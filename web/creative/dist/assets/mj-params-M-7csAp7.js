@@ -1,0 +1,1 @@
+const n={mj_ar:"--ar",mj_v:"--v",mj_style:"--style",mj_s:"--s",mj_q:"--q",mj_seed:"--seed"},o=t=>{const s=[];return Object.entries(n).forEach(([r,j])=>{const e=t[r];!e||e==="default"||s.push(`${j} ${e}`)}),s.join(" ")};export{o as b};

@@ -1,0 +1,1627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <!-- 权限策略：禁止 unload 事件（不影响 beforeunload） -->
+    <!-- 基本 SEO Meta 标签 -->
+    <title>Opentu 开图 | AI 图片生成、流程图、思维导图与画布工作区</title>
+    <meta
+      name="description"
+      content="Opentu（开图）是一个以画布工作区为核心的 AI 应用平台，支持 AI 图片生成、流程图、思维导图、素材管理与任务推进，在一个浏览器窗口里完成创作与整理。"
+    />
+    <meta
+      name="keywords"
+      content="Opentu,开图,AI图片生成,AI绘图,流程图,思维导图,白板,画布工作区,AI工作流,素材库,知识库,任务队列"
+    />
+    <meta name="application-name" content="Opentu" />
+    <meta name="author" content="Opentu Team" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta
+      name="robots"
+      content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1"
+    />
+    <!-- Open Graph Meta 标签 -->
+    <meta
+      property="og:title"
+      content="Opentu 开图 | AI 图片生成、流程图、思维导图与画布工作区"
+    />
+    <meta
+      property="og:description"
+      content="在一个浏览器窗口里完成 AI 图片生成、流程图、思维导图、素材整理与任务推进，让画布成为真正的 AI 工作台。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://opentu.ai" />
+    <meta property="og:site_name" content="Opentu" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta
+      property="og:image"
+      content="https://opentu.ai/product_showcase/aitu-01.png"
+    />
+    <meta
+      property="og:image:alt"
+      content="Opentu 画布工作区与 AI 应用平台界面预览"
+    />
+    <!-- Twitter Card Meta 标签 -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="Opentu 开图 | AI 图片生成、流程图、思维导图与画布工作区"
+    />
+    <meta
+      name="twitter:description"
+      content="一个把 AI 图片生成、流程图、思维导图、素材与任务队列放进同一块画布的 AI 工作台。"
+    />
+    <meta
+      name="twitter:image"
+      content="https://opentu.ai/product_showcase/aitu-01.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="Opentu 画布工作区与 AI 应用平台界面预览"
+    />
+    <link rel="canonical" href="https://opentu.ai" />
+    <!-- 语言替代链接 -->
+    <link rel="alternate" hreflang="zh-CN" href="https://opentu.ai" />
+    <link rel="alternate" hreflang="x-default" href="https://opentu.ai" />
+    <!-- 结构化数据 (JSON-LD) -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://opentu.ai/#website",
+            "url": "https://opentu.ai",
+            "name": "Opentu",
+            "inLanguage": "zh-CN",
+            "description": "Opentu（开图）是一个以画布工作区为核心的 AI 应用平台，在一个浏览器窗口中串联模型、素材、知识与任务。"
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://opentu.ai/#organization",
+            "name": "Opentu Team",
+            "url": "https://opentu.ai",
+            "logo": "https://opentu.ai/icons/android-chrome-512x512.png"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://opentu.ai/#app",
+            "name": "Opentu",
+            "alternateName": [
+              "开图",
+              "Opentu AI 应用平台",
+              "Opentu Canvas Workspace"
+            ],
+            "description": "Opentu（开图）是一个以画布工作区为核心的 AI 应用平台，集成模型、知识库、素材库与任务队列，将生成、编辑与交付串联在同一个浏览器窗口里。",
+            "url": "https://opentu.ai",
+            "image": "https://opentu.ai/product_showcase/aitu-01.png",
+            "applicationCategory": "DesignApplication",
+            "operatingSystem": "Any",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "publisher": {
+              "@id": "https://opentu.ai/#organization"
+            },
+            "keywords": [
+              "Opentu",
+              "开图",
+              "AI应用平台",
+              "AI图片生成",
+              "流程图",
+              "思维导图",
+              "画布工作区",
+              "AI工作流",
+              "素材库",
+              "知识库",
+              "任务队列"
+            ],
+            "inLanguage": "zh-CN",
+            "license": "https://github.com/ljquan/aitu/blob/master/LICENSE"
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://opentu.ai/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Opentu 适合做什么？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Opentu 适合做 AI 图片生成、流程图、思维导图、画布整理、素材管理和任务推进。你可以在同一块画布里完成创意生成、编辑、整理与交付。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Opentu 和普通白板工具有什么区别？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Opentu 不只是白板，还把 AI 生成、素材库、知识与任务队列整合到同一个工作区，减少在多个应用间来回切换。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Opentu 是否支持流程图和思维导图？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "支持。Opentu 提供流程图、思维导图、文本和图形编辑能力，也支持通过自然语言或 Mermaid 语法快速生成结构化图示。"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+    <!-- base href 由构建工具处理，CDN 模式下使用相对路径 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="app-version" content="0.9.6" />
+    <style>
+      :root {
+        --app-boot-bg: radial-gradient(
+            circle at top,
+            rgba(90, 79, 207, 0.14),
+            transparent 38%
+          ),
+          linear-gradient(180deg, #fff8ef 0%, #ffffff 58%, #f8f9ff 100%);
+        --app-boot-text: #2d3436;
+        --app-boot-muted: #636e72;
+        --app-boot-accent: #f39c12;
+        --app-boot-accent-soft: rgba(243, 156, 18, 0.14);
+        --app-boot-shadow: 0 20px 60px rgba(45, 52, 54, 0.08);
+      }
+
+      #app-boot-loading {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--app-boot-bg);
+        transition: opacity 0.28s ease, visibility 0.28s ease;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+
+      #app-boot-loading.is-visible {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+
+      #app-boot-loading.is-leaving {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .app-boot-card {
+        width: min(420px, calc(100vw - 48px));
+        padding: 28px 24px;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        box-shadow: var(--app-boot-shadow);
+        backdrop-filter: blur(14px);
+        text-align: center;
+      }
+
+      .app-boot-mark {
+        min-width: 52px;
+        height: 52px;
+        padding: 0 16px;
+        margin: 0 auto 16px;
+        border-radius: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(
+          135deg,
+          rgba(243, 156, 18, 0.18),
+          rgba(90, 79, 207, 0.12)
+        );
+        color: var(--app-boot-accent);
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        text-decoration: none;
+      }
+
+      .app-boot-title {
+        margin: 0;
+        color: var(--app-boot-text);
+        font-size: 18px;
+        font-weight: 600;
+        line-height: 1.4;
+      }
+
+      .app-boot-tip {
+        margin: 10px 0 0;
+        color: var(--app-boot-muted);
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .app-boot-progress {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        margin-top: 18px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: var(--app-boot-accent-soft);
+        color: var(--app-boot-accent);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .app-boot-progress-track {
+        position: relative;
+        width: min(180px, 42vw);
+        height: 8px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(243, 156, 18, 0.16);
+      }
+
+      .app-boot-progress-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 0%;
+        border-radius: inherit;
+        background: linear-gradient(
+          90deg,
+          rgba(243, 156, 18, 0.72),
+          rgba(243, 156, 18, 1)
+        );
+        box-shadow: 0 0 16px rgba(243, 156, 18, 0.3);
+        transition: width 0.24s ease;
+      }
+
+      .app-boot-progress-value {
+        min-width: 44px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .app-boot-note {
+        margin-top: 14px;
+        color: rgba(99, 110, 114, 0.84);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      #seo-content {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 48px 24px 88px;
+        color: #1f2937;
+      }
+
+      #seo-content a {
+        color: #5a4fcf;
+        text-decoration: none;
+      }
+
+      #seo-content a:hover {
+        text-decoration: underline;
+      }
+
+      .seo-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+        gap: 24px;
+        align-items: start;
+        margin-bottom: 36px;
+      }
+
+      .seo-hero-copy h1 {
+        margin: 0 0 16px;
+        font-size: clamp(32px, 5vw, 54px);
+        line-height: 1.05;
+        color: #121826;
+      }
+
+      .seo-hero-copy p {
+        margin: 0 0 14px;
+        font-size: 16px;
+        line-height: 1.8;
+        color: #3f4a5a;
+      }
+
+      .seo-badges,
+      .seo-card-links,
+      .seo-faq-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .seo-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .seo-badges li {
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: #fff4df;
+        color: #ad6800;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .seo-panel {
+        border: 1px solid rgba(90, 79, 207, 0.14);
+        border-radius: 24px;
+        padding: 24px;
+        background: linear-gradient(180deg, #ffffff 0%, #faf8ff 100%);
+        box-shadow: 0 18px 40px rgba(90, 79, 207, 0.08);
+      }
+
+      .seo-panel h2,
+      .seo-section h2 {
+        margin: 0 0 14px;
+        font-size: 24px;
+        color: #121826;
+      }
+
+      .seo-panel p,
+      .seo-section p {
+        margin: 0 0 12px;
+        line-height: 1.8;
+        color: #475569;
+      }
+
+      .seo-card-links li + li,
+      .seo-faq-list li + li {
+        margin-top: 12px;
+      }
+
+      .seo-card-links a {
+        display: block;
+        padding: 14px 16px;
+        border-radius: 16px;
+        background: #ffffff;
+        border: 1px solid rgba(90, 79, 207, 0.12);
+      }
+
+      .seo-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        margin-bottom: 36px;
+      }
+
+      .seo-grid article,
+      .seo-faq-list li {
+        border-radius: 20px;
+        border: 1px solid #e8ebf3;
+        background: #ffffff;
+        padding: 20px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+      }
+
+      .seo-grid h3,
+      .seo-faq-list h3 {
+        margin: 0 0 10px;
+        font-size: 18px;
+        color: #121826;
+      }
+
+      .seo-section {
+        margin-bottom: 36px;
+      }
+
+      .seo-inline-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+      }
+
+      html.app-ready #seo-content {
+        display: none;
+      }
+
+      html.app-boot-error .app-boot-progress {
+        background: rgba(233, 30, 99, 0.1);
+        color: #e91e63;
+      }
+
+      html.app-boot-error .app-boot-progress-track {
+        background: rgba(233, 30, 99, 0.16);
+      }
+
+      html.app-boot-error .app-boot-progress-fill {
+        background: linear-gradient(
+          90deg,
+          rgba(233, 30, 99, 0.72),
+          rgba(233, 30, 99, 1)
+        );
+        box-shadow: 0 0 16px rgba(233, 30, 99, 0.22);
+      }
+
+      @media (max-width: 640px) {
+        .app-boot-card {
+          padding: 24px 20px;
+          border-radius: 20px;
+        }
+
+        .seo-hero,
+        .seo-grid {
+          grid-template-columns: 1fr;
+        }
+
+        #seo-content {
+          padding: 32px 20px 64px;
+        }
+      }
+    </style>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      sizes="16x16"
+      href="https://cdn.jsdelivr.net/npm/aitu-app@0.9.6/icons/favicon-16x16.svg" data-local-href="./icons/favicon-16x16.svg" data-cdn-fallback-managed="1"
+     onerror="window.__OPENTU_BOOT_ASSET_FALLBACK__&&window.__OPENTU_BOOT_ASSET_FALLBACK__(this)" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      sizes="32x32"
+      href="https://cdn.jsdelivr.net/npm/aitu-app@0.9.6/icons/favicon-32x32.svg" data-local-href="./icons/favicon-32x32.svg" data-cdn-fallback-managed="1"
+     onerror="window.__OPENTU_BOOT_ASSET_FALLBACK__&&window.__OPENTU_BOOT_ASSET_FALLBACK__(this)" />
+    <link rel="icon" type="image/svg+xml" href="https://cdn.jsdelivr.net/npm/aitu-app@0.9.6/icons/favicon-new.svg" data-local-href="./icons/favicon-new.svg" data-cdn-fallback-managed="1"  onerror="window.__OPENTU_BOOT_ASSET_FALLBACK__&&window.__OPENTU_BOOT_ASSET_FALLBACK__(this)" />
+    <link rel="icon" type="image/ico" href="https://cdn.jsdelivr.net/npm/aitu-app@0.9.6/favicon.ico" data-local-href="./favicon.ico" data-cdn-fallback-managed="1"  onerror="window.__OPENTU_BOOT_ASSET_FALLBACK__&&window.__OPENTU_BOOT_ASSET_FALLBACK__(this)" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="https://cdn.jsdelivr.net/npm/aitu-app@0.9.6/manifest.json?v=0.1.0" data-local-href="./manifest.json?v=0.1.0" data-cdn-fallback-managed="1"  onerror="window.__OPENTU_BOOT_ASSET_FALLBACK__&&window.__OPENTU_BOOT_ASSET_FALLBACK__(this)" />
+
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Opentu" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="msapplication-TileColor" content="#ffffff" />
+    <meta name="msapplication-tap-highlight" content="no" />
+
+    <!-- Apple Touch Icons -->
+    <link
+      rel="apple-touch-icon"
+      sizes="192x192"
+      href="https://cdn.jsdelivr.net/npm/aitu-app@0.9.6/icons/icon-192x192.svg" data-local-href="./icons/icon-192x192.svg" data-cdn-fallback-managed="1"
+     onerror="window.__OPENTU_BOOT_ASSET_FALLBACK__&&window.__OPENTU_BOOT_ASSET_FALLBACK__(this)" />
+
+    <!-- Windows Tiles -->
+    <meta name="msapplication-TileImage" content="./icons/icon-192x192.svg" />
+    <meta
+      name="msapplication-square310x310logo"
+      content="./icons/icon-512x512.svg"
+    />
+
+
+
+  </head>
+  <body>
+    <div
+      id="app-boot-loading"
+      role="status"
+      aria-live="polite"
+      aria-label="应用正在加载"
+    >
+      <div class="app-boot-card">
+        <a
+          class="app-boot-mark"
+          href="https://opentu.ai/"
+          data-official-site-link
+          aria-label="打开 OpenTu.ai 官网"
+          >OpenTu.ai</a
+        >
+        <p class="app-boot-title" data-app-boot-title>正在唤起工作台</p>
+        <p class="app-boot-tip" data-app-boot-tip>
+          脚本与资源加载中，马上就好...
+        </p>
+        <div
+          class="app-boot-progress"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+          data-app-boot-progress
+        >
+          <span class="app-boot-progress-track" aria-hidden="true">
+            <span
+              class="app-boot-progress-fill"
+              data-app-boot-progress-fill
+            ></span>
+          </span>
+          <span class="app-boot-progress-value" data-app-boot-progress-value>
+            0%
+          </span>
+        </div>
+        <div class="app-boot-note" data-app-boot-note>
+          数据存储在浏览器本地，可通过菜单中的“备份/恢复”对重要数据进行管理。
+        </div>
+      </div>
+    </div>
+    <main id="seo-content">
+      <section class="seo-hero">
+        <div class="seo-hero-copy">
+          <h1>把 AI 图片生成、流程图、思维导图放进同一块画布</h1>
+          <p>
+            Opentu（开图）是一个面向创作与整理场景的 AI
+            应用平台。你可以在浏览器里直接生成图片、搭建流程图、整理思维导图，并把素材、知识与任务推进放在同一个工作区里完成。
+          </p>
+          <p>
+            相比把提示词、素材库、知识卡片和任务列表拆散在多个工具里，Opentu
+            更适合需要边生成、边编辑、边整理的人。首页即工作台，打开就能开始产出。
+          </p>
+          <ul class="seo-badges">
+            <li>AI 图片生成</li>
+            <li>流程图</li>
+            <li>思维导图</li>
+            <li>画布工作区</li>
+            <li>素材管理</li>
+          </ul>
+        </div>
+        <aside class="seo-panel">
+          <h2>从这些入口开始</h2>
+          <p>
+            如果你想先了解产品能力，可以查看 OpenTu
+            介绍页；如果已经准备创作，直接进入工作台即可。
+          </p>
+          <ul class="seo-card-links">
+            <li>
+              <a href="/home.html"
+                >OpenTu 介绍页：了解 AI 画布、作品流和开源项目</a
+              >
+            </li>
+            <li>
+              <a href="/user-manual/index.html"
+                >用户手册：查看完整功能与操作路径</a
+              >
+            </li>
+          </ul>
+        </aside>
+      </section>
+
+      <section class="seo-section">
+        <h2>为什么适合搜索用户</h2>
+        <div class="seo-grid">
+          <article>
+            <h3>不是单点工具</h3>
+            <p>
+              Opentu
+              把生成、编辑、整理和交付放在一起，适合需要持续推进任务，而不是只做一次性生成的人。
+            </p>
+          </article>
+          <article>
+            <h3>图文结构兼容</h3>
+            <p>
+              既能做 AI
+              图片生成，也能用流程图和思维导图承接方案、脑图、产品结构和知识整理。
+            </p>
+          </article>
+          <article>
+            <h3>更少切换</h3>
+            <p>
+              素材、知识、任务和画布相互打通，减少从聊天窗口、白板、网盘和文档来回跳转的摩擦。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="seo-section">
+        <h2>常见使用场景</h2>
+        <p>
+          适合做营销海报、社媒配图、灵感整理、产品方案梳理、业务流程图、项目脑图，以及需要边生成边归档的工作流。
+        </p>
+        <p class="seo-inline-links">
+          <a href="/user-manual/ai-generation-image-generation.html"
+            >AI 图片生成指南</a
+          >
+          <a href="/user-manual/ai-generation-video-generation.html"
+            >AI 视频生成指南</a
+          >
+          <a href="/user-manual/drawing-flowchart.html">流程图指南</a>
+          <a href="/user-manual/drawing-mindmap.html">思维导图指南</a>
+          <a href="/versions.html">版本日志</a>
+        </p>
+      </section>
+
+      <section class="seo-section">
+        <h2>常见问题</h2>
+        <ul class="seo-faq-list">
+          <li>
+            <h3>Opentu 是什么？</h3>
+            <p>
+              它是一个以画布工作区为核心的 AI 应用平台，支持 AI
+              图片生成、流程图、思维导图、素材管理与任务推进。
+            </p>
+          </li>
+          <li>
+            <h3>Opentu 适合谁？</h3>
+            <p>
+              适合需要把创意生成、结构整理和任务交付放在一起的人，比如内容创作者、产品经理、运营、设计和独立开发者。
+            </p>
+          </li>
+          <li>
+            <h3>Opentu 支持哪些图示能力？</h3>
+            <p>
+              支持流程图、思维导图、文本、形状、自由绘制，也支持通过自然语言或
+              Mermaid 语法快速生成结构化图示。
+            </p>
+          </li>
+        </ul>
+      </section>
+    </main>
+    <script>
+      (function () {
+        var bootReady = false;
+        var bootProgress = 0;
+        var simulationStartAt = Date.now();
+        var simulationTimer = 0;
+        var slowTipTimer = window.setTimeout(function () {
+          var tip = document.querySelector('[data-app-boot-tip]');
+          if (tip) {
+            tip.textContent =
+              '首次打开或网络较慢时会多等一会，正在努力准备中...';
+          }
+        }, 4000);
+        var removeTimer = 0;
+        var cdnConfigLoadStarted = false;
+        var resolveMainEntryReady = null;
+        var BOOT_CDN_PACKAGE_NAME = 'aitu-app';
+        var BOOT_CDN_BASE_URL = 'https://cdn.jsdelivr.net/npm/';
+        var BOOT_LOCAL_RETRY_STORAGE_KEY = '__OPENTU_BOOT_LOCAL_RETRY_AT__';
+        var BOOT_IMPORT_RETRY_STORAGE_KEY = '__OPENTU_BOOT_IMPORT_RETRY_AT__';
+        var BOOT_LOCAL_RETRY_TTL_MS = 2 * 60 * 1000;
+        var forceLocalBootAssets = false;
+        window.__OPENTU_START_MAIN_ENTRY__ = new Promise(function (resolve) {
+          resolveMainEntryReady = resolve;
+        });
+
+        (function setupOfficialSiteLink() {
+          try {
+            var officialSiteLink = document.querySelector(
+              '[data-official-site-link]'
+            );
+            if (!officialSiteLink) {
+              return;
+            }
+
+            if (window.location.hostname.toLowerCase() === 'opentu.ai') {
+              officialSiteLink.removeAttribute('href');
+              officialSiteLink.addEventListener('click', function (event) {
+                event.preventDefault();
+              });
+            }
+          } catch (error) {
+            // 启动页兜底逻辑不能影响主应用加载。
+          }
+        })();
+
+        (function initializeBootLocalRetryFlag() {
+          try {
+            var retryAtRaw = window.sessionStorage.getItem(
+              BOOT_LOCAL_RETRY_STORAGE_KEY
+            );
+            if (!retryAtRaw) {
+              return;
+            }
+
+            var retryAt = Number(retryAtRaw);
+            if (
+              !isFinite(retryAt) ||
+              Date.now() - retryAt > BOOT_LOCAL_RETRY_TTL_MS
+            ) {
+              window.sessionStorage.removeItem(BOOT_LOCAL_RETRY_STORAGE_KEY);
+              return;
+            }
+
+            forceLocalBootAssets = true;
+          } catch (_error) {
+            forceLocalBootAssets = false;
+          }
+        })();
+
+        function clearBootLocalRetryFlag() {
+          forceLocalBootAssets = false;
+          try {
+            window.sessionStorage.removeItem(BOOT_LOCAL_RETRY_STORAGE_KEY);
+            window.sessionStorage.removeItem(BOOT_IMPORT_RETRY_STORAGE_KEY);
+          } catch (_error) {
+            // ignore sessionStorage cleanup failures
+          }
+        }
+
+        function scheduleBootSelfHealReload() {
+          if (isBootLocalDevelopment() || forceLocalBootAssets) {
+            return false;
+          }
+
+          try {
+            window.sessionStorage.setItem(
+              BOOT_LOCAL_RETRY_STORAGE_KEY,
+              String(Date.now())
+            );
+          } catch (_error) {
+            return false;
+          }
+
+          var tip = document.querySelector('[data-app-boot-tip]');
+          if (tip) {
+            tip.textContent = '首屏资源回退中，正在自动重试...';
+          }
+          window.location.reload();
+          return true;
+        }
+
+        function isRecoverableBootImportError(error) {
+          var message =
+            error && typeof error.message === 'string'
+              ? error.message
+              : String(error || '');
+
+          return (
+            /Failed to fetch dynamically imported module/i.test(message) ||
+            /Importing a module script failed/i.test(message) ||
+            /Loading chunk [\w-]+ failed/i.test(message) ||
+            /ChunkLoadError/i.test(message)
+          );
+        }
+
+        function hasBootImportRetryParam() {
+          try {
+            return new URLSearchParams(window.location.search).has(
+              '_lazy_chunk_retry'
+            );
+          } catch (_error) {
+            return window.location.search.indexOf('_lazy_chunk_retry=') !== -1;
+          }
+        }
+
+        function createBootImportRecoveryUrl() {
+          var recoveryUrl = new URL(window.location.href);
+          recoveryUrl.searchParams.set('_lazy_chunk_retry', '1');
+          recoveryUrl.searchParams.set('_t', String(Date.now()));
+          return recoveryUrl.toString();
+        }
+
+        function prepareBootImportRecovery() {
+          var tasks = [];
+
+          try {
+            if (
+              navigator.serviceWorker &&
+              navigator.serviceWorker.controller
+            ) {
+              navigator.serviceWorker.controller.postMessage({
+                type: 'RECOVER_DYNAMIC_IMPORT_FAILURE',
+                appVersion: getBootAppVersion(),
+                moduleKey: 'boot-main-entry',
+              });
+            }
+          } catch (_error) {
+            // ignore best-effort SW notification failures
+          }
+
+          try {
+            if (window.caches && typeof window.caches.keys === 'function') {
+              tasks.push(
+                window.caches.keys().then(function (cacheNames) {
+                  return Promise.all(
+                    cacheNames
+                      .filter(function (name) {
+                        return name.indexOf('drawnix-static-v') === 0;
+                      })
+                      .map(function (name) {
+                        return window.caches.delete(name);
+                      })
+                  );
+                })
+              );
+            }
+          } catch (_error) {
+            // ignore cache cleanup failures
+          }
+
+          return Promise.allSettled(tasks);
+        }
+
+        window.__OPENTU_BOOT_DYNAMIC_IMPORT_RECOVERY__ = function (error) {
+          if (!isRecoverableBootImportError(error) || isBootLocalDevelopment()) {
+            return false;
+          }
+
+          try {
+            var lastRetryAt = Number(
+              window.sessionStorage.getItem(BOOT_IMPORT_RETRY_STORAGE_KEY)
+            );
+            if (
+              isFinite(lastRetryAt) &&
+              Date.now() - lastRetryAt <= BOOT_LOCAL_RETRY_TTL_MS
+            ) {
+              return false;
+            }
+            window.sessionStorage.setItem(
+              BOOT_IMPORT_RETRY_STORAGE_KEY,
+              String(Date.now())
+            );
+          } catch (_error) {
+            if (hasBootImportRetryParam()) {
+              return false;
+            }
+          }
+
+          var recoveryUrl = createBootImportRecoveryUrl();
+          var didReload = false;
+          var reload = function () {
+            if (didReload) {
+              return;
+            }
+            didReload = true;
+            window.location.replace(recoveryUrl);
+          };
+
+          var tip = document.querySelector('[data-app-boot-tip]');
+          if (tip) {
+            tip.textContent = '启动资源已更新，正在自动刷新恢复...';
+          }
+
+          window.setTimeout(reload, 700);
+          prepareBootImportRecovery().then(reload, reload);
+          return true;
+        };
+
+        function clearBootTimers() {
+          if (slowTipTimer) {
+            window.clearTimeout(slowTipTimer);
+            slowTipTimer = 0;
+          }
+          if (removeTimer) {
+            window.clearTimeout(removeTimer);
+            removeTimer = 0;
+          }
+          if (simulationTimer) {
+            window.clearInterval(simulationTimer);
+            simulationTimer = 0;
+          }
+        }
+
+        function getBootRoot() {
+          return document.getElementById('app-boot-loading');
+        }
+
+        function getBootAppVersion() {
+          var versionMeta = document.querySelector('meta[name="app-version"]');
+          return versionMeta
+            ? versionMeta.getAttribute('content') || '0.0.0'
+            : '0.0.0';
+        }
+
+        function isBootLocalDevelopment() {
+          return (
+            window.location.hostname === 'localhost' ||
+            window.location.hostname === '127.0.0.1' ||
+            window.location.hostname.endsWith('.localhost')
+          );
+        }
+
+        function toPreferredBootAssetUrl(localPath) {
+          if (!localPath || isBootLocalDevelopment() || forceLocalBootAssets) {
+            return localPath;
+          }
+
+          var normalizedPath = String(localPath).trim();
+
+          if (/^https?:\/\//i.test(normalizedPath)) {
+            return normalizedPath;
+          }
+
+          normalizedPath = normalizedPath
+            .replace(/^\.?\//, '')
+            .replace(/^npm\/aitu-app@[^/]+\//, '')
+            .replace(/^aitu-app@[^/]+\//, '');
+
+          return (
+            BOOT_CDN_BASE_URL +
+            BOOT_CDN_PACKAGE_NAME +
+            '@' +
+            getBootAppVersion() +
+            '/' +
+            normalizedPath
+          );
+        }
+
+        function isManagedBootFallbackTarget(target) {
+          return !!(
+            target &&
+            typeof target.getAttribute === 'function' &&
+            target.getAttribute('data-cdn-fallback-managed') === '1'
+          );
+        }
+
+        function createLocalBootAssetNode(target, localUrl) {
+          var replacement = target.cloneNode(false);
+          replacement.setAttribute('data-fallback-attempted', '1');
+          replacement.removeAttribute('onerror');
+
+          var failureMessage =
+            target.tagName === 'SCRIPT'
+              ? '首屏脚本加载失败，请刷新页面后重试。'
+              : target.getAttribute('rel') === 'stylesheet'
+              ? '首屏样式加载失败，请刷新页面后重试。'
+              : '首屏资源加载失败，请刷新页面后重试。';
+
+          if (target.tagName === 'SCRIPT') {
+            replacement.setAttribute('src', localUrl);
+            replacement.onerror = function () {
+              markError(failureMessage);
+            };
+            return replacement;
+          }
+
+          replacement.setAttribute('href', localUrl);
+          replacement.onerror = function () {
+            markError(failureMessage);
+          };
+          return replacement;
+        }
+
+        window.__OPENTU_BOOT_ASSET_FALLBACK__ = function (target) {
+          if (!target) {
+            return false;
+          }
+
+          var localUrl =
+            target.getAttribute('data-local-src') ||
+            target.getAttribute('data-local-href');
+
+          if (!localUrl) {
+            return false;
+          }
+
+          if (target.getAttribute('data-fallback-attempted') === '1') {
+            markError(
+              target.tagName === 'SCRIPT'
+                ? '首屏脚本加载失败，请刷新页面后重试。'
+                : target.getAttribute('rel') === 'stylesheet'
+                ? '首屏样式加载失败，请刷新页面后重试。'
+                : '首屏资源加载失败，请刷新页面后重试。'
+            );
+            return true;
+          }
+
+          if (
+            target.tagName === 'SCRIPT' &&
+            target.getAttribute('type') === 'module' &&
+            scheduleBootSelfHealReload()
+          ) {
+            return true;
+          }
+
+          var replacement = createLocalBootAssetNode(target, localUrl);
+          if (target.parentNode) {
+            target.parentNode.replaceChild(replacement, target);
+          }
+          return true;
+        };
+
+        function appendManagedBootScript(localPath, onload, onfinalerror) {
+          var preferredUrl = toPreferredBootAssetUrl(localPath);
+          var script = document.createElement('script');
+          script.async = true;
+          script.setAttribute('data-cdn-fallback-managed', '1');
+          script.setAttribute('data-local-src', localPath);
+
+          var handleFinalFailure = function () {
+            if (typeof onfinalerror === 'function') {
+              onfinalerror();
+            }
+          };
+
+          if (!preferredUrl || preferredUrl === localPath) {
+            script.src = localPath;
+            script.onload = onload;
+            script.onerror = handleFinalFailure;
+            document.head.appendChild(script);
+            return;
+          }
+
+          script.src = preferredUrl;
+          script.onload = onload;
+          script.onerror = function () {
+            var localScript = document.createElement('script');
+            localScript.async = true;
+            localScript.src = localPath;
+            localScript.setAttribute('data-cdn-fallback-managed', '1');
+            localScript.setAttribute('data-fallback-attempted', '1');
+            localScript.onload = onload;
+            localScript.onerror = handleFinalFailure;
+            if (script.parentNode) {
+              script.parentNode.removeChild(script);
+            }
+            document.head.appendChild(localScript);
+          };
+
+          document.head.appendChild(script);
+        }
+
+        function clampProgress(value) {
+          if (!isFinite(value)) {
+            return bootProgress;
+          }
+          return Math.max(0, Math.min(100, value));
+        }
+
+        function renderProgress() {
+          var progressRoot = document.querySelector('[data-app-boot-progress]');
+          var progressFill = document.querySelector(
+            '[data-app-boot-progress-fill]'
+          );
+          var progressValue = document.querySelector(
+            '[data-app-boot-progress-value]'
+          );
+          var safeProgress = Math.round(clampProgress(bootProgress));
+
+          if (progressRoot) {
+            progressRoot.setAttribute('aria-valuenow', String(safeProgress));
+          }
+          if (progressFill) {
+            progressFill.style.width = safeProgress + '%';
+          }
+          if (progressValue) {
+            progressValue.textContent = safeProgress + '%';
+          }
+        }
+
+        function startSimulatedProgress() {
+          if (simulationTimer) {
+            return;
+          }
+
+          simulationTimer = window.setInterval(function () {
+            if (bootReady) {
+              window.clearInterval(simulationTimer);
+              simulationTimer = 0;
+              return;
+            }
+
+            var elapsed = Date.now() - simulationStartAt;
+            var simulatedProgress = Math.min(82, (elapsed / 4200) * 82);
+            if (simulatedProgress > bootProgress) {
+              bootProgress = simulatedProgress;
+              renderProgress();
+            }
+
+            if (simulatedProgress >= 82) {
+              window.clearInterval(simulationTimer);
+              simulationTimer = 0;
+            }
+          }, 60);
+        }
+
+        function setProgress(value, options) {
+          if (bootReady) {
+            return;
+          }
+
+          if (typeof value === 'number' && isFinite(value)) {
+            bootProgress = Math.max(bootProgress, clampProgress(value));
+          }
+
+          var title = document.querySelector('[data-app-boot-title]');
+          var tip = document.querySelector('[data-app-boot-tip]');
+          var note = document.querySelector('[data-app-boot-note]');
+
+          if (options && typeof options.title === 'string' && title) {
+            title.textContent = options.title;
+          }
+          if (options && typeof options.tip === 'string' && tip) {
+            tip.textContent = options.tip;
+          }
+          if (options && typeof options.note === 'string' && note) {
+            note.textContent = options.note;
+          }
+
+          renderProgress();
+        }
+
+        function markReady() {
+          if (bootReady) {
+            return;
+          }
+          document.documentElement.classList.add('app-ready');
+          clearBootLocalRetryFlag();
+          setProgress(100, {
+            tip: '启动完成，正在进入工作台...',
+          });
+          bootReady = true;
+          clearBootTimers();
+          var bootRoot = getBootRoot();
+          if (!bootRoot) {
+            return;
+          }
+          bootRoot.classList.add('is-leaving');
+          var removeBootRoot = function () {
+            if (bootRoot.parentNode) {
+              bootRoot.parentNode.removeChild(bootRoot);
+            }
+          };
+          bootRoot.addEventListener('transitionend', removeBootRoot, {
+            once: true,
+          });
+          removeTimer = window.setTimeout(removeBootRoot, 360);
+        }
+
+        function markError(message) {
+          if (bootReady) {
+            return;
+          }
+          setProgress(100);
+          clearBootTimers();
+          document.documentElement.classList.add('app-boot-error');
+          var title = document.querySelector('[data-app-boot-title]');
+          var tip = document.querySelector('[data-app-boot-tip]');
+          if (title) {
+            title.textContent = '启动中遇到问题';
+          }
+          if (tip) {
+            tip.textContent = message || '资源加载失败，请刷新页面后重试。';
+          }
+        }
+
+        window.__OPENTU_BOOT__ = {
+          markReady: markReady,
+          markError: markError,
+          setProgress: setProgress,
+        };
+
+        function getRuntimeCDNPreference() {
+          var preference = window.__OPENTU_CDN__ || window.__AITU_CDN__;
+          if (!preference || typeof preference !== 'object') {
+            return null;
+          }
+
+          var cdn = preference.cdn;
+          if (cdn !== 'jsdelivr' && cdn !== 'unpkg' && cdn !== 'local') {
+            return null;
+          }
+
+          return {
+            cdn: cdn,
+            latency:
+              typeof preference.latency === 'number' &&
+              isFinite(preference.latency)
+                ? Math.max(0, preference.latency)
+                : 0,
+            timestamp:
+              typeof preference.timestamp === 'number' &&
+              isFinite(preference.timestamp) &&
+              preference.timestamp > 0
+                ? preference.timestamp
+                : Date.now(),
+          };
+        }
+
+        function postCDNPreferenceToRegistration(registration, preference) {
+          if (!registration || !preference) {
+            return;
+          }
+
+          var payload = {
+            type: 'SW_CDN_SET_PREFERENCE',
+            cdn: preference.cdn,
+            latency: preference.latency,
+            timestamp: preference.timestamp,
+            version: (function () {
+              var versionMeta = document.querySelector(
+                'meta[name="app-version"]'
+              );
+              return versionMeta
+                ? versionMeta.getAttribute('content') || '0.0.0'
+                : '0.0.0';
+            })(),
+          };
+
+          var targets = [];
+          var maybeWorkers = [
+            navigator.serviceWorker.controller,
+            registration.active,
+            registration.waiting,
+            registration.installing,
+          ];
+
+          for (var i = 0; i < maybeWorkers.length; i++) {
+            var worker = maybeWorkers[i];
+            if (worker && targets.indexOf(worker) === -1) {
+              targets.push(worker);
+            }
+          }
+
+          for (var j = 0; j < targets.length; j++) {
+            targets[j].postMessage(payload);
+          }
+        }
+
+        function syncEarlyCDNPreference(registration) {
+          var cachedPreference = getRuntimeCDNPreference();
+          if (cachedPreference) {
+            postCDNPreferenceToRegistration(registration, cachedPreference);
+          }
+
+          var api = window.__OPENTU_CDN_API__ || window.__AITU_CDN_API__;
+          if (!api || typeof api.selectBestCDN !== 'function') {
+            return;
+          }
+
+          api
+            .selectBestCDN()
+            .then(function (preference) {
+              if (!preference || typeof preference !== 'object') {
+                return;
+              }
+
+              window.__OPENTU_CDN__ = preference;
+              window.__AITU_CDN__ = preference;
+              postCDNPreferenceToRegistration(registration, {
+                cdn: preference.cdn,
+                latency:
+                  typeof preference.latency === 'number' &&
+                  isFinite(preference.latency)
+                    ? Math.max(0, preference.latency)
+                    : 0,
+                timestamp:
+                  typeof preference.timestamp === 'number' &&
+                  isFinite(preference.timestamp) &&
+                  preference.timestamp > 0
+                    ? preference.timestamp
+                    : Date.now(),
+              });
+            })
+            .catch(function (error) {
+              console.warn('[Boot] Early CDN preference sync failed:', error);
+            });
+        }
+
+        function shouldEnableEarlyServiceWorkerBootstrap() {
+          try {
+            var swParam = new URLSearchParams(window.location.search).get('sw');
+            if (swParam === '0') {
+              return false;
+            }
+            return true;
+          } catch {
+            if (window.location.search.indexOf('sw=0') !== -1) {
+              return false;
+            }
+            return true;
+          }
+        }
+
+        function cleanupExplicitlyDisabledServiceWorker() {
+          if (!('serviceWorker' in navigator)) {
+            return;
+          }
+
+          navigator.serviceWorker
+            .getRegistration()
+            .then(function (registration) {
+              if (registration) {
+                return registration.unregister();
+              }
+              return false;
+            })
+            .catch(function (error) {
+              console.warn(
+                '[Boot] Disabled service worker cleanup failed:',
+                error
+              );
+            });
+        }
+
+        function setupEarlyServiceWorkerBootstrap() {
+          if (!('serviceWorker' in navigator)) {
+            return;
+          }
+
+          if (!shouldEnableEarlyServiceWorkerBootstrap()) {
+            cleanupExplicitlyDisabledServiceWorker();
+            setProgress(52, {
+              tip: '已按 URL 参数跳过离线缓存服务，正在直接启动工作台...',
+              source: 'phase',
+            });
+            return;
+          }
+
+          if (!window.__OPENTU_SW_REGISTRATION_PROMISE__) {
+            setProgress(undefined, {
+              tip: '正在连接启动缓存服务...',
+              source: 'phase',
+            });
+
+            window.__OPENTU_SW_REGISTRATION_PROMISE__ = navigator.serviceWorker
+              .register('./sw.js')
+              .then(function (registration) {
+                syncEarlyCDNPreference(registration);
+                setProgress(54, {
+                  tip: '启动缓存服务已连接，正在准备资源清单...',
+                  source: 'phase',
+                });
+
+                if (
+                  registration.active &&
+                  !registration.installing &&
+                  !registration.waiting
+                ) {
+                  setProgress(58, {
+                    tip: '启动缓存服务已就绪，正在恢复工作台状态...',
+                    source: 'phase',
+                  });
+                }
+
+                return registration;
+              })
+              .catch(function (error) {
+                console.warn(
+                  '[Boot] Early service worker registration failed:',
+                  error
+                );
+                setProgress(52, {
+                  tip: '离线加速未启用，正在直接启动工作台...',
+                  source: 'phase',
+                });
+                return null;
+              });
+          } else {
+            window.__OPENTU_SW_REGISTRATION_PROMISE__.then(function (
+              registration
+            ) {
+              syncEarlyCDNPreference(registration);
+            });
+          }
+        }
+
+        function loadCDNConfigAndBootstrap() {
+          if (cdnConfigLoadStarted) {
+            return;
+          }
+          cdnConfigLoadStarted = true;
+
+          appendManagedBootScript(
+            './cdn-config.js',
+            function () {
+              setupEarlyServiceWorkerBootstrap();
+              if (resolveMainEntryReady) {
+                resolveMainEntryReady();
+                resolveMainEntryReady = null;
+              }
+            },
+            function () {
+              console.warn(
+                '[Boot] CDN config load failed, fallback to local bootstrap'
+              );
+              setupEarlyServiceWorkerBootstrap();
+              if (resolveMainEntryReady) {
+                resolveMainEntryReady();
+                resolveMainEntryReady = null;
+              }
+            }
+          );
+        }
+
+        renderProgress();
+        startSimulatedProgress();
+        loadCDNConfigAndBootstrap();
+
+        window.addEventListener(
+          'error',
+          function (event) {
+            var target = event && event.target;
+            if (target && target !== window && (target.src || target.href)) {
+              if (isManagedBootFallbackTarget(target)) {
+                return;
+              }
+              var resourceUrl = target.src || target.href || '';
+              var resourceName = resourceUrl.split('/').pop() || '资源文件';
+              markError(resourceName + ' 加载失败，请刷新页面后重试。');
+              return;
+            }
+
+            var message =
+              event && typeof event.message === 'string' && event.message.trim()
+                ? event.message.trim()
+                : '启动脚本执行失败，请刷新页面后重试。';
+            markError(message);
+          },
+          { once: true }
+        );
+
+        window.addEventListener(
+          'unhandledrejection',
+          function (event) {
+            var reason = event && event.reason;
+            var message =
+              reason && typeof reason.message === 'string'
+                ? reason.message
+                : typeof reason === 'string'
+                ? reason
+                : '启动过程中发生异常，请刷新页面后重试。';
+            markError(message);
+          },
+          { once: true }
+        );
+      })();
+    </script>
+    <div id="root"></div>
+    <script type="module" crossorigin src="https://cdn.jsdelivr.net/npm/aitu-app@0.9.6/assets/index-CTjaAcM6.js" data-local-src="./assets/index-CTjaAcM6.js" data-cdn-fallback-managed="1" onerror="window.__OPENTU_BOOT_ASSET_FALLBACK__&&window.__OPENTU_BOOT_ASSET_FALLBACK__(this)"></script>
+  <link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/npm/aitu-app@0.9.6/assets/index-C2C9RW9e.css" data-local-href="./assets/index-C2C9RW9e.css" data-cdn-fallback-managed="1" onerror="window.__OPENTU_BOOT_ASSET_FALLBACK__&&window.__OPENTU_BOOT_ASSET_FALLBACK__(this)">
+</body>
+  <!-- PostHog Analytics -->
+  <!-- 本地开发环境（localhost/127.0.0.1）默认不加载，除非 URL 带 report=1 参数 -->
+  <script>
+    (function () {
+      var isLocalDev =
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1';
+      var forceReport =
+        new URLSearchParams(window.location.search).get('report') === '1';
+
+      // 本地开发环境且没有 report=1 参数时，不加载 PostHog
+      if (isLocalDev && !forceReport) {
+        return;
+      }
+
+      !(function (t, e) {
+        var o, n, p, r;
+        e.__SV ||
+          (window.posthog && window.posthog.__loaded) ||
+          ((window.posthog = e),
+          (e._i = []),
+          (e.init = function (i, s, a) {
+            function g(t, e) {
+              var o = e.split('.');
+              2 == o.length && ((t = t[o[0]]), (e = o[1])),
+                (t[e] = function () {
+                  t.push([e].concat(Array.prototype.slice.call(arguments, 0)));
+                });
+            }
+            ((p = t.createElement('script')).type = 'text/javascript'),
+              (p.crossOrigin = 'anonymous'),
+              (p.async = !0),
+              (p.src =
+                s.api_host.replace('.i.posthog.com', '-assets.i.posthog.com') +
+                '/static/array.js'),
+              (r = t.getElementsByTagName('script')[0]).parentNode.insertBefore(
+                p,
+                r
+              );
+            var u = e;
+            for (
+              void 0 !== a ? (u = e[a] = []) : (a = 'posthog'),
+                u.people = u.people || [],
+                u.toString = function (t) {
+                  var e = 'posthog';
+                  return (
+                    'posthog' !== a && (e += '.' + a), t || (e += ' (stub)'), e
+                  );
+                },
+                u.people.toString = function () {
+                  return u.toString(1) + '.people (stub)';
+                },
+                o =
+                  'init Dr Ur fi Lr zr ci Or jr capture Ai calculateEventProperties qr register register_once register_for_session unregister unregister_for_session Jr getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey displaySurvey cancelPendingSurvey canRenderSurvey canRenderSurveyAsync identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty Gr Br createPersonProfile Vr Cr Kr opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing get_explicit_consent_status is_capturing clear_opt_in_out_capturing Hr debug O Wr getPageViewId captureTraceFeedback captureTraceMetric Rr'.split(
+                    ' '
+                  ),
+                n = 0;
+              n < o.length;
+              n++
+            )
+              g(u, o[n]);
+            e._i.push([i, s, a]);
+          }),
+          (e.__SV = 1));
+      })(document, window.posthog || []);
+      var isIgnorableExceptionEvent = function (event) {
+        if (!event || event.event !== '$exception') return false;
+        var properties = event.properties || {};
+        var messages = [];
+
+        var appendMessages = function (value) {
+          if (!value) return;
+          if (typeof value === 'string') {
+            messages.push(value);
+            if (
+              value.length < 2000 &&
+              (value.charAt(0) === '[' || value.charAt(0) === '{')
+            ) {
+              try {
+                appendMessages(JSON.parse(value));
+              } catch (_) {}
+            }
+            return;
+          }
+
+          if (Array.isArray(value)) {
+            for (var i = 0; i < value.length; i++) {
+              appendMessages(value[i]);
+            }
+            return;
+          }
+
+          if (typeof value === 'object') {
+            if (typeof value.value === 'string') messages.push(value.value);
+            if (typeof value.message === 'string') messages.push(value.message);
+            if (typeof value.name === 'string') messages.push(value.name);
+          }
+        };
+
+        appendMessages(properties.$exception_values);
+        appendMessages(properties.$exception_list);
+        appendMessages(properties.$exception_message);
+        appendMessages(properties.$exception_type);
+        appendMessages(properties.$exception_types);
+        appendMessages(properties.message);
+        appendMessages(properties.name);
+        appendMessages(event.exception);
+        appendMessages(event.error);
+
+        var text = messages.join('\n');
+        return (
+          text.indexOf(
+            'ResizeObserver loop completed with undelivered notifications'
+          ) !== -1 ||
+          text.indexOf('ResizeObserver loop limit exceeded') !== -1 ||
+          (text.indexOf('WebCodecs API') !== -1 &&
+            (text.indexOf('Chrome 94+') !== -1 ||
+              text.indexOf('Edge 94+') !== -1)) ||
+          (text.indexOf("Failed to execute 'write' on 'Clipboard'") !== -1 &&
+            text.indexOf('permissions policy') !== -1) ||
+          ((text.indexOf('AbortError') !== -1 ||
+            text.indexOf('The user aborted a request') !== -1) &&
+            (text.indexOf("Failed to execute 'showOpenFilePicker'") !== -1 ||
+              text.indexOf("Failed to execute 'showSaveFilePicker'") !== -1 ||
+              text.indexOf('The user aborted a request') !== -1)) ||
+          text.indexOf('No key or key range specified') !== -1
+        );
+      };
+
+      posthog.init('phc_13URtidKwTR9POlwnB153NsN99shRykvPguKWf3vZVn', {
+        api_host: 'https://us.i.posthog.com',
+        defaults: '2025-11-30',
+        person_profiles: 'identified_only',
+        // 关闭 Session Recording，避免 rrweb 主线程开销（wheel/setInterval）与 413
+        disable_session_recording: true,
+        // 限制单次 flush 体积，避免 413 Content Too Large
+        rate_limiting: { events_per_second: 10, events_burst_limit: 30 },
+        request_queue: { flush_interval_ms: 2000 },
+        // 白板 SPA 点击多，关闭 autocapture 减少事件量与请求体
+        autocapture: false,
+        // 静默网络错误；避免 413 重试风暴干扰
+        on_xhr_error: function (err) {
+          var code =
+            err &&
+            (typeof err.statusCode !== 'undefined'
+              ? err.statusCode
+              : err.status);
+          void code;
+        },
+        before_send: function (event) {
+          if (isIgnorableExceptionEvent(event)) return false;
+          return event;
+        },
+      });
+    })();
+  </script>
+</html>

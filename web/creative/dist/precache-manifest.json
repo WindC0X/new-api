@@ -1,0 +1,42 @@
+{
+  "version": "0.9.6",
+  "timestamp": "2026-06-07T08:14:07.993Z",
+  "files": [
+    {
+      "url": "/assets/index-C2C9RW9e.css",
+      "revision": "0b6f3edf"
+    },
+    {
+      "url": "/assets/index-CTjaAcM6.js",
+      "revision": "1fc18d39"
+    },
+    {
+      "url": "/favicon.ico",
+      "revision": "ea5572cb"
+    },
+    {
+      "url": "/icons/favicon-16x16.svg",
+      "revision": "ef0d3169"
+    },
+    {
+      "url": "/icons/favicon-32x32.svg",
+      "revision": "ef0d3169"
+    },
+    {
+      "url": "/icons/favicon-new.svg",
+      "revision": "ef0d3169"
+    },
+    {
+      "url": "/icons/icon-192x192.svg",
+      "revision": "ef0d3169"
+    },
+    {
+      "url": "/index.html",
+      "revision": "9daf2255"
+    },
+    {
+      "url": "/manifest.json",
+      "revision": "551b4a7f"
+    }
+  ]
+}

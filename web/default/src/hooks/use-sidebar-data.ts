@@ -26,6 +26,7 @@ import {
   LayoutDashboard,
   ListTodo,
   MessageSquare,
+  Palette,
   Radio,
   Settings,
   Ticket,
@@ -76,6 +77,12 @@ export function useSidebarData(): SidebarData {
             title: t('Dashboard'),
             url: '/dashboard/models',
             icon: LayoutDashboard,
+          },
+          {
+            title: t('Creative Workspace'),
+            url: '/creative/',
+            icon: Palette,
+            isExternal: true,
           },
           {
             title: t('API Keys'),

@@ -1,38 +1,30 @@
 {
   "version": "0.9.6",
-  "timestamp": "2026-06-07T08:14:07.993Z",
+  "timestamp": "2026-06-07T23:56:46.162Z",
   "files": [
-    {
-      "url": "/assets/index-C2C9RW9e.css",
-      "revision": "0b6f3edf"
-    },
-    {
-      "url": "/assets/index-CTjaAcM6.js",
-      "revision": "1fc18d39"
-    },
     {
       "url": "/favicon.ico",
       "revision": "ea5572cb"
     },
     {
       "url": "/icons/favicon-16x16.svg",
-      "revision": "ef0d3169"
+      "revision": "dfc10712"
     },
     {
       "url": "/icons/favicon-32x32.svg",
-      "revision": "ef0d3169"
+      "revision": "dfc10712"
     },
     {
       "url": "/icons/favicon-new.svg",
-      "revision": "ef0d3169"
+      "revision": "dfc10712"
     },
     {
       "url": "/icons/icon-192x192.svg",
-      "revision": "ef0d3169"
+      "revision": "dfc10712"
     },
     {
       "url": "/index.html",
-      "revision": "9daf2255"
+      "revision": "aebc8a7f"
     },
     {
       "url": "/manifest.json",

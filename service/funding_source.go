@@ -1,9 +1,12 @@
 package service
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/model"
+	"gorm.io/gorm"
 )
 
 // ---------------------------------------------------------------------------
@@ -113,7 +116,45 @@ func (s *SubscriptionFunding) Refund() error {
 		return nil
 	}
 	return refundWithRetry(func() error {
-		return model.RefundSubscriptionPreConsume(s.requestId)
+		return refundSubscriptionPreConsumeInSingleTransaction(s.requestId)
+	})
+}
+
+func refundSubscriptionPreConsumeInSingleTransaction(requestId string) error {
+	if strings.TrimSpace(requestId) == "" {
+		return errors.New("requestId is empty")
+	}
+	return model.DB.Transaction(func(tx *gorm.DB) error {
+		var record model.SubscriptionPreConsumeRecord
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			Where("request_id = ?", requestId).
+			First(&record).Error; err != nil {
+			return err
+		}
+		if record.Status == "refunded" {
+			return nil
+		}
+		if record.PreConsumed <= 0 {
+			record.Status = "refunded"
+			return tx.Save(&record).Error
+		}
+
+		var subscription model.UserSubscription
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			Where("id = ?", record.UserSubscriptionId).
+			First(&subscription).Error; err != nil {
+			return err
+		}
+		amountUsed := subscription.AmountUsed - record.PreConsumed
+		if amountUsed < 0 {
+			amountUsed = 0
+		}
+		subscription.AmountUsed = amountUsed
+		if err := tx.Save(&subscription).Error; err != nil {
+			return err
+		}
+		record.Status = "refunded"
+		return tx.Save(&record).Error
 	})
 }
 

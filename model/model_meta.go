@@ -176,7 +176,7 @@ func GetPreferredModelOwnerChannelTypes(modelNames []string, groups []string) (m
 
 	groups = normalizeLookupValues(groups)
 	if len(groups) > 0 {
-		query = query.Where("abilities."+commonGroupCol+" IN ?", groups)
+		query = query.Where("abilities."+abilityGroupCol()+" IN ?", groups)
 	}
 
 	if err := query.Scan(&rows).Error; err != nil {

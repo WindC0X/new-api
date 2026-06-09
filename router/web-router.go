@@ -1,7 +1,10 @@
 package router
 
 import (
+	"crypto/sha256"
 	"embed"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -11,6 +14,13 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	creativeNoCacheControl        = "no-cache"
+	creativeImmutableCacheControl = "public, max-age=31536000, immutable"
+	creativeEmbeddedCSP           = "frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
+	creativePermissionsPolicy     = "camera=(), microphone=(), geolocation=(), payment=()"
 )
 
 // ThemeAssets holds the embedded frontend assets for both themes and creative.
@@ -28,6 +38,7 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	classicFS := common.EmbedFolder(assets.ClassicBuildFS, "web/classic/dist")
 	creativeFS := common.EmbedFolder(assets.CreativeBuildFS, "web/creative/dist")
 	themeFS := common.NewThemeAwareFS(defaultFS, classicFS)
+	creativeProvenance := loadCreativeProvenanceHeaders(creativeFS)
 
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.GlobalWebRateLimit())
@@ -41,23 +52,58 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	// is a middleware.  If the admin dist ever gains a /creative/ directory, the
 	// behaviour here is undefined by design — choose to mount on a unique prefix.
 	creativeServer := http.StripPrefix("/creative", http.FileServer(creativeFS))
+
+	creativeAPIRouter := router.Group("/creative/api")
+	creativeAPIRouter.Use(middleware.RouteTag("api"))
+	creativeAPIRouter.Use(middleware.BodyStorageCleanup())
+	creativeAPIRouter.Use(middleware.CreativeSessionHeaderBridge(), middleware.UserAuth())
+	{
+		creativeAPIRouter.GET("/bootstrap", controller.CreativeBootstrap)
+		creativeAPIRouter.GET("/models", controller.CreativeListModels)
+		creativeAPIRouter.GET("/preferences/model", controller.CreativeGetModelPreference)
+		creativeAPIRouter.PATCH("/preferences/model", middleware.CreativeRequireNonce(), controller.CreativePatchModelPreference)
+		creativeAPIRouter.GET("/documents", controller.CreativeListDocuments)
+		creativeAPIRouter.POST("/documents", middleware.CreativeRequireNonce(), controller.CreativeCreateDocument)
+		creativeAPIRouter.GET("/documents/:id", controller.CreativeGetDocument)
+		creativeAPIRouter.PUT("/documents/:id", middleware.CreativeRequireNonce(), controller.CreativeUpdateDocument)
+		creativeAPIRouter.DELETE("/documents/:id", middleware.CreativeRequireNonce(), controller.CreativeDeleteDocument)
+		creativeAPIRouter.POST("/assets", middleware.CreativeRequireNonce(), controller.CreativeUploadAsset)
+		creativeAPIRouter.GET("/assets/:id", controller.CreativeGetAsset)
+		creativeAPIRouter.GET("/assets/:id/content", controller.CreativeGetAssetContent)
+		creativeAPIRouter.DELETE("/assets/:id", middleware.CreativeRequireNonce(), controller.CreativeDeleteAsset)
+	}
+
+	creativeRelayRouter := router.Group("/creative/relay/v1")
+	creativeRelayRouter.Use(middleware.RouteTag("relay"))
+	creativeRelayRouter.Use(middleware.BodyStorageCleanup())
+	creativeRelayRouter.Use(middleware.SystemPerformanceCheck())
+	creativeRelayRouter.Use(middleware.CreativeSessionHeaderBridge(), middleware.UserAuth())
+	creativeRelayRouter.Use(middleware.CreativeRequireNonce())
+	creativeRelayRouter.Use(controller.CreativeRejectForbiddenRelayFields())
+	creativeRelayRouter.Use(middleware.CreativeRelaySessionBroker(), middleware.Distribute())
+	{
+		creativeRelayRouter.POST("/chat/completions", controller.CreativeRelayChatCompletions)
+		creativeRelayRouter.POST("/images/generations", controller.CreativeRelayImagesGenerations)
+	}
+
 	serveCreative := func(c *gin.Context) {
 		p := c.Request.URL.Path
+		setCreativeEmbeddedHeaders(c, creativeProvenance)
 
-		// Reserve /creative/relay[/...] for the future session-auth relay.
-		if p == "/creative/relay" || strings.HasPrefix(p, "/creative/relay/") {
+		// /creative/api and /creative/relay are handled by explicit routes above.
+		if p == "/creative/api" || strings.HasPrefix(p, "/creative/api/") ||
+			p == "/creative/relay" || strings.HasPrefix(p, "/creative/relay/") {
 			controller.RelayNotFound(c)
 			return
 		}
 		// SW-critical files must not be cached by the global Cache() middleware.
-		switch p {
-		case "/creative/sw.js", "/creative/index.html", "/creative/version.json":
-			c.Header("Cache-Control", "no-cache")
+		if creativeNoCachePath(p) {
+			c.Header("Cache-Control", creativeNoCacheControl)
 		}
 		// SPA root — serve the embedded opentu index.html.
 		stripped := strings.TrimPrefix(p, "/creative")
-		if stripped == "" || stripped == "/" {
-			c.Header("Cache-Control", "no-cache")
+		if stripped == "" || stripped == "/" || stripped == "/index.html" {
+			c.Header("Cache-Control", creativeNoCacheControl)
 			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.CreativeIndexPage)
 			return
 		}
@@ -67,26 +113,33 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 		if fi, err := creativeFS.Open(stripped); err == nil {
 			if s, se := fi.Stat(); se == nil && s.IsDir() {
 				fi.Close()
-				c.Header("Cache-Control", "no-cache")
+				c.Header("Cache-Control", creativeNoCacheControl)
 				c.Data(http.StatusOK, "text/html; charset=utf-8", assets.CreativeIndexPage)
 				return
 			}
 			fi.Close()
+			if creativeImmutableAssetPath(p) {
+				c.Header("Cache-Control", creativeImmutableCacheControl)
+			}
 			creativeServer.ServeHTTP(c.Writer, c.Request)
 			return
 		}
 		// File not found — SPA fallback for client-side routes.
-		c.Header("Cache-Control", "no-cache")
+		c.Header("Cache-Control", creativeNoCacheControl)
 		c.Data(http.StatusOK, "text/html; charset=utf-8", assets.CreativeIndexPage)
 	}
 
 	router.GET("/creative", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/creative/")
 	})
-	router.Any("/creative/*filepath", serveCreative)
+	router.GET("/creative/", serveCreative)
 
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
+		if strings.HasPrefix(c.Request.URL.Path, "/creative/") {
+			serveCreative(c)
+			return
+		}
 		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
 			controller.RelayNotFound(c)
 			return
@@ -98,4 +151,84 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.DefaultIndexPage)
 		}
 	})
+}
+
+type creativeVersionMetadata struct {
+	Version   string `json:"version"`
+	BuildTime string `json:"buildTime"`
+	GitCommit string `json:"gitCommit"`
+}
+
+type creativeProvenanceHeaders struct {
+	versionHash string
+	version     string
+	buildTime   string
+	gitCommit   string
+}
+
+type creativeFileOpener interface {
+	Open(name string) (http.File, error)
+}
+
+func loadCreativeProvenanceHeaders(creativeFS creativeFileOpener) creativeProvenanceHeaders {
+	file, err := creativeFS.Open("/version.json")
+	if err != nil {
+		return creativeProvenanceHeaders{}
+	}
+	defer file.Close()
+
+	versionBytes, err := io.ReadAll(file)
+	if err != nil || len(versionBytes) == 0 {
+		return creativeProvenanceHeaders{}
+	}
+	hash := sha256.Sum256(versionBytes)
+	provenance := creativeProvenanceHeaders{
+		versionHash: "sha256:" + fmt.Sprintf("%x", hash),
+	}
+	var metadata creativeVersionMetadata
+	if err := common.Unmarshal(versionBytes, &metadata); err == nil {
+		provenance.version = safeCreativeHeaderValue(metadata.Version)
+		provenance.buildTime = safeCreativeHeaderValue(metadata.BuildTime)
+		provenance.gitCommit = safeCreativeHeaderValue(metadata.GitCommit)
+	}
+	return provenance
+}
+
+func setCreativeEmbeddedHeaders(c *gin.Context, provenance creativeProvenanceHeaders) {
+	c.Header("Content-Security-Policy", creativeEmbeddedCSP)
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Referrer-Policy", "origin-when-cross-origin")
+	c.Header("Permissions-Policy", creativePermissionsPolicy)
+	if provenance.versionHash != "" {
+		c.Header("X-Creative-Version-Hash", provenance.versionHash)
+	}
+	if provenance.version != "" {
+		c.Header("X-Creative-Build-Version", provenance.version)
+	}
+	if provenance.buildTime != "" {
+		c.Header("X-Creative-Build-Time", provenance.buildTime)
+	}
+	if provenance.gitCommit != "" {
+		c.Header("X-Creative-Git-Commit", provenance.gitCommit)
+	}
+}
+
+func creativeNoCachePath(path string) bool {
+	switch path {
+	case "/creative/", "/creative/index.html", "/creative/sw.js", "/creative/version.json":
+		return true
+	default:
+		return false
+	}
+}
+
+func creativeImmutableAssetPath(path string) bool {
+	return strings.HasPrefix(path, "/creative/assets/")
+}
+
+func safeCreativeHeaderValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	return value
 }

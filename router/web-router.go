@@ -78,12 +78,22 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	creativeRelayRouter.Use(middleware.BodyStorageCleanup())
 	creativeRelayRouter.Use(middleware.SystemPerformanceCheck())
 	creativeRelayRouter.Use(middleware.CreativeSessionHeaderBridge(), middleware.UserAuth())
+	creativeRelayRouter.Use(middleware.CreativeRequireSameOrigin())
 	creativeRelayRouter.Use(middleware.CreativeRequireNonce())
 	creativeRelayRouter.Use(controller.CreativeRejectForbiddenRelayFields())
-	creativeRelayRouter.Use(middleware.CreativeRelaySessionBroker(), middleware.Distribute())
 	{
-		creativeRelayRouter.POST("/chat/completions", controller.CreativeRelayChatCompletions)
-		creativeRelayRouter.POST("/images/generations", controller.CreativeRelayImagesGenerations)
+		creativeDistributedRelayRouter := creativeRelayRouter.Group("")
+		creativeDistributedRelayRouter.Use(middleware.CreativeRelaySessionBroker(), middleware.Distribute())
+		creativeDistributedRelayRouter.POST("/chat/completions", controller.CreativeRelayChatCompletions)
+		creativeDistributedRelayRouter.POST("/images/generations", controller.CreativeRelayImagesGenerations)
+
+		creativeVideoRelayRouter := creativeRelayRouter.Group("/videos")
+		creativeVideoRelayRouter.Use(controller.CreativeVideoRelayGate())
+		creativeVideoRelayRouter.Use(controller.CreativeVideoSubmitIdempotency())
+		creativeVideoRelayRouter.Use(middleware.CreativeRelaySessionBroker(), middleware.Distribute())
+		creativeVideoRelayRouter.POST("", controller.CreativeRelayVideos)
+		creativeVideoRelayRouter.GET("/:task_id", controller.CreativeRelayVideoFetch)
+		creativeVideoRelayRouter.GET("/:task_id/content", controller.CreativeRelayVideoContent)
 	}
 
 	serveCreative := func(c *gin.Context) {

@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -99,7 +102,8 @@ func (m Properties) Value() (driver.Value, error) {
 type TaskPrivateData struct {
 	Key            string `json:"key,omitempty"`
 	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	ResultURL      string `json:"result_url,omitempty"` // 任务成功后的结果 URL（视频地址等）
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -156,6 +160,107 @@ func (p TaskPrivateData) Value() (driver.Value, error) {
 	return common.Marshal(p)
 }
 
+type CreativeVideoIdempotency struct {
+	ID          int64  `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
+	UserId      int    `json:"user_id" gorm:"uniqueIndex:idx_creative_video_idempotency_user_scope_request,priority:1;index"`
+	Scope       string `json:"scope" gorm:"type:varchar(64);uniqueIndex:idx_creative_video_idempotency_user_scope_request,priority:2;index"`
+	RequestID   string `json:"request_id" gorm:"type:varchar(128);uniqueIndex:idx_creative_video_idempotency_user_scope_request,priority:3"`
+	PayloadHash string `json:"payload_hash" gorm:"type:varchar(64);index"`
+	TaskID      string `json:"task_id" gorm:"type:varchar(191);index"`
+	CreatedTime int64  `json:"created_time" gorm:"bigint"`
+	UpdatedTime int64  `json:"updated_time" gorm:"bigint;index"`
+}
+
+func (r *CreativeVideoIdempotency) BeforeCreate(tx *gorm.DB) error {
+	now := common.GetTimestamp()
+	r.CreatedTime = now
+	r.UpdatedTime = now
+	return nil
+}
+
+func (r *CreativeVideoIdempotency) BeforeUpdate(tx *gorm.DB) error {
+	r.UpdatedTime = common.GetTimestamp()
+	return nil
+}
+
+const CreativeVideoIdempotencyScopeVideoSubmit = "video.submit"
+
+func normalizeCreativeVideoIdempotencyScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return CreativeVideoIdempotencyScopeVideoSubmit
+	}
+	return scope
+}
+
+func PrepareCreativeVideoIdempotency(userID int, requestID string, payloadHash string) (*CreativeVideoIdempotency, bool, error) {
+	return PrepareCreativeVideoIdempotencyScoped(userID, CreativeVideoIdempotencyScopeVideoSubmit, requestID, payloadHash)
+}
+
+func PrepareCreativeVideoIdempotencyScoped(userID int, scope string, requestID string, payloadHash string) (*CreativeVideoIdempotency, bool, error) {
+	scope = normalizeCreativeVideoIdempotencyScope(scope)
+	requestID = strings.TrimSpace(requestID)
+	payloadHash = strings.TrimSpace(payloadHash)
+	if userID <= 0 || scope == "" || requestID == "" || payloadHash == "" {
+		return nil, false, errors.New("invalid creative video idempotency args")
+	}
+	var existing CreativeVideoIdempotency
+	err := DB.Where("user_id = ? AND scope = ? AND request_id = ?", userID, scope, requestID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) && scope == CreativeVideoIdempotencyScopeVideoSubmit {
+		err = DB.Where("user_id = ? AND scope = ? AND request_id = ?", userID, "", requestID).First(&existing).Error
+	}
+	if err == nil {
+		return &existing, true, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, err
+	}
+	record := &CreativeVideoIdempotency{
+		UserId:      userID,
+		Scope:       scope,
+		RequestID:   requestID,
+		PayloadHash: payloadHash,
+		TaskID:      GenerateTaskID(),
+	}
+	if err := DB.Create(record).Error; err != nil {
+		var dup CreativeVideoIdempotency
+		if dupErr := DB.Where("user_id = ? AND scope = ? AND request_id = ?", userID, scope, requestID).First(&dup).Error; dupErr == nil {
+			return &dup, true, nil
+		}
+		return nil, false, err
+	}
+	return record, false, nil
+}
+
+func CompleteCreativeVideoIdempotency(userID int, requestID string, taskID string) error {
+	return CompleteCreativeVideoIdempotencyScoped(userID, CreativeVideoIdempotencyScopeVideoSubmit, requestID, taskID)
+}
+
+func CompleteCreativeVideoIdempotencyScoped(userID int, scope string, requestID string, taskID string) error {
+	scope = normalizeCreativeVideoIdempotencyScope(scope)
+	requestID = strings.TrimSpace(requestID)
+	taskID = strings.TrimSpace(taskID)
+	if userID <= 0 || requestID == "" || taskID == "" {
+		return nil
+	}
+	return DB.Model(&CreativeVideoIdempotency{}).
+		Where("user_id = ? AND scope = ? AND request_id = ?", userID, scope, requestID).
+		Update("task_id", taskID).Error
+}
+
+func DeleteCreativeVideoIdempotency(userID int, requestID string) error {
+	return DeleteCreativeVideoIdempotencyScoped(userID, CreativeVideoIdempotencyScopeVideoSubmit, requestID)
+}
+
+func DeleteCreativeVideoIdempotencyScoped(userID int, scope string, requestID string) error {
+	scope = normalizeCreativeVideoIdempotencyScope(scope)
+	requestID = strings.TrimSpace(requestID)
+	if userID <= 0 || requestID == "" {
+		return nil
+	}
+	return DB.Where("user_id = ? AND scope = ? AND request_id = ?", userID, scope, requestID).Delete(&CreativeVideoIdempotency{}).Error
+}
+
 // SyncTaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段
 type SyncTaskQueryParams struct {
 	Platform       constant.TaskPlatform
@@ -173,9 +278,11 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	properties := Properties{}
 	privateData := TaskPrivateData{}
 	if relayInfo != nil && relayInfo.ChannelMeta != nil {
-		if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||
-			relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeVertexAi {
+		if relayInfo.ChannelMeta.ApiKey != "" {
 			privateData.Key = relayInfo.ChannelMeta.ApiKey
+		}
+		if relayInfo.TaskRelayInfo != nil && relayInfo.TaskRelayInfo.IdempotencyKey != "" {
+			privateData.IdempotencyKey = relayInfo.TaskRelayInfo.IdempotencyKey
 		}
 		if relayInfo.UpstreamModelName != "" {
 			properties.UpstreamModelName = relayInfo.UpstreamModelName

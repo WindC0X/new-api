@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -493,6 +496,13 @@ func RelayTask(c *gin.Context) {
 		return
 	}
 
+	if publicTaskID := c.GetString(creativeVideoPublicTaskIDContextKey); publicTaskID != "" && relayInfo.TaskRelayInfo != nil {
+		relayInfo.PublicTaskID = publicTaskID
+	}
+	if idempotencyKey := c.GetString(creativeVideoIdempotencyKeyContextKey); idempotencyKey != "" && relayInfo.TaskRelayInfo != nil {
+		relayInfo.IdempotencyKey = idempotencyKey
+	}
+
 	if taskErr := relay.ResolveOriginTask(c, relayInfo); taskErr != nil {
 		respondTaskError(c, taskErr)
 		return
@@ -546,8 +556,13 @@ func RelayTask(c *gin.Context) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
+		originalWriter := c.Writer
+		bufferedWriter := newTaskSubmitBufferedResponseWriter(originalWriter)
+		c.Writer = bufferedWriter
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
+		c.Writer = originalWriter
 		if taskErr == nil {
+			c.Set(taskSubmitBufferedResponseContextKey, bufferedWriter)
 			break
 		}
 
@@ -571,11 +586,6 @@ func RelayTask(c *gin.Context) {
 
 	// ── 成功：结算 + 日志 + 插入任务 ──
 	if taskErr == nil {
-		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-			common.SysError("settle task billing error: " + settleErr.Error())
-		}
-		service.LogTaskConsumption(c, relayInfo)
-
 		task := model.InitTask(result.Platform, relayInfo)
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
@@ -593,13 +603,138 @@ func RelayTask(c *gin.Context) {
 		task.Data = result.TaskData
 		task.Action = relayInfo.Action
 		if insertErr := task.Insert(); insertErr != nil {
-			common.SysError("insert task error: " + insertErr.Error())
+			taskErr = service.TaskErrorWrapper(insertErr, "insert_task_failed", http.StatusInternalServerError)
+		} else if relayInfo.TaskRelayInfo != nil && relayInfo.IdempotencyKey != "" {
+			if err := model.CompleteCreativeVideoIdempotency(relayInfo.UserId, relayInfo.IdempotencyKey, task.TaskID); err != nil {
+				taskErr = service.TaskErrorWrapper(err, "complete_idempotency_failed", http.StatusInternalServerError)
+			}
+		}
+		if taskErr == nil {
+			if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+				common.SysError("settle task billing error: " + settleErr.Error())
+			}
+			service.LogTaskConsumption(c, relayInfo)
+			if bufferedWriter, ok := c.Get(taskSubmitBufferedResponseContextKey); ok {
+				if writer, ok := bufferedWriter.(*taskSubmitBufferedResponseWriter); ok {
+					if err := writer.FlushTo(c.Writer); err != nil {
+						common.SysError("flush task submit response error: " + err.Error())
+					}
+				}
+			}
 		}
 	}
 
 	if taskErr != nil {
+		if relayInfo.TaskRelayInfo != nil && relayInfo.IdempotencyKey != "" {
+			if err := model.DeleteCreativeVideoIdempotency(relayInfo.UserId, relayInfo.IdempotencyKey); err != nil {
+				common.SysError("delete creative video idempotency error: " + err.Error())
+			}
+		}
 		respondTaskError(c, taskErr)
 	}
+}
+
+const taskSubmitBufferedResponseContextKey = "task_submit_buffered_response_writer"
+
+type taskSubmitBufferedResponseWriter struct {
+	target gin.ResponseWriter
+	header http.Header
+	body   bytes.Buffer
+	status int
+	size   int
+	wrote  bool
+}
+
+func newTaskSubmitBufferedResponseWriter(target gin.ResponseWriter) *taskSubmitBufferedResponseWriter {
+	header := make(http.Header, len(target.Header()))
+	for key, values := range target.Header() {
+		header[key] = append([]string(nil), values...)
+	}
+	return &taskSubmitBufferedResponseWriter{
+		target: target,
+		header: header,
+		status: http.StatusOK,
+	}
+}
+
+func (w *taskSubmitBufferedResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *taskSubmitBufferedResponseWriter) WriteHeader(code int) {
+	if w.wrote {
+		return
+	}
+	w.status = code
+	w.wrote = true
+}
+
+func (w *taskSubmitBufferedResponseWriter) WriteHeaderNow() {
+	if !w.wrote {
+		w.WriteHeader(w.status)
+	}
+}
+
+func (w *taskSubmitBufferedResponseWriter) Write(data []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.body.Write(data)
+	w.size += n
+	return n, err
+}
+
+func (w *taskSubmitBufferedResponseWriter) WriteString(s string) (int, error) {
+	return w.Write([]byte(s))
+}
+
+func (w *taskSubmitBufferedResponseWriter) Status() int {
+	return w.status
+}
+
+func (w *taskSubmitBufferedResponseWriter) Size() int {
+	if w.size == 0 && !w.wrote {
+		return -1
+	}
+	return w.size
+}
+
+func (w *taskSubmitBufferedResponseWriter) Written() bool {
+	return w.wrote
+}
+
+func (w *taskSubmitBufferedResponseWriter) Flush() {}
+
+func (w *taskSubmitBufferedResponseWriter) CloseNotify() <-chan bool {
+	return w.target.CloseNotify()
+}
+
+func (w *taskSubmitBufferedResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.target.Hijack()
+}
+
+func (w *taskSubmitBufferedResponseWriter) Pusher() http.Pusher {
+	return w.target.Pusher()
+}
+
+func (w *taskSubmitBufferedResponseWriter) FlushTo(target gin.ResponseWriter) error {
+	for key := range target.Header() {
+		target.Header().Del(key)
+	}
+	for key, values := range w.header {
+		for _, value := range values {
+			target.Header().Add(key, value)
+		}
+	}
+	if !w.wrote {
+		return nil
+	}
+	target.WriteHeader(w.status)
+	if w.body.Len() == 0 {
+		return nil
+	}
+	_, err := target.Write(w.body.Bytes())
+	return err
 }
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）

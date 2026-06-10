@@ -108,7 +108,13 @@ func VideoProxy(c *gin.Context) {
 		}
 	case constant.ChannelTypeOpenAI, constant.ChannelTypeSora:
 		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
-		req.Header.Set("Authorization", "Bearer "+channel.Key)
+		apiKey := task.PrivateData.Key
+		if apiKey == "" {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Missing stored API key for video task %s", taskID))
+			videoProxyError(c, http.StatusInternalServerError, "server_error", "API key not stored for task")
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	default:
 		// Video URL is stored in PrivateData.ResultURL (fallback to FailReason for old data)
 		videoURL = task.GetResultURL()
@@ -158,17 +164,42 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
-	for key, values := range resp.Header {
-		for _, value := range values {
-			c.Writer.Header().Add(key, value)
-		}
-	}
-
-	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	copyVideoProxyHeaders(c, resp)
+	applyVideoProxyCacheHeaders(c)
 	c.Writer.WriteHeader(resp.StatusCode)
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
+}
+
+func copyVideoProxyHeaders(c *gin.Context, resp *http.Response) {
+	for key, values := range resp.Header {
+		if videoProxyBlockedResponseHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			c.Writer.Header().Add(key, value)
+		}
+	}
+}
+
+func videoProxyBlockedResponseHeader(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	switch normalized {
+	case "set-cookie", "authorization", "proxy-authorization", "www-authenticate", "proxy-authenticate", "cache-control", "pragma", "expires", "x-api-key", "x-goog-api-key":
+		return true
+	default:
+		return strings.Contains(normalized, "api-key") || strings.Contains(normalized, "apikey")
+	}
+}
+
+func applyVideoProxyCacheHeaders(c *gin.Context) {
+	if c.GetBool(creativeVideoContentContextKey) {
+		c.Writer.Header().Set("Cache-Control", "private, no-store")
+		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+		return
+	}
+	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
 }
 
 func writeVideoDataURL(c *gin.Context, dataURL string) error {
@@ -198,7 +229,7 @@ func writeVideoDataURL(c *gin.Context, dataURL string) error {
 	}
 
 	c.Writer.Header().Set("Content-Type", mimeType)
-	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	applyVideoProxyCacheHeaders(c)
 	c.Writer.WriteHeader(http.StatusOK)
 	_, err = c.Writer.Write(videoBytes)
 	return err

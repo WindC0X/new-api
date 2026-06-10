@@ -70,3 +70,32 @@ func TestCreativeImageRelayModeNormalizesPathForBillingReuse(t *testing.T) {
 	require.True(t, info.IsPlayground)
 	require.Equal(t, types.RelayFormat(types.RelayFormatOpenAIImage), info.RelayFormat)
 }
+
+func TestCreativeVideoRelayModeNormalizesPathForTaskReuse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/creative/relay/v1/videos?trace=1", nil)
+
+	info, err := GenRelayInfo(ctx, types.RelayFormatTask, nil, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, relayconstant.RelayModeVideoSubmit, info.RelayMode)
+	require.Equal(t, "/v1/videos?trace=1", info.RequestURLPath)
+	require.True(t, info.IsPlayground)
+	require.Equal(t, types.RelayFormat(types.RelayFormatTask), info.RelayFormat)
+}
+
+func TestCreativeVideoFetchRelayModeNormalizesPathForTaskReuse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/creative/relay/v1/videos/task_abc?trace=1", nil)
+
+	info, err := GenRelayInfo(ctx, types.RelayFormatTask, nil, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, relayconstant.RelayModeVideoFetchByID, info.RelayMode)
+	require.Equal(t, "/v1/videos/task_abc?trace=1", info.RequestURLPath)
+	require.True(t, info.IsPlayground)
+}

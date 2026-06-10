@@ -376,7 +376,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
-	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
+	isOpenAIVideoAPI := strings.HasPrefix(c.Request.URL.Path, "/v1/videos/") ||
+		strings.HasPrefix(c.Request.URL.Path, "/creative/relay/v1/videos/")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
 	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
@@ -437,7 +438,11 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 
-	resp, err := adaptor.FetchTask(baseURL, channelModel.Key, map[string]any{
+	key := channelModel.Key
+	if task.PrivateData.Key != "" {
+		key = task.PrivateData.Key
+	}
+	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
 	}, proxy)
@@ -452,6 +457,13 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 
 	ti, err := adaptor.ParseTaskResult(body)
 	if err != nil || ti == nil {
+		return nil
+	}
+
+	if ti.Status == model.TaskStatusSuccess || ti.Status == model.TaskStatusFailure {
+		// Terminal transitions are left to the background polling path, where
+		// billing settle/refund is CAS-guarded. Updating terminal state here would
+		// bypass that accounting path and could skip refunds/settlement.
 		return nil
 	}
 

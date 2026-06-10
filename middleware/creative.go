@@ -76,6 +76,20 @@ func CreativeSessionHeaderBridge() gin.HandlerFunc {
 
 // CreativeRequireNonce validates bootstrap-issued CSRF/nonce material for
 // unsafe /creative requests. GET/HEAD/OPTIONS remain session-auth only.
+func CreativeRequireSameOrigin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !creativeUnsafeRequestOriginIsValid(c) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "creative request origin is invalid",
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 func CreativeRequireNonce() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		switch c.Request.Method {
@@ -150,6 +164,11 @@ func CreativeRelaySessionBroker() gin.HandlerFunc {
 }
 
 func readCreativeRelayModel(c *gin.Context) (string, error) {
+	switch c.Request.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return "", nil
+	}
+
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
 		return "", err
@@ -166,6 +185,21 @@ func readCreativeRelayModel(c *gin.Context) (string, error) {
 	if len(strings.TrimSpace(string(body))) == 0 {
 		return "", nil
 	}
+
+	contentType := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type")))
+	if strings.Contains(contentType, "multipart/form-data") {
+		form, err := common.ParseMultipartFormReusable(c)
+		if err != nil {
+			return "", err
+		}
+		defer form.RemoveAll()
+		values := form.Value["model"]
+		if len(values) == 0 {
+			return "", nil
+		}
+		return strings.TrimSpace(values[0]), nil
+	}
+
 	var payload map[string]any
 	if err := common.Unmarshal(body, &payload); err != nil {
 		return "", err

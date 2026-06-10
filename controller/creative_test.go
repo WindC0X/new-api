@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -408,6 +412,15 @@ func TestCreativeBootstrapIssuesSessionAuthMaterial(t *testing.T) {
 	secondAuth := creativeResponseObject(t, creativeResponseData(t, decodeCreativeResponse(t, second)), "auth")
 	require.Equal(t, firstCSRF, secondAuth["csrfToken"])
 	require.Equal(t, firstNonce, secondAuth["nonce"])
+}
+
+func TestCreativeVideoRelayEnvDefaultIsFailClosed(t *testing.T) {
+	t.Setenv("CREATIVE_VIDEO_RELAY_ENABLED", "")
+
+	require.False(t, loadCreativeVideoRelayEnabledFromEnv())
+
+	t.Setenv("CREATIVE_VIDEO_RELAY_ENABLED", "true")
+	require.True(t, loadCreativeVideoRelayEnabledFromEnv())
 }
 
 func TestCreativeNonceMiddlewareRequiresSameOriginSignalForUnsafeMethods(t *testing.T) {
@@ -953,6 +966,445 @@ func TestCreativeRelayRejectsProviderOverrideBeforeDistributionAndBilling(t *tes
 	require.Contains(t, errorObject["message"], "forbidden field metadata.routing.providerOverride")
 }
 
+func TestCreativeVideoRelayRejectsForbiddenQueryAndHeadersForGetBeforeSessionBroker(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 60)
+	seedCreativeControllerModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 60, func(c *gin.Context) {
+		relayReachedCount++
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	queryOverride := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/videos/task_123?apiKey=sk-test-abcdefghijklmnopqrstuvwxyz", nil, auth.cookies, map[string]string{
+		"Origin": "http://example.com",
+	})
+	require.Equal(t, http.StatusBadRequest, queryOverride.Code)
+	require.Equal(t, 0, relayReachedCount)
+	queryError := creativeResponseObject(t, decodeCreativeResponse(t, queryOverride), "error")
+	require.Contains(t, queryError["message"], "forbidden field apiKey")
+
+	headerOverride := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/videos/task_123", nil, auth.cookies, map[string]string{
+		"Origin":    "http://example.com",
+		"X-API-Key": "sk-test-abcdefghijklmnopqrstuvwxyz",
+	})
+	require.Equal(t, http.StatusBadRequest, headerOverride.Code)
+	require.Equal(t, 0, relayReachedCount)
+	headerError := creativeResponseObject(t, decodeCreativeResponse(t, headerOverride), "error")
+	require.Contains(t, headerError["message"], "forbidden field X-Api-Key")
+}
+
+func TestCreativeVideoRelayValidatesMultipartAndReplaysBody(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 61)
+	seedCreativeControllerModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 61, func(c *gin.Context) {
+		relayReachedCount++
+		form, err := common.ParseMultipartFormReusable(c)
+		require.NoError(t, err)
+		c.JSON(http.StatusOK, gin.H{
+			"model":      form.Value["model"],
+			"prompt":     form.Value["prompt"],
+			"tokenGroup": common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
+			"usingGroup": common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	missingNonce := performCreativeSessionMultipart(t, router, http.MethodPost, "/creative/relay/v1/videos", auth.cookies, nil, map[string]string{
+		"model":  "creative-model-05",
+		"prompt": "safe video prompt",
+	})
+	require.Equal(t, http.StatusForbidden, missingNonce.Code)
+	require.Equal(t, 0, relayReachedCount)
+
+	forbiddenHeaders := creativeSameOriginNonceHeaders(auth)
+	forbiddenHeaders["Idempotency-Key"] = "video-multipart-forbidden"
+	forbidden := performCreativeSessionMultipart(t, router, http.MethodPost, "/creative/relay/v1/videos", auth.cookies, forbiddenHeaders, map[string]string{
+		"model":   "creative-model-05",
+		"prompt":  "safe video prompt",
+		"baseUrl": "https://upstream.example",
+	})
+	require.Equal(t, http.StatusBadRequest, forbidden.Code)
+	require.Equal(t, 0, relayReachedCount)
+	forbiddenError := creativeResponseObject(t, decodeCreativeResponse(t, forbidden), "error")
+	require.Contains(t, forbiddenError["message"], "forbidden field baseUrl")
+
+	allowedHeaders := creativeSameOriginNonceHeaders(auth)
+	allowedHeaders["Idempotency-Key"] = "video-multipart-allowed"
+	allowed := performCreativeSessionMultipart(t, router, http.MethodPost, "/creative/relay/v1/videos", auth.cookies, allowedHeaders, map[string]string{
+		"model":  "creative-model-05",
+		"prompt": "safe video prompt",
+	})
+	require.Equal(t, http.StatusOK, allowed.Code)
+	require.Equal(t, 1, relayReachedCount)
+	payload := decodeCreativeResponse(t, allowed)
+	require.Equal(t, []any{"creative-model-05"}, payload["model"])
+	require.Equal(t, []any{"safe video prompt"}, payload["prompt"])
+	require.Equal(t, "default", payload["usingGroup"])
+	require.Equal(t, "default", payload["tokenGroup"])
+}
+
+func TestCreativeVideoRelayRejectsForbiddenMultipartFilePartNames(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 62)
+	seedCreativeControllerModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 62, func(c *gin.Context) {
+		relayReachedCount++
+		form, err := common.ParseMultipartFormReusable(c)
+		require.NoError(t, err)
+		c.JSON(http.StatusOK, gin.H{
+			"model": form.Value["model"],
+			"files": len(form.File),
+		})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	forbiddenHeaders := creativeSameOriginNonceHeaders(auth)
+	forbiddenHeaders["Idempotency-Key"] = "video-multipart-file-forbidden"
+	forbidden := performCreativeSessionMultipartWithFiles(t, router, http.MethodPost, "/creative/relay/v1/videos", auth.cookies, forbiddenHeaders, map[string]string{
+		"model":  "creative-model-05",
+		"prompt": "safe video prompt",
+	}, map[string]string{
+		"headers.Authorization": "Bearer leak",
+	})
+	require.Equal(t, http.StatusBadRequest, forbidden.Code)
+	require.Equal(t, 0, relayReachedCount)
+	forbiddenError := creativeResponseObject(t, decodeCreativeResponse(t, forbidden), "error")
+	require.Contains(t, forbiddenError["message"], "forbidden field headers.Authorization")
+
+	allowedHeaders := creativeSameOriginNonceHeaders(auth)
+	allowedHeaders["Idempotency-Key"] = "video-multipart-file-allowed"
+	allowed := performCreativeSessionMultipartWithFiles(t, router, http.MethodPost, "/creative/relay/v1/videos", auth.cookies, allowedHeaders, map[string]string{
+		"model":  "creative-model-05",
+		"prompt": "safe video prompt",
+	}, map[string]string{
+		"input_reference": "image-bytes",
+	})
+	require.Equal(t, http.StatusOK, allowed.Code)
+	require.Equal(t, 1, relayReachedCount)
+	payload := decodeCreativeResponse(t, allowed)
+	require.Equal(t, []any{"creative-model-05"}, payload["model"])
+	require.Equal(t, float64(1), payload["files"])
+}
+
+func TestCreativeRelayVideosUsesTemporarySessionTokenContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/creative/relay/v1/videos", strings.NewReader(`{"model":"creative-model-05","prompt":"safe"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", 62)
+	ctx.Set("group", "default")
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "vip")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "vip")
+
+	CreativeRelayVideos(ctx)
+
+	require.GreaterOrEqual(t, recorder.Code, http.StatusBadRequest)
+	require.Equal(t, 0, ctx.GetInt("token_id"))
+	require.Empty(t, ctx.GetString("token_key"))
+	require.Equal(t, "creative-session-broker-vip", ctx.GetString("token_name"))
+	require.Equal(t, false, ctx.GetBool("token_unlimited_quota"))
+	require.Equal(t, 0, ctx.GetInt("token_quota"))
+	require.Equal(t, "vip", common.GetContextKeyString(ctx, constant.ContextKeyTokenGroup))
+	require.NotContains(t, recorder.Body.String(), "apiKey")
+	require.NotContains(t, recorder.Body.String(), "sk-")
+}
+
+func TestCreativeRelayVideoHandlersRejectAccessTokenOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tt := range []struct {
+		name    string
+		method  string
+		target  string
+		params  gin.Params
+		handler gin.HandlerFunc
+	}{
+		{name: "submit", method: http.MethodPost, target: "/creative/relay/v1/videos", handler: CreativeRelayVideos},
+		{name: "fetch", method: http.MethodGet, target: "/creative/relay/v1/videos/task_abc", params: gin.Params{{Key: "task_id", Value: "task_abc"}}, handler: CreativeRelayVideoFetch},
+		{name: "content", method: http.MethodGet, target: "/creative/relay/v1/videos/task_abc/content", params: gin.Params{{Key: "task_id", Value: "task_abc"}}, handler: CreativeRelayVideoContent},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(tt.method, tt.target, strings.NewReader(`{"model":"creative-model-05"}`))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			ctx.Params = tt.params
+			ctx.Set("id", 63)
+			ctx.Set("group", "default")
+			ctx.Set("use_access_token", true)
+
+			tt.handler(ctx)
+
+			require.Equal(t, http.StatusForbidden, recorder.Code)
+			errorObject := creativeResponseObject(t, decodeCreativeResponse(t, recorder), "error")
+			require.Contains(t, errorObject["message"], "browser session")
+		})
+	}
+}
+
+func TestCreativeRelayVideoContentIsOwnerScoped(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}))
+	require.NoError(t, model.DB.Create(&model.Task{
+		TaskID:    "task_other_user",
+		UserId:    6502,
+		Status:    model.TaskStatusSuccess,
+		ChannelId: 1,
+	}).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/creative/relay/v1/videos/task_other_user/content", nil)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_other_user"}}
+	ctx.Set("id", 6501)
+	ctx.Set("group", "default")
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "default")
+
+	CreativeRelayVideoContent(ctx)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	errorObject := creativeResponseObject(t, decodeCreativeResponse(t, recorder), "error")
+	require.Contains(t, errorObject["message"], "Task not found")
+}
+
+func TestCreativeRelayVideoContentUsesStoredKeyAffinity(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}))
+	service.InitHttpClient()
+
+	var gotAuthorization string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		require.Equal(t, "/v1/videos/upstream_content/content", r.URL.Path)
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write([]byte("video-bytes"))
+	}))
+	t.Cleanup(upstream.Close)
+	upstreamURL, err := url.Parse(upstream.URL)
+	require.NoError(t, err)
+	fetchSetting := system_setting.GetFetchSetting()
+	previousAllowPrivateIP := fetchSetting.AllowPrivateIp
+	previousAllowedPorts := append([]string(nil), fetchSetting.AllowedPorts...)
+	fetchSetting.AllowPrivateIp = true
+	fetchSetting.AllowedPorts = append(fetchSetting.AllowedPorts, upstreamURL.Port())
+	t.Cleanup(func() {
+		fetchSetting.AllowPrivateIp = previousAllowPrivateIP
+		fetchSetting.AllowedPorts = previousAllowedPorts
+	})
+
+	baseURL := upstream.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      2,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "sk-fresh-random-key",
+		BaseURL: &baseURL,
+		Status:  common.ChannelStatusEnabled,
+		Name:    "content-affinity",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Task{
+		TaskID:    "task_content_affinity",
+		UserId:    6503,
+		Status:    model.TaskStatusSuccess,
+		ChannelId: 2,
+		Platform:  constant.TaskPlatform("openai"),
+		PrivateData: model.TaskPrivateData{
+			Key:            "sk-original-selected-key",
+			UpstreamTaskID: "upstream_content",
+		},
+	}).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/creative/relay/v1/videos/task_content_affinity/content", nil)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_content_affinity"}}
+	ctx.Set("id", 6503)
+	ctx.Set("group", "default")
+	ctx.Set(creativeVideoContentContextKey, true)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "default")
+
+	VideoProxy(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "Bearer sk-original-selected-key", gotAuthorization)
+	require.Equal(t, "video-bytes", recorder.Body.String())
+	require.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
+	require.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+}
+
+func TestCreativeVideoRelayRequiresSameOriginForGet(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 64)
+	seedCreativeControllerModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 64, func(c *gin.Context) {
+		relayReachedCount++
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	missingOrigin := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/videos/task_123", nil, auth.cookies, nil)
+	require.Equal(t, http.StatusForbidden, missingOrigin.Code)
+	require.Equal(t, 0, relayReachedCount)
+
+	crossHeaders := map[string]string{"Origin": "https://evil.example"}
+	crossOrigin := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/videos/task_123", nil, auth.cookies, crossHeaders)
+	require.Equal(t, http.StatusForbidden, crossOrigin.Code)
+	require.Equal(t, 0, relayReachedCount)
+
+	sameHeaders := map[string]string{"Origin": "http://example.com"}
+	sameOrigin := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/videos/task_123", nil, auth.cookies, sameHeaders)
+	require.Equal(t, http.StatusOK, sameOrigin.Code)
+	require.Equal(t, 1, relayReachedCount)
+}
+
+func TestCreativeVideoRelayGateDisablesBeforeSessionBroker(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 65)
+	seedCreativeControllerModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 65, func(c *gin.Context) {
+		relayReachedCount++
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	defer SetCreativeVideoRelayEnabledForTest(false)()
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "disabled-video-submit"
+
+	recorder := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/videos", map[string]any{"model": "creative-model-05", "prompt": "safe"}, auth.cookies, headers)
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	require.Equal(t, 0, relayReachedCount)
+}
+
+func TestCreativeVideoRelayRejectsBracketAndXRoutingOverrides(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 66)
+	seedCreativeControllerModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 66, func(c *gin.Context) {
+		relayReachedCount++
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	headerOverride := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/videos/task_123", nil, auth.cookies, map[string]string{
+		"Origin":        "http://example.com",
+		"X-Provider-Id": "provider-leak",
+	})
+	require.Equal(t, http.StatusBadRequest, headerOverride.Code)
+	require.Equal(t, 0, relayReachedCount)
+
+	upstreamHeaderOverride := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/videos/task_123", nil, auth.cookies, map[string]string{
+		"Origin":         "http://example.com",
+		"X-Upstream-Key": "upstream-key-leak",
+	})
+	require.Equal(t, http.StatusBadRequest, upstreamHeaderOverride.Code)
+	require.Equal(t, 0, relayReachedCount)
+
+	queryOverride := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/videos/task_123?headers[Authorization]=Bearer+leak", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusBadRequest, queryOverride.Code)
+	require.Equal(t, 0, relayReachedCount)
+
+	upstreamQueryOverride := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/videos/task_123?x_upstream_base_url=https://upstream.example", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusBadRequest, upstreamQueryOverride.Code)
+	require.Equal(t, 0, relayReachedCount)
+
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "nested-body-reject"
+	bodyOverride := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/videos", map[string]any{
+		"model":    "creative-model-05",
+		"prompt":   "safe",
+		"metadata": map[string]any{"request_headers.Authorization": "Bearer leak"},
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusBadRequest, bodyOverride.Code)
+	require.Equal(t, 0, relayReachedCount)
+}
+
+func TestCreativeVideoSubmitIdempotencyReplaysExistingTaskAndConflictsOnPayload(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 67)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	record, existed, err := model.PrepareCreativeVideoIdempotency(67, "idem-1", "hash-1")
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.NoError(t, model.DB.Create(&model.Task{TaskID: record.TaskID, UserId: 67, Status: model.TaskStatusSubmitted, ChannelId: 1, Platform: constant.TaskPlatform("sora")}).Error)
+
+	replay, existed, err := model.PrepareCreativeVideoIdempotency(67, "idem-1", "hash-1")
+	require.NoError(t, err)
+	require.True(t, existed)
+	require.Equal(t, record.TaskID, replay.TaskID)
+	require.Equal(t, "hash-1", replay.PayloadHash)
+
+	conflict, existed, err := model.PrepareCreativeVideoIdempotency(67, "idem-1", "hash-2")
+	require.NoError(t, err)
+	require.True(t, existed)
+	require.Equal(t, "hash-1", conflict.PayloadHash)
+}
+
+func TestCreativeVideoSubmitIdempotencyIsScopedByAction(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 69)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+
+	videoSubmit, existed, err := model.PrepareCreativeVideoIdempotencyScoped(69, "video.submit", "idem-shared", "hash-video")
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.Equal(t, "video.submit", videoSubmit.Scope)
+
+	statusRetry, existed, err := model.PrepareCreativeVideoIdempotencyScoped(69, "video.status", "idem-shared", "hash-status")
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.NotEqual(t, videoSubmit.TaskID, statusRetry.TaskID)
+	require.Equal(t, "video.status", statusRetry.Scope)
+
+	replay, existed, err := model.PrepareCreativeVideoIdempotencyScoped(69, "video.submit", "idem-shared", "hash-video")
+	require.NoError(t, err)
+	require.True(t, existed)
+	require.Equal(t, videoSubmit.TaskID, replay.TaskID)
+	require.Equal(t, "hash-video", replay.PayloadHash)
+}
+
+func TestCreativeVideoSubmitIdempotencyCleansRecordWhenSessionBrokerRejects(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 68)
+	seedCreativeControllerModelPool(t)
+
+	router := newCreativeRelayBrokerTestRouter(t, 68, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "session-broker-reject"
+
+	rejected := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/videos", map[string]any{
+		"model":  "creative-model-not-available",
+		"prompt": "safe video prompt",
+	}, auth.cookies, headers)
+
+	require.Equal(t, http.StatusForbidden, rejected.Code)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.CreativeVideoIdempotency{}).
+		Where("user_id = ? AND request_id = ?", 68, "session-broker-reject").
+		Count(&count).Error)
+	require.Equal(t, int64(0), count)
+}
+
 func TestCreativeImageRelayRejectsNonceAndForbiddenFieldsBeforeSessionBroker(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 59)
@@ -1184,7 +1636,7 @@ func setupCreativeControllerTestDB(t *testing.T) {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Ability{}, &model.CreativeModelPreference{}, &model.CreativeDocument{}, &model.CreativeAsset{}, &model.CreativeDocumentAssetRef{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Ability{}, &model.CreativeModelPreference{}, &model.CreativeDocument{}, &model.CreativeAsset{}, &model.CreativeDocumentAssetRef{}, &model.CreativeVideoIdempotency{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -1270,6 +1722,9 @@ func newCreativeRelayBrokerTestRouter(t *testing.T, userId int, relayHandler gin
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
+	restoreCreativeVideoGate := SetCreativeVideoRelayEnabledForTest(true)
+	t.Cleanup(restoreCreativeVideoGate)
+
 	router := gin.New()
 	router.Use(sessions.Sessions("session", cookie.NewStore([]byte("creative-relay-test-secret"))))
 	router.GET("/creative/api/bootstrap", func(c *gin.Context) {
@@ -1286,11 +1741,20 @@ func newCreativeRelayBrokerTestRouter(t *testing.T, userId int, relayHandler gin
 	relayRouter := router.Group("/creative/relay/v1")
 	relayRouter.Use(middleware.BodyStorageCleanup())
 	relayRouter.Use(middleware.CreativeSessionHeaderBridge(), middleware.UserAuth())
+	relayRouter.Use(middleware.CreativeRequireSameOrigin())
 	relayRouter.Use(middleware.CreativeRequireNonce())
 	relayRouter.Use(CreativeRejectForbiddenRelayFields())
-	relayRouter.Use(middleware.CreativeRelaySessionBroker())
-	relayRouter.POST("/chat/completions", relayHandler)
-	relayRouter.POST("/images/generations", relayHandler)
+	generalRelayRouter := relayRouter.Group("")
+	generalRelayRouter.Use(middleware.CreativeRelaySessionBroker())
+	generalRelayRouter.POST("/chat/completions", relayHandler)
+	generalRelayRouter.POST("/images/generations", relayHandler)
+	videoRelayRouter := relayRouter.Group("/videos")
+	videoRelayRouter.Use(CreativeVideoRelayGate())
+	videoRelayRouter.Use(CreativeVideoSubmitIdempotency())
+	videoRelayRouter.Use(middleware.CreativeRelaySessionBroker())
+	videoRelayRouter.POST("", relayHandler)
+	videoRelayRouter.GET("/:task_id", relayHandler)
+	videoRelayRouter.GET("/:task_id/content", relayHandler)
 	return router
 }
 
@@ -1335,6 +1799,40 @@ func performCreativeSessionJSON(t *testing.T, router *gin.Engine, method string,
 	require.NoError(t, err)
 	request := httptest.NewRequest(method, target, bytes.NewReader(encoded))
 	request.Header.Set("Content-Type", "application/json")
+	for _, sessionCookie := range cookies {
+		request.AddCookie(sessionCookie)
+	}
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func performCreativeSessionMultipart(t *testing.T, router *gin.Engine, method string, target string, cookies []*http.Cookie, headers map[string]string, fields map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	return performCreativeSessionMultipartWithFiles(t, router, method, target, cookies, headers, fields, nil)
+}
+
+func performCreativeSessionMultipartWithFiles(t *testing.T, router *gin.Engine, method string, target string, cookies []*http.Cookie, headers map[string]string, fields map[string]string, files map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for key, value := range fields {
+		require.NoError(t, writer.WriteField(key, value))
+	}
+	for key, value := range files {
+		part, err := writer.CreateFormFile(key, "test.txt")
+		require.NoError(t, err)
+		_, err = part.Write([]byte(value))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+	request := httptest.NewRequest(method, target, bytes.NewReader(body.Bytes()))
+	request.Header.Set("Content-Type", writer.FormDataContentType())
 	for _, sessionCookie := range cookies {
 		request.AddCookie(sessionCookie)
 	}

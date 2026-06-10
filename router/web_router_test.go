@@ -80,6 +80,28 @@ func TestSetWebRouterKeepsCreativeRoutesGinSafe(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, imageRelay.Code)
 	requireNoCreativeFixtureMarkersInText(t, imageRelay.Body.String(), "/creative/relay/v1/images/generations")
 
+	videoRelay := httptest.NewRecorder()
+	videoRelayRequest := httptest.NewRequest(http.MethodPost, "/creative/relay/v1/videos", strings.NewReader(`{"model":"sora-2","prompt":"draw"}`))
+	videoRelayRequest.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(videoRelay, videoRelayRequest)
+	require.Equal(t, http.StatusUnauthorized, videoRelay.Code)
+	requireNoCreativeFixtureMarkersInText(t, videoRelay.Body.String(), "/creative/relay/v1/videos")
+
+	videoFetch := httptest.NewRecorder()
+	engine.ServeHTTP(videoFetch, httptest.NewRequest(http.MethodGet, "/creative/relay/v1/videos/task_abc", nil))
+	require.Equal(t, http.StatusUnauthorized, videoFetch.Code)
+	requireNoCreativeFixtureMarkersInText(t, videoFetch.Body.String(), "/creative/relay/v1/videos/task_abc")
+
+	videoContent := httptest.NewRecorder()
+	engine.ServeHTTP(videoContent, httptest.NewRequest(http.MethodGet, "/creative/relay/v1/videos/task_abc/content", nil))
+	require.Equal(t, http.StatusUnauthorized, videoContent.Code)
+	requireNoCreativeFixtureMarkersInText(t, videoContent.Body.String(), "/creative/relay/v1/videos/task_abc/content")
+
+	doubleVersionVideo := httptest.NewRecorder()
+	engine.ServeHTTP(doubleVersionVideo, httptest.NewRequest(http.MethodPost, "/creative/relay/v1/v1/videos", strings.NewReader(`{"model":"sora-2"}`)))
+	require.Equal(t, http.StatusNotFound, doubleVersionVideo.Code)
+	requireNoCreativeFixtureMarkersInText(t, doubleVersionVideo.Body.String(), "/creative/relay/v1/v1/videos")
+
 	wrongMethodRelay := httptest.NewRecorder()
 	engine.ServeHTTP(wrongMethodRelay, httptest.NewRequest(http.MethodGet, "/creative/relay/v1/chat/completions", nil))
 	require.Equal(t, http.StatusNotFound, wrongMethodRelay.Code)

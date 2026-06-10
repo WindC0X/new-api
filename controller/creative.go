@@ -1,11 +1,15 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -19,6 +23,59 @@ import (
 )
 
 const creativeBrokerBaseURL = "/creative/relay/v1"
+
+const (
+	creativeVideoPublicTaskIDContextKey   = "creative_video_public_task_id"
+	creativeVideoIdempotencyKeyContextKey = "creative_video_idempotency_key"
+	creativeVideoContentContextKey        = "creative_video_content"
+)
+
+var creativeVideoRelayEnabled atomic.Bool
+
+func init() {
+	creativeVideoRelayEnabled.Store(loadCreativeVideoRelayEnabledFromEnv())
+}
+
+func loadCreativeVideoRelayEnabledFromEnv() bool {
+	return common.GetEnvOrDefaultBool("CREATIVE_VIDEO_RELAY_ENABLED", false)
+}
+
+func SetCreativeVideoRelayEnabledForTest(enabled bool) func() {
+	previous := creativeVideoRelayEnabled.Load()
+	creativeVideoRelayEnabled.Store(enabled)
+	return func() { creativeVideoRelayEnabled.Store(previous) }
+}
+
+func CreativeVideoRelayGate() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !creativeVideoRelayEnabled.Load() {
+			creativeOpenAIError(c, http.StatusNotFound, "creative video relay is disabled")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+func CreativeVideoSubmitIdempotency() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method == http.MethodPost {
+			if !creativePrepareVideoSubmitIdempotency(c) {
+				return
+			}
+			requestID := c.GetString(creativeVideoIdempotencyKeyContextKey)
+			userID := c.GetInt("id")
+			c.Next()
+			if requestID != "" && c.Writer.Status() >= http.StatusBadRequest {
+				if err := model.DeleteCreativeVideoIdempotency(userID, requestID); err != nil {
+					common.SysError("cleanup failed creative video idempotency error: " + err.Error())
+				}
+			}
+			return
+		}
+		c.Next()
+	}
+}
 
 func CreativeBootstrap(c *gin.Context) {
 	if !creativeRequireSession(c) {
@@ -360,22 +417,30 @@ func CreativeDeleteDocument(c *gin.Context) {
 
 func CreativeRejectForbiddenRelayFields() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if strings.TrimSpace(c.GetHeader("Authorization")) != "" {
-			creativeOpenAIError(c, http.StatusBadRequest, "forbidden field Authorization")
-			c.Abort()
-			return
-		}
-		payload, err := creativeReadJSONMap(c)
-		if err != nil {
-			creativeOpenAIError(c, http.StatusBadRequest, err.Error())
-			c.Abort()
-			return
-		}
-		if field, forbidden := containsCreativeForbiddenField(payload); forbidden {
+		if field, forbidden := creativeForbiddenRelayHeader(c); forbidden {
 			creativeOpenAIError(c, http.StatusBadRequest, "forbidden field "+field)
 			c.Abort()
 			return
 		}
+
+		if field, forbidden := creativeForbiddenRelayQuery(c); forbidden {
+			creativeOpenAIError(c, http.StatusBadRequest, "forbidden field "+field)
+			c.Abort()
+			return
+		}
+
+		if creativeUnsafeMethod(c.Request.Method) {
+			if field, err := creativeForbiddenRelayBodyField(c); err != nil {
+				creativeOpenAIError(c, http.StatusBadRequest, err.Error())
+				c.Abort()
+				return
+			} else if field != "" {
+				creativeOpenAIError(c, http.StatusBadRequest, "forbidden field "+field)
+				c.Abort()
+				return
+			}
+		}
+
 		c.Next()
 	}
 }
@@ -388,10 +453,39 @@ func CreativeRelayImagesGenerations(c *gin.Context) {
 	creativeRelayWithSessionBroker(c, types.RelayFormatOpenAIImage)
 }
 
+func CreativeRelayVideos(c *gin.Context) {
+	if !creativeSetupSessionBrokerToken(c) {
+		return
+	}
+	RelayTask(c)
+}
+
+func CreativeRelayVideoFetch(c *gin.Context) {
+	if !creativeSetupSessionBrokerToken(c) {
+		return
+	}
+	RelayTaskFetch(c)
+}
+
+func CreativeRelayVideoContent(c *gin.Context) {
+	if !creativeSetupSessionBrokerToken(c) {
+		return
+	}
+	c.Set(creativeVideoContentContextKey, true)
+	VideoProxy(c)
+}
+
 func creativeRelayWithSessionBroker(c *gin.Context, relayFormat types.RelayFormat) {
+	if !creativeSetupSessionBrokerToken(c) {
+		return
+	}
+	Relay(c, relayFormat)
+}
+
+func creativeSetupSessionBrokerToken(c *gin.Context) bool {
 	if c.GetBool("use_access_token") {
 		creativeOpenAIError(c, http.StatusForbidden, "creative relay requires a browser session")
-		return
+		return false
 	}
 	usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	if usingGroup == "" {
@@ -405,9 +499,72 @@ func creativeRelayWithSessionBroker(c *gin.Context, relayFormat types.RelayForma
 	}
 	if err := middleware.SetupContextForToken(c, tempToken); err != nil {
 		creativeOpenAIError(c, http.StatusForbidden, err.Error())
-		return
+		return false
 	}
-	Relay(c, relayFormat)
+	return true
+}
+
+func creativePrepareVideoSubmitIdempotency(c *gin.Context) bool {
+	requestID := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if requestID == "" {
+		requestID = strings.TrimSpace(c.GetHeader("X-Creative-Request-Id"))
+	}
+	if requestID == "" {
+		creativeOpenAIError(c, http.StatusBadRequest, "creative video submit requires Idempotency-Key")
+		c.Abort()
+		return false
+	}
+	if len(requestID) > 128 {
+		creativeOpenAIError(c, http.StatusBadRequest, "Idempotency-Key is too long")
+		c.Abort()
+		return false
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		creativeOpenAIError(c, http.StatusBadRequest, err.Error())
+		c.Abort()
+		return false
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		creativeOpenAIError(c, http.StatusBadRequest, err.Error())
+		c.Abort()
+		return false
+	}
+	if _, seekErr := storage.Seek(0, io.SeekStart); seekErr == nil {
+		c.Request.Body = io.NopCloser(storage)
+	}
+	sum := sha256.Sum256(body)
+	payloadHash := hex.EncodeToString(sum[:])
+	record, existed, err := model.PrepareCreativeVideoIdempotency(c.GetInt("id"), requestID, payloadHash)
+	if err != nil {
+		creativeOpenAIError(c, http.StatusInternalServerError, "failed to prepare idempotency record")
+		c.Abort()
+		return false
+	}
+	if existed {
+		if record.PayloadHash != payloadHash {
+			creativeOpenAIError(c, http.StatusConflict, "Idempotency-Key conflicts with a different payload")
+			c.Abort()
+			return false
+		}
+		if strings.TrimSpace(record.TaskID) == "" {
+			creativeOpenAIError(c, http.StatusConflict, "creative video request is still being prepared")
+			c.Abort()
+			return false
+		}
+		if task, ok, taskErr := model.GetByTaskId(c.GetInt("id"), record.TaskID); taskErr == nil && ok && task != nil {
+			c.JSON(http.StatusOK, task.ToOpenAIVideo())
+			c.Abort()
+			return false
+		}
+		creativeOpenAIError(c, http.StatusConflict, "creative video request is still being prepared")
+		c.Abort()
+		return false
+	}
+	c.Set(creativeVideoPublicTaskIDContextKey, record.TaskID)
+	c.Set(creativeVideoIdempotencyKeyContextKey, requestID)
+	return true
 }
 
 func creativeModelsForUser(c *gin.Context) ([]dto.OpenAIModels, string, error) {
@@ -479,6 +636,148 @@ func creativeReadJSONMap(c *gin.Context) (map[string]any, error) {
 	return payload, nil
 }
 
+func creativeUnsafeMethod(method string) bool {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	default:
+		return true
+	}
+}
+
+func creativeForbiddenRelayHeader(c *gin.Context) (string, bool) {
+	if c == nil || c.Request == nil {
+		return "", false
+	}
+	for key, values := range c.Request.Header {
+		if !creativeForbiddenRelayHeaderKey(key) {
+			continue
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				return key, true
+			}
+		}
+	}
+	return "", false
+}
+
+func creativeForbiddenRelayQuery(c *gin.Context) (string, bool) {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return "", false
+	}
+	for key, values := range c.Request.URL.Query() {
+		if !creativeForbiddenRelayQueryKey(key) {
+			continue
+		}
+		_ = values
+		return key, true
+	}
+	return "", false
+}
+
+func creativeForbiddenRelayBodyField(c *gin.Context) (string, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return "", err
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if _, seekErr := storage.Seek(0, io.SeekStart); seekErr == nil {
+			c.Request.Body = io.NopCloser(storage)
+		}
+	}()
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return "", nil
+	}
+
+	contentType := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type")))
+	switch {
+	case strings.Contains(contentType, "multipart/form-data"):
+		form, err := common.ParseMultipartFormReusable(c)
+		if err != nil {
+			return "", err
+		}
+		defer form.RemoveAll()
+		for key := range form.Value {
+			if creativeForbiddenRelayFormKey(key) {
+				return key, nil
+			}
+		}
+		for key := range form.File {
+			if creativeForbiddenRelayFileKey(key) {
+				return key, nil
+			}
+		}
+		return "", nil
+	case strings.Contains(contentType, "application/x-www-form-urlencoded"):
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return "", err
+		}
+		for key := range values {
+			if creativeForbiddenRelayFormKey(key) {
+				return key, nil
+			}
+		}
+		return "", nil
+	case strings.Contains(contentType, "json") || contentType == "":
+		payload, err := creativeReadJSONMap(c)
+		if err != nil {
+			return "", err
+		}
+		if field, forbidden := containsCreativeForbiddenRelayBodyField(payload); forbidden {
+			return field, nil
+		}
+		return "", nil
+	default:
+		return "", nil
+	}
+}
+
+func containsCreativeForbiddenRelayBodyField(value any) (string, bool) {
+	return containsCreativeForbiddenRelayBodyFieldAt(value, "")
+}
+
+func containsCreativeForbiddenRelayBodyFieldAt(value any, path string) (string, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			childPath := key
+			if path != "" {
+				childPath = path + "." + key
+			}
+			if creativeForbiddenRelayBodyKey(key, path == "") {
+				return childPath, true
+			}
+			if found, ok := containsCreativeForbiddenRelayBodyFieldAt(child, childPath); ok {
+				return found, true
+			}
+		}
+	case []any:
+		for i, child := range typed {
+			childPath := fmt.Sprintf("%s[%d]", path, i)
+			if path == "" {
+				childPath = fmt.Sprintf("[%d]", i)
+			}
+			if found, ok := containsCreativeForbiddenRelayBodyFieldAt(child, childPath); ok {
+				return found, true
+			}
+		}
+	case string:
+		if creativeStringLooksLikeSecret(typed) {
+			if path == "" {
+				return "value", true
+			}
+			return path, true
+		}
+	}
+	return "", false
+}
+
 func containsCreativeForbiddenField(value any) (string, bool) {
 	return containsCreativeForbiddenFieldAt(value, "")
 }
@@ -532,6 +831,106 @@ func creativeForbiddenKey(key string) bool {
 	default:
 		return false
 	}
+}
+
+func creativeForbiddenRelayHeaderKey(key string) bool {
+	normalized := creativeNormalizeRelayFieldName(key)
+	if strings.Contains(normalized, "apikey") ||
+		strings.Contains(normalized, "authorization") ||
+		strings.Contains(normalized, "baseurl") ||
+		strings.HasSuffix(normalized, "token") {
+		return true
+	}
+	return creativeForbiddenRelayBodyNormalizedKey(normalized)
+}
+
+func creativeForbiddenRelayQueryKey(key string) bool {
+	return creativeForbiddenRelayFieldPathKey(key, false)
+}
+
+func creativeForbiddenRelayFormKey(key string) bool {
+	return creativeForbiddenRelayFieldPathKey(key, true)
+}
+
+func creativeForbiddenRelayFileKey(key string) bool {
+	return creativeForbiddenRelayFieldPathKey(key, false)
+}
+
+func creativeForbiddenRelayBodyKey(key string, topLevel bool) bool {
+	return creativeForbiddenRelayFieldPathKey(key, topLevel)
+}
+
+func creativeForbiddenRelayFieldPathKey(key string, allowTopLevelModel bool) bool {
+	normalized := creativeNormalizeRelayFieldName(key)
+	if allowTopLevelModel && normalized == "model" {
+		return false
+	}
+	if creativeForbiddenRelayBodyNormalizedKey(normalized) {
+		return true
+	}
+	for _, segment := range creativeRelayFieldSegments(key) {
+		if allowTopLevelModel && segment == "model" && len(creativeRelayFieldSegments(key)) == 1 {
+			continue
+		}
+		if creativeForbiddenRelayBodyNormalizedKey(segment) {
+			return true
+		}
+	}
+	return false
+}
+
+func creativeForbiddenRelayBodyNormalizedKey(normalized string) bool {
+	if normalized == "" {
+		return false
+	}
+	if strings.HasPrefix(normalized, "upstream") ||
+		strings.HasPrefix(strings.TrimPrefix(normalized, "x"), "upstream") ||
+		strings.Contains(normalized, "apikey") ||
+		strings.Contains(normalized, "accesstoken") {
+		return true
+	}
+	switch normalized {
+	case "apikey", "apikeys", "apitoken", "key", "authorization", "proxyauthorization", "bearer", "bearertoken",
+		"baseurl", "xbaseurl", "upstreambaseurl", "provider", "xprovider", "providerid", "xproviderid", "providername", "xprovidername", "provideroverride", "xprovideroverride", "providertype",
+		"channel", "xchannel", "channelid", "xchannelid", "channeloverride", "xchanneloverride", "channeltype",
+		"group", "xgroup", "groupid", "xgroupid", "model", "xmodel", "modelid", "xmodelid", "modeloverride", "xmodeloverride",
+		"endpoint", "xendpoint", "url", "xurl", "proxy", "xproxy", "headers", "requestheaders",
+		"token", "xtoken", "accesstoken", "xaccesstoken", "refreshtoken", "idtoken", "internaltoken",
+		"secret", "secretkey", "sourceurl", "objectkey", "bucketurl", "signedurl",
+		"presignedurl", "accesskeyid", "secretaccesskey", "s3endpoint", "storagebackend", "organization", "openaiorganization":
+		return true
+	default:
+		return false
+	}
+}
+
+func creativeRelayFieldSegments(key string) []string {
+	parts := strings.FieldsFunc(key, func(r rune) bool {
+		switch r {
+		case '.', '[', ']', '(', ')', '{', '}', '/', '\\', ':', ';', ',', ' ', '\t', '\n', '\r':
+			return true
+		default:
+			return false
+		}
+	})
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		segment := creativeNormalizeRelayFieldName(part)
+		if segment != "" {
+			segments = append(segments, segment)
+		}
+	}
+	return segments
+}
+
+func creativeNormalizeRelayFieldName(key string) string {
+	var builder strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(key)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
 
 func creativeStringLooksLikeSecret(value string) bool {

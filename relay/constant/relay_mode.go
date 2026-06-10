@@ -24,6 +24,7 @@ const (
 	RelayModeMidjourneyTaskFetch
 	RelayModeMidjourneyTaskImageSeed
 	RelayModeMidjourneyTaskFetchByCondition
+	RelayModeMidjourneyImage
 	RelayModeMidjourneyAction
 	RelayModeMidjourneyModal
 	RelayModeMidjourneyShorten
@@ -97,7 +98,9 @@ func Path2RelayMode(path string) int {
 		relayMode = RelayModeRealtime
 	} else if strings.HasPrefix(path, "/v1beta/models") || strings.HasPrefix(path, "/v1/models") {
 		relayMode = RelayModeGemini
-	} else if strings.HasPrefix(path, "/mj") {
+	} else if strings.HasPrefix(path, "/mj") ||
+		strings.HasPrefix(path, "/v1/mj") ||
+		strings.HasPrefix(path, "/creative/relay/v1/mj") {
 		relayMode = Path2RelayModeMidjourney(path)
 	}
 	return relayMode
@@ -142,6 +145,8 @@ func Path2RelayModeMidjourney(path string) int {
 		relayMode = RelayModeMidjourneyTaskImageSeed
 	} else if strings.HasSuffix(path, "/list-by-condition") {
 		relayMode = RelayModeMidjourneyTaskFetchByCondition
+	} else if strings.Contains(path, "/mj/image/") {
+		relayMode = RelayModeMidjourneyImage
 	}
 	return relayMode
 }

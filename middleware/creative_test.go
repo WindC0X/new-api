@@ -86,6 +86,76 @@ func TestCreativeSunoDistributorReadsActionModelAndRelayMode(t *testing.T) {
 	require.Equal(t, relayconstant.RelayModeSunoSubmit, ctx.GetInt("relay_mode"))
 }
 
+func TestCreativeMJDistributorReadsImagineModelAndRelayMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/creative/relay/v1/mj/submit/imagine", strings.NewReader(`{"prompt":"safe image prompt"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	req, shouldSelectChannel, err := getModelRequest(ctx)
+
+	require.NoError(t, err)
+	require.True(t, shouldSelectChannel)
+	require.Equal(t, "mj_imagine", req.Model)
+	require.Equal(t, relayconstant.RelayModeMidjourneyImagine, ctx.GetInt("relay_mode"))
+}
+
+func TestCreativeMJDistributorDoesNotSelectChannelForFetchOrImage(t *testing.T) {
+	tests := []struct {
+		name     string
+		method   string
+		path     string
+		wantMode int
+		paramKey string
+		paramVal string
+		body     string
+	}{
+		{
+			name:     "fetch",
+			method:   http.MethodGet,
+			path:     "/creative/relay/v1/mj/task/task_abc/fetch",
+			wantMode: relayconstant.RelayModeMidjourneyTaskFetch,
+			paramKey: "task_id",
+			paramVal: "task_abc",
+		},
+		{
+			name:     "image",
+			method:   http.MethodGet,
+			path:     "/creative/relay/v1/mj/image/task_abc",
+			wantMode: relayconstant.RelayModeMidjourneyImage,
+			paramKey: "task_id",
+			paramVal: "task_abc",
+		},
+		{
+			name:     "list",
+			method:   http.MethodPost,
+			path:     "/creative/relay/v1/mj/task/list-by-condition",
+			wantMode: relayconstant.RelayModeMidjourneyTaskFetchByCondition,
+			body:     `{"ids":["task_abc"]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			if tt.paramKey != "" {
+				ctx.Params = gin.Params{{Key: tt.paramKey, Value: tt.paramVal}}
+			}
+
+			req, shouldSelectChannel, err := getModelRequest(ctx)
+
+			require.NoError(t, err)
+			require.False(t, shouldSelectChannel)
+			require.Empty(t, req.Model)
+			require.Equal(t, tt.wantMode, ctx.GetInt("relay_mode"))
+		})
+	}
+}
+
 func TestCreativeVideoDistributorReadsSubmitModelAndRelayMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

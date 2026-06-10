@@ -139,7 +139,9 @@ func TaskPollingLoop() {
 func DispatchPlatformUpdate(platform constant.TaskPlatform, taskChannelM map[int][]string, taskM map[string]*model.Task) {
 	switch platform {
 	case constant.TaskPlatformMidjourney:
-		// MJ 轮询由其自身处理，这里预留入口
+		if err := UpdateVideoTasks(context.Background(), platform, taskChannelM, taskM); err != nil {
+			common.SysLog(fmt.Sprintf("UpdateMidjourneyTasks fail: %s", err))
+		}
 	case constant.TaskPlatformSuno:
 		_ = UpdateSunoTasks(context.Background(), taskChannelM, taskM)
 	default:
@@ -545,11 +547,19 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			task.FinishTime = now
 		}
 		if strings.HasPrefix(taskResult.Url, "data:") {
-			// data: URI (e.g. Vertex base64 encoded video) — keep in Data, not in ResultURL
-			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
+			if task.Platform == constant.TaskPlatformMidjourney {
+				// Creative MJ only exposes the owner-scoped image proxy when an image URL exists.
+				task.PrivateData.ResultURL = ""
+			} else {
+				// data: URI (e.g. Vertex base64 encoded video) — keep in Data, not in ResultURL
+				task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
+			}
 		} else if taskResult.Url != "" {
 			// Direct upstream URL (e.g. Kling, Ali, Doubao, etc.)
 			task.PrivateData.ResultURL = taskResult.Url
+		} else if task.Platform == constant.TaskPlatformMidjourney {
+			// Do not synthesize a generic /v1/videos proxy for MJ image tasks.
+			task.PrivateData.ResultURL = ""
 		} else {
 			// No URL from adaptor — construct proxy URL using public task ID
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)

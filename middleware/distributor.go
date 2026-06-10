@@ -242,7 +242,8 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		if relayMode == relayconstant.RelayModeMidjourneyTaskFetch ||
 			relayMode == relayconstant.RelayModeMidjourneyTaskFetchByCondition ||
 			relayMode == relayconstant.RelayModeMidjourneyNotify ||
-			relayMode == relayconstant.RelayModeMidjourneyTaskImageSeed {
+			relayMode == relayconstant.RelayModeMidjourneyTaskImageSeed ||
+			relayMode == relayconstant.RelayModeMidjourneyImage {
 			shouldSelectChannel = false
 		} else {
 			midjourneyRequest := dto.MidjourneyRequest{}

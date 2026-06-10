@@ -16,8 +16,11 @@ import (
 )
 
 type recordingVideoPollingAdaptor struct {
-	key  string
-	body map[string]any
+	key          string
+	body         map[string]any
+	responseBody string
+	result       *relaycommon.TaskInfo
+	adjustQuota  int
 }
 
 func (a *recordingVideoPollingAdaptor) Init(info *relaycommon.RelayInfo) {}
@@ -25,16 +28,24 @@ func (a *recordingVideoPollingAdaptor) Init(info *relaycommon.RelayInfo) {}
 func (a *recordingVideoPollingAdaptor) FetchTask(baseURL string, key string, body map[string]any, proxy string) (*http.Response, error) {
 	a.key = key
 	a.body = body
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Body: io.NopCloser(strings.NewReader(`{
+	responseBody := a.responseBody
+	if responseBody == "" {
+		responseBody = `{
 			"status": "IN_PROGRESS",
 			"progress": "50%"
-		}`)),
+		}`
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(responseBody)),
 	}, nil
 }
 
 func (a *recordingVideoPollingAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
+	if a.result != nil {
+		result := *a.result
+		return &result, nil
+	}
 	return &relaycommon.TaskInfo{
 		Status:   model.TaskStatusInProgress,
 		Progress: "50%",
@@ -42,7 +53,7 @@ func (a *recordingVideoPollingAdaptor) ParseTaskResult(body []byte) (*relaycommo
 }
 
 func (a *recordingVideoPollingAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
-	return 0
+	return a.adjustQuota
 }
 
 func TestUpdateVideoSingleTaskUsesStoredChannelKeyAffinity(t *testing.T) {
@@ -185,6 +196,254 @@ func TestUpdateSunoTasksGroupsByStoredKeyAndUsesChannelBaseURL(t *testing.T) {
 	}
 	require.Equal(t, []string{"upstream_suno_a"}, seen["sk-selected-a"])
 	require.Equal(t, []string{"upstream_suno_b"}, seen["sk-selected-b"])
+}
+
+func TestDispatchPlatformUpdateForMidjourneyUsesGenericStoredKeyAffinity(t *testing.T) {
+	truncate(t)
+
+	const userID, tokenID, channelID = 906, 906, 906
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-token", 5000)
+	baseURL := "https://mj-upstream.example"
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Name:    "mj-multi-key",
+		Key:     "sk-fresh-mj-key",
+		BaseURL: &baseURL,
+		Status:  common.ChannelStatusEnabled,
+		Type:    constant.ChannelTypeMidjourney,
+	}).Error)
+
+	task := makeTask(userID, channelID, 1000, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_public_mj_affinity"
+	task.Platform = constant.TaskPlatformMidjourney
+	task.Action = constant.MjActionImagine
+	task.PrivateData.UpstreamTaskID = "upstream_mj_affinity"
+	task.PrivateData.Key = "sk-selected-mj-key"
+	task.Status = model.TaskStatusSubmitted
+	require.NoError(t, model.DB.Create(task).Error)
+
+	adaptor := &recordingVideoPollingAdaptor{}
+	originalGetTaskAdaptor := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(platform constant.TaskPlatform) TaskPollingAdaptor {
+		require.Equal(t, constant.TaskPlatform(constant.TaskPlatformMidjourney), platform)
+		return adaptor
+	}
+	t.Cleanup(func() { GetTaskAdaptorFunc = originalGetTaskAdaptor })
+
+	DispatchPlatformUpdate(constant.TaskPlatformMidjourney, map[int][]string{
+		channelID: []string{"upstream_mj_affinity"},
+	}, map[string]*model.Task{
+		"upstream_mj_affinity": task,
+	})
+
+	require.Equal(t, "sk-selected-mj-key", adaptor.key)
+	require.Equal(t, "upstream_mj_affinity", adaptor.body["task_id"])
+	require.Equal(t, constant.MjActionImagine, adaptor.body["action"])
+}
+
+func TestUpdateMidjourneySingleTaskSuccessWithoutImageURLLeavesResultURLEmpty(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, channelID = 907, 907
+	seedUser(t, userID, 10000)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, 0, 0, BillingSourceWallet, 0)
+	task.TaskID = "task_public_mj_no_image"
+	task.Platform = constant.TaskPlatformMidjourney
+	task.Action = constant.MjActionImagine
+	task.PrivateData.UpstreamTaskID = "upstream_mj_no_image"
+	task.PrivateData.Key = "sk-selected-mj-key"
+	task.Status = model.TaskStatusInProgress
+	require.NoError(t, model.DB.Create(task).Error)
+
+	adaptor := &recordingVideoPollingAdaptor{
+		responseBody: `{"id":"upstream_mj_no_image","status":"SUCCESS","progress":"100%"}`,
+		result: &relaycommon.TaskInfo{
+			TaskID:   "upstream_mj_no_image",
+			Status:   model.TaskStatusSuccess,
+			Progress: "100%",
+		},
+	}
+
+	err := updateVideoSingleTask(ctx, adaptor, &model.Channel{
+		Id:     channelID,
+		Key:    "sk-fresh-mj-key",
+		Status: common.ChannelStatusEnabled,
+		Type:   constant.ChannelTypeMidjourney,
+	}, "upstream_mj_no_image", map[string]*model.Task{
+		"upstream_mj_no_image": task,
+	})
+
+	require.NoError(t, err)
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.Equal(t, model.TaskStatusSuccess, string(reloaded.Status))
+	require.Empty(t, reloaded.PrivateData.ResultURL)
+	require.NotContains(t, reloaded.PrivateData.ResultURL, "/v1/videos/")
+}
+
+func TestUpdateMidjourneySingleTaskFailureRefundsOnlyCASWinner(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 908, 908, 908
+	const initQuota, preConsumed, tokenRemain = 10000, 2000, 5000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_public_mj_cas_refund"
+	task.Platform = constant.TaskPlatformMidjourney
+	task.Action = constant.MjActionImagine
+	task.PrivateData.UpstreamTaskID = "upstream_mj_cas_refund"
+	task.PrivateData.Key = "sk-selected-mj-key"
+	task.Status = model.TaskStatusInProgress
+	require.NoError(t, model.DB.Create(task).Error)
+
+	var first model.Task
+	require.NoError(t, model.DB.First(&first, task.ID).Error)
+	var second model.Task
+	require.NoError(t, model.DB.First(&second, task.ID).Error)
+
+	adaptor := &recordingVideoPollingAdaptor{
+		responseBody: `{"id":"upstream_mj_cas_refund","status":"FAILURE","failReason":"upstream failed"}`,
+		result: &relaycommon.TaskInfo{
+			TaskID: "upstream_mj_cas_refund",
+			Status: model.TaskStatusFailure,
+			Reason: "upstream failed",
+		},
+	}
+	channel := &model.Channel{
+		Id:     channelID,
+		Key:    "sk-fresh-mj-key",
+		Status: common.ChannelStatusEnabled,
+		Type:   constant.ChannelTypeMidjourney,
+	}
+
+	require.NoError(t, updateVideoSingleTask(ctx, adaptor, channel, "upstream_mj_cas_refund", map[string]*model.Task{
+		"upstream_mj_cas_refund": &first,
+	}))
+	require.NoError(t, updateVideoSingleTask(ctx, adaptor, channel, "upstream_mj_cas_refund", map[string]*model.Task{
+		"upstream_mj_cas_refund": &second,
+	}))
+
+	require.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	require.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	require.Equal(t, int64(1), countLogs(t))
+}
+
+func TestUpdateMidjourneySingleTaskSubscriptionFailureRefundsOnlyCASWinner(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID, subscriptionID = 909, 909, 909, 909
+	const preConsumed, tokenRemain = 3000, 7000
+	const subscriptionUsed int64 = 50000
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-token", tokenRemain)
+	seedChannel(t, channelID)
+	seedSubscription(t, subscriptionID, userID, 100000, subscriptionUsed)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subscriptionID)
+	task.TaskID = "task_public_mj_sub_cas_refund"
+	task.Platform = constant.TaskPlatformMidjourney
+	task.Action = constant.MjActionImagine
+	task.PrivateData.UpstreamTaskID = "upstream_mj_sub_cas_refund"
+	task.PrivateData.Key = "sk-selected-mj-key"
+	task.Status = model.TaskStatusInProgress
+	require.NoError(t, model.DB.Create(task).Error)
+
+	var first model.Task
+	require.NoError(t, model.DB.First(&first, task.ID).Error)
+	var second model.Task
+	require.NoError(t, model.DB.First(&second, task.ID).Error)
+
+	adaptor := &recordingVideoPollingAdaptor{
+		responseBody: `{"id":"upstream_mj_sub_cas_refund","status":"FAILURE","failReason":"subscription upstream failed"}`,
+		result: &relaycommon.TaskInfo{
+			TaskID: "upstream_mj_sub_cas_refund",
+			Status: model.TaskStatusFailure,
+			Reason: "subscription upstream failed",
+		},
+	}
+	channel := &model.Channel{
+		Id:     channelID,
+		Key:    "sk-fresh-mj-key",
+		Status: common.ChannelStatusEnabled,
+		Type:   constant.ChannelTypeMidjourney,
+	}
+
+	require.NoError(t, updateVideoSingleTask(ctx, adaptor, channel, "upstream_mj_sub_cas_refund", map[string]*model.Task{
+		"upstream_mj_sub_cas_refund": &first,
+	}))
+	require.NoError(t, updateVideoSingleTask(ctx, adaptor, channel, "upstream_mj_sub_cas_refund", map[string]*model.Task{
+		"upstream_mj_sub_cas_refund": &second,
+	}))
+
+	require.Equal(t, subscriptionUsed-int64(preConsumed), getSubscriptionUsed(t, subscriptionID))
+	require.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	require.Equal(t, int64(1), countLogs(t))
+}
+
+func TestUpdateMidjourneySingleTaskSuccessSettlesOnlyCASWinner(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 910, 910, 910
+	const initQuota, preConsumed, actualQuota, tokenRemain = 10000, 3000, 1000, 7000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_public_mj_cas_settle"
+	task.Platform = constant.TaskPlatformMidjourney
+	task.Action = constant.MjActionImagine
+	task.PrivateData.UpstreamTaskID = "upstream_mj_cas_settle"
+	task.PrivateData.Key = "sk-selected-mj-key"
+	task.Status = model.TaskStatusInProgress
+	require.NoError(t, model.DB.Create(task).Error)
+
+	var first model.Task
+	require.NoError(t, model.DB.First(&first, task.ID).Error)
+	var second model.Task
+	require.NoError(t, model.DB.First(&second, task.ID).Error)
+
+	adaptor := &recordingVideoPollingAdaptor{
+		responseBody: `{"id":"upstream_mj_cas_settle","status":"SUCCESS","progress":"100%","imageUrl":"https://cdn.example/mj.png"}`,
+		result: &relaycommon.TaskInfo{
+			TaskID:   "upstream_mj_cas_settle",
+			Status:   model.TaskStatusSuccess,
+			Progress: "100%",
+			Url:      "https://cdn.example/mj.png",
+		},
+		adjustQuota: actualQuota,
+	}
+	channel := &model.Channel{
+		Id:     channelID,
+		Key:    "sk-fresh-mj-key",
+		Status: common.ChannelStatusEnabled,
+		Type:   constant.ChannelTypeMidjourney,
+	}
+
+	require.NoError(t, updateVideoSingleTask(ctx, adaptor, channel, "upstream_mj_cas_settle", map[string]*model.Task{
+		"upstream_mj_cas_settle": &first,
+	}))
+	require.NoError(t, updateVideoSingleTask(ctx, adaptor, channel, "upstream_mj_cas_settle", map[string]*model.Task{
+		"upstream_mj_cas_settle": &second,
+	}))
+
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.EqualValues(t, model.TaskStatusSuccess, reloaded.Status)
+	require.Equal(t, "https://cdn.example/mj.png", reloaded.PrivateData.ResultURL)
+	require.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
+	require.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
+	require.Equal(t, int64(1), countLogs(t))
 }
 
 func TestUpdateSunoTaskFromResponseRefundsOnlyCASWinner(t *testing.T) {

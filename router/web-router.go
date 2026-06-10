@@ -99,6 +99,24 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 		creativeSunoRelayRouter.POST("/submit/:action", controller.CreativeSunoSubmitGuard(), middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoSubmit)
 		creativeSunoRelayRouter.GET("/fetch/:id", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
 		creativeSunoRelayRouter.POST("/fetch", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
+
+		creativeMJRelayRouter := creativeRelayRouter.Group("/mj")
+		creativeMJRelayRouter.POST("/submit/imagine", controller.CreativeMJSubmitImagineGuard(), middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJSubmitImagine)
+		creativeMJRelayRouter.GET("/task/:task_id/fetch", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJFetch)
+		creativeMJRelayRouter.POST("/task/list-by-condition", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJListByCondition)
+		creativeMJRelayRouter.GET("/image/:task_id", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJImage)
+		creativeMJRelayRouter.POST("/submit/action", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/change", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/simple-change", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/modal", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/shorten", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/blend", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/describe", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/edits", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/video", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/upload-discord-images", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/insight-face/swap", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.GET("/task/:task_id/image-seed", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
 	}
 
 	serveCreative := func(c *gin.Context) {

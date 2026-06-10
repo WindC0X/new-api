@@ -24,3 +24,10 @@ func TestRelayModeVideosMapsCanonicalAndCreativePaths(t *testing.T) {
 	require.Equal(t, RelayModeVideoFetchByID, Path2RelayMode("/creative/relay/v1/videos/task_abc"))
 	require.Equal(t, RelayModeUnknown, Path2RelayMode("/creative/relay/v1/v1/videos"))
 }
+
+func TestRelayModeMidjourneyMapsCreativePaths(t *testing.T) {
+	require.Equal(t, RelayModeMidjourneyImagine, Path2RelayMode("/creative/relay/v1/mj/submit/imagine"))
+	require.Equal(t, RelayModeMidjourneyTaskFetch, Path2RelayMode("/creative/relay/v1/mj/task/task_abc/fetch"))
+	require.Equal(t, RelayModeMidjourneyTaskFetchByCondition, Path2RelayMode("/creative/relay/v1/mj/task/list-by-condition"))
+	require.Equal(t, RelayModeMidjourneyImage, Path2RelayMode("/creative/relay/v1/mj/image/task_abc"))
+}

@@ -25,9 +25,17 @@ import (
 const creativeBrokerBaseURL = "/creative/relay/v1"
 
 const (
-	creativeVideoPublicTaskIDContextKey   = "creative_video_public_task_id"
-	creativeVideoIdempotencyKeyContextKey = "creative_video_idempotency_key"
-	creativeVideoContentContextKey        = "creative_video_content"
+	creativeVideoPublicTaskIDContextKey    = "creative_video_public_task_id"
+	creativeVideoIdempotencyKeyContextKey  = "creative_video_idempotency_key"
+	creativeVideoContentContextKey         = "creative_video_content"
+	creativeTaskPublicTaskIDContextKey     = "creative_task_public_task_id"
+	creativeTaskIdempotencyKeyContextKey   = "creative_task_idempotency_key"
+	creativeTaskIdempotencyScopeContextKey = "creative_task_idempotency_scope"
+)
+
+const (
+	creativeSunoSubmitScopeMusic  = "suno.submit.music"
+	creativeSunoSubmitScopeLyrics = "suno.submit.lyrics"
 )
 
 var creativeVideoRelayEnabled atomic.Bool
@@ -74,6 +82,39 @@ func CreativeVideoSubmitIdempotency() gin.HandlerFunc {
 			return
 		}
 		c.Next()
+	}
+}
+
+func CreativeSunoSubmitGuard() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		modelName, scope, ok := creativeSunoModelAndScope(c.Param("action"))
+		if !ok {
+			creativeOpenAIError(c, http.StatusBadRequest, "invalid Suno action")
+			c.Abort()
+			return
+		}
+		if field, err := creativeSunoForbiddenSubmitField(c); err != nil {
+			creativeOpenAIError(c, http.StatusBadRequest, err.Error())
+			c.Abort()
+			return
+		} else if field != "" {
+			creativeOpenAIError(c, http.StatusBadRequest, "forbidden field "+field)
+			c.Abort()
+			return
+		}
+
+		c.Set(middleware.ContextKeyCreativeRelayModelOverride, modelName)
+		if !creativePrepareSunoSubmitIdempotency(c, scope) {
+			return
+		}
+		requestID := c.GetString(creativeTaskIdempotencyKeyContextKey)
+		userID := c.GetInt("id")
+		c.Next()
+		if requestID != "" && c.Writer.Status() >= http.StatusBadRequest {
+			if err := model.DeleteCreativeVideoIdempotencyScoped(userID, scope, requestID); err != nil {
+				common.SysError("cleanup failed creative Suno idempotency error: " + err.Error())
+			}
+		}
 	}
 }
 
@@ -467,6 +508,20 @@ func CreativeRelayVideoFetch(c *gin.Context) {
 	RelayTaskFetch(c)
 }
 
+func CreativeRelaySunoSubmit(c *gin.Context) {
+	if !creativeSetupSessionBrokerToken(c) {
+		return
+	}
+	RelayTask(c)
+}
+
+func CreativeRelaySunoFetch(c *gin.Context) {
+	if !creativeSetupSessionBrokerToken(c) {
+		return
+	}
+	RelayTaskFetch(c)
+}
+
 func CreativeRelayVideoContent(c *gin.Context) {
 	if !creativeSetupSessionBrokerToken(c) {
 		return
@@ -564,7 +619,148 @@ func creativePrepareVideoSubmitIdempotency(c *gin.Context) bool {
 	}
 	c.Set(creativeVideoPublicTaskIDContextKey, record.TaskID)
 	c.Set(creativeVideoIdempotencyKeyContextKey, requestID)
+	c.Set(creativeTaskPublicTaskIDContextKey, record.TaskID)
+	c.Set(creativeTaskIdempotencyKeyContextKey, requestID)
+	c.Set(creativeTaskIdempotencyScopeContextKey, model.CreativeVideoIdempotencyScopeVideoSubmit)
 	return true
+}
+
+func creativePrepareSunoSubmitIdempotency(c *gin.Context, scope string) bool {
+	requestID := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if requestID == "" {
+		requestID = strings.TrimSpace(c.GetHeader("X-Creative-Request-Id"))
+	}
+	if requestID == "" {
+		creativeOpenAIError(c, http.StatusBadRequest, "creative Suno submit requires Idempotency-Key")
+		c.Abort()
+		return false
+	}
+	if len(requestID) > 128 {
+		creativeOpenAIError(c, http.StatusBadRequest, "Idempotency-Key is too long")
+		c.Abort()
+		return false
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		creativeOpenAIError(c, http.StatusBadRequest, err.Error())
+		c.Abort()
+		return false
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		creativeOpenAIError(c, http.StatusBadRequest, err.Error())
+		c.Abort()
+		return false
+	}
+	if _, seekErr := storage.Seek(0, io.SeekStart); seekErr == nil {
+		c.Request.Body = io.NopCloser(storage)
+	}
+	sum := sha256.Sum256(body)
+	payloadHash := hex.EncodeToString(sum[:])
+	record, existed, err := model.PrepareCreativeVideoIdempotencyScoped(c.GetInt("id"), scope, requestID, payloadHash)
+	if err != nil {
+		creativeOpenAIError(c, http.StatusInternalServerError, "failed to prepare idempotency record")
+		c.Abort()
+		return false
+	}
+	if existed {
+		if record.PayloadHash != payloadHash {
+			creativeOpenAIError(c, http.StatusConflict, "Idempotency-Key conflicts with a different payload")
+			c.Abort()
+			return false
+		}
+		if strings.TrimSpace(record.TaskID) == "" {
+			creativeOpenAIError(c, http.StatusConflict, "creative Suno request is still being prepared")
+			c.Abort()
+			return false
+		}
+		if task, ok, taskErr := model.GetByTaskId(c.GetInt("id"), record.TaskID); taskErr == nil && ok && task != nil {
+			c.JSON(http.StatusOK, dto.TaskResponse[string]{
+				Code: dto.TaskSuccessCode,
+				Data: task.TaskID,
+			})
+			c.Abort()
+			return false
+		}
+		creativeOpenAIError(c, http.StatusConflict, "creative Suno request is still being prepared")
+		c.Abort()
+		return false
+	}
+	c.Set(creativeTaskPublicTaskIDContextKey, record.TaskID)
+	c.Set(creativeTaskIdempotencyKeyContextKey, requestID)
+	c.Set(creativeTaskIdempotencyScopeContextKey, scope)
+	return true
+}
+
+func creativeSunoModelAndScope(action string) (string, string, bool) {
+	switch strings.TrimSpace(action) {
+	case "music":
+		return "suno_music", creativeSunoSubmitScopeMusic, true
+	case "lyrics":
+		return "suno_lyrics", creativeSunoSubmitScopeLyrics, true
+	default:
+		return "", "", false
+	}
+}
+
+func creativeSunoForbiddenSubmitField(c *gin.Context) (string, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return "", err
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if _, seekErr := storage.Seek(0, io.SeekStart); seekErr == nil {
+			c.Request.Body = io.NopCloser(storage)
+		}
+	}()
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return "", nil
+	}
+
+	contentType := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type")))
+	switch {
+	case strings.Contains(contentType, "multipart/form-data"):
+		form, err := common.ParseMultipartFormReusable(c)
+		if err != nil {
+			return "", err
+		}
+		defer form.RemoveAll()
+		for key := range form.Value {
+			if creativeNormalizeRelayFieldName(key) == "model" {
+				return key, nil
+			}
+		}
+		for key := range form.File {
+			if creativeNormalizeRelayFieldName(key) == "model" {
+				return key, nil
+			}
+		}
+	case strings.Contains(contentType, "application/x-www-form-urlencoded"):
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return "", err
+		}
+		for key := range values {
+			if creativeNormalizeRelayFieldName(key) == "model" {
+				return key, nil
+			}
+		}
+	case strings.Contains(contentType, "json") || contentType == "":
+		var payload map[string]any
+		if err := common.Unmarshal(body, &payload); err != nil {
+			return "", err
+		}
+		for key := range payload {
+			if creativeNormalizeRelayFieldName(key) == "model" {
+				return key, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 func creativeModelsForUser(c *gin.Context) ([]dto.OpenAIModels, string, error) {

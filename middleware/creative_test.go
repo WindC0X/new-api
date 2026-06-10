@@ -53,6 +53,39 @@ func TestCreativeRelayModelReaderAllowsGetWithoutBody(t *testing.T) {
 	require.Empty(t, modelName)
 }
 
+func TestCreativeRelayModelReaderUsesServerSideOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/creative/relay/v1/suno/submit/music", strings.NewReader(`{"prompt":"safe song prompt"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set(ContextKeyCreativeRelayModelOverride, "suno_music")
+
+	modelName, err := readCreativeRelayModel(ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, "suno_music", modelName)
+	replayed, err := io.ReadAll(ctx.Request.Body)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"prompt":"safe song prompt"}`, string(replayed))
+}
+
+func TestCreativeSunoDistributorReadsActionModelAndRelayMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/creative/relay/v1/suno/submit/lyrics", strings.NewReader(`{"prompt":"safe lyrics prompt"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Params = gin.Params{{Key: "action", Value: "lyrics"}}
+
+	req, shouldSelectChannel, err := getModelRequest(ctx)
+
+	require.NoError(t, err)
+	require.True(t, shouldSelectChannel)
+	require.Equal(t, "suno_lyrics", req.Model)
+	require.Equal(t, relayconstant.RelayModeSunoSubmit, ctx.GetInt("relay_mode"))
+}
+
 func TestCreativeVideoDistributorReadsSubmitModelAndRelayMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

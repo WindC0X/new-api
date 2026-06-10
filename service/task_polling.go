@@ -17,8 +17,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-
-	"github.com/samber/lo"
 )
 
 // TaskPollingAdaptor 定义轮询所需的最小适配器接口，避免 service -> relay 的循环依赖
@@ -170,21 +168,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 	ch, err := model.CacheGetChannel(channelId)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("CacheGetChannel: %v", err))
-		// Collect DB primary key IDs for bulk update (taskIds are upstream IDs, not task_id column values)
-		var failedIDs []int64
-		for _, upstreamID := range taskIds {
-			if t, ok := taskM[upstreamID]; ok {
-				failedIDs = append(failedIDs, t.ID)
-			}
-		}
-		err = model.TaskBulkUpdateByID(failedIDs, map[string]any{
-			"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-			"status":      "FAILURE",
-			"progress":    "100%",
-		})
-		if err != nil {
-			common.SysLog(fmt.Sprintf("UpdateSunoTask error: %v", err))
-		}
+		markSunoTasksFailed(ctx, taskIds, taskM, fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId))
 		return err
 	}
 	adaptor := GetTaskAdaptorFunc(constant.TaskPlatformSuno)
@@ -192,18 +176,44 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		return errors.New("adaptor not found")
 	}
 	proxy := ch.GetSetting().Proxy
-	resp, err := adaptor.FetchTask(*ch.BaseURL, ch.Key, map[string]any{
+	baseURL := ch.GetBaseURL()
+	taskIDsByKey := make(map[string][]string)
+	for _, upstreamID := range taskIds {
+		task := taskM[upstreamID]
+		if task == nil {
+			logger.LogError(ctx, fmt.Sprintf("Suno task %s not found in taskM", upstreamID))
+			continue
+		}
+		key := ch.Key
+		if task.PrivateData.Key != "" {
+			key = task.PrivateData.Key
+		}
+		taskIDsByKey[key] = append(taskIDsByKey[key], upstreamID)
+	}
+	for key, keyedTaskIds := range taskIDsByKey {
+		if err := fetchAndUpdateSunoTaskBatch(ctx, adaptor, baseURL, key, keyedTaskIds, proxy, taskM); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func fetchAndUpdateSunoTaskBatch(ctx context.Context, adaptor TaskPollingAdaptor, baseURL string, key string, taskIds []string, proxy string, taskM map[string]*model.Task) error {
+	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"ids": taskIds,
 	}, proxy)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Get Task Do req error: %v", err))
 		return err
 	}
+	if resp == nil {
+		return errors.New("Get Task returned nil response")
+	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		logger.LogError(ctx, fmt.Sprintf("Get Task status code: %d", resp.StatusCode))
 		return fmt.Errorf("Get Task status code: %d", resp.StatusCode)
 	}
-	defer resp.Body.Close()
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Get Suno Task parse body error: %v", err))
@@ -216,37 +226,132 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		return err
 	}
 	if !responseItems.IsSuccess() {
-		common.SysLog(fmt.Sprintf("渠道 #%d 未完成的任务有: %d, 成功获取到任务数: %s", channelId, len(taskIds), string(responseBody)))
-		return err
+		common.SysLog(fmt.Sprintf("Suno batch fetch failed for %d tasks: %s", len(taskIds), string(responseBody)))
+		return fmt.Errorf("Suno batch fetch failed: %s", responseItems.Message)
 	}
 
 	for _, responseItem := range responseItems.Data {
 		task := taskM[responseItem.TaskID]
-		if !taskNeedsUpdate(task, responseItem) {
+		if task == nil {
+			logger.LogError(ctx, fmt.Sprintf("Suno response task %s not found in taskM", responseItem.TaskID))
 			continue
 		}
-
-		task.Status = lo.If(model.TaskStatus(responseItem.Status) != "", model.TaskStatus(responseItem.Status)).Else(task.Status)
-		task.FailReason = lo.If(responseItem.FailReason != "", responseItem.FailReason).Else(task.FailReason)
-		task.SubmitTime = lo.If(responseItem.SubmitTime != 0, responseItem.SubmitTime).Else(task.SubmitTime)
-		task.StartTime = lo.If(responseItem.StartTime != 0, responseItem.StartTime).Else(task.StartTime)
-		task.FinishTime = lo.If(responseItem.FinishTime != 0, responseItem.FinishTime).Else(task.FinishTime)
-		if responseItem.FailReason != "" || task.Status == model.TaskStatusFailure {
-			logger.LogInfo(ctx, task.TaskID+" 构建失败，"+task.FailReason)
-			task.Progress = "100%"
-			RefundTaskQuota(ctx, task, task.FailReason)
-		}
-		if responseItem.Status == model.TaskStatusSuccess {
-			task.Progress = "100%"
-		}
-		task.Data = responseItem.Data
-
-		err = task.Update()
-		if err != nil {
+		if _, err := updateSunoTaskFromResponse(ctx, task, responseItem, adaptor); err != nil {
 			common.SysLog("UpdateSunoTask task error: " + err.Error())
 		}
 	}
 	return nil
+}
+
+func markSunoTasksFailed(ctx context.Context, taskIds []string, taskM map[string]*model.Task, reason string) {
+	now := time.Now().Unix()
+	for _, upstreamID := range taskIds {
+		task := taskM[upstreamID]
+		if task == nil {
+			continue
+		}
+		snap := task.Snapshot()
+		task.Status = model.TaskStatusFailure
+		task.Progress = "100%"
+		if task.FinishTime == 0 {
+			task.FinishTime = now
+		}
+		task.FailReason = reason
+		won, err := task.UpdateWithStatus(snap.Status)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("Suno task %s failure CAS update failed: %s", task.TaskID, err.Error()))
+			continue
+		}
+		if !won {
+			logger.LogWarn(ctx, fmt.Sprintf("Suno task %s already transitioned by another process, skip failure refund", task.TaskID))
+			continue
+		}
+		if task.Quota != 0 {
+			RefundTaskQuota(ctx, task, reason)
+		}
+	}
+}
+
+func updateSunoTaskFromResponse(ctx context.Context, task *model.Task, responseItem dto.SunoDataResponse, adaptor TaskPollingAdaptor) (bool, error) {
+	if task == nil {
+		return false, errors.New("task is nil")
+	}
+	if !taskNeedsUpdate(task, responseItem) {
+		return false, nil
+	}
+
+	snap := task.Snapshot()
+	if responseItem.Status != "" {
+		task.Status = model.TaskStatus(responseItem.Status)
+	}
+	if responseItem.FailReason != "" {
+		task.FailReason = responseItem.FailReason
+	}
+	if responseItem.SubmitTime != 0 {
+		task.SubmitTime = responseItem.SubmitTime
+	}
+	if responseItem.StartTime != 0 {
+		task.StartTime = responseItem.StartTime
+	}
+	if responseItem.FinishTime != 0 {
+		task.FinishTime = responseItem.FinishTime
+	}
+	if len(responseItem.Data) > 0 {
+		task.Data = responseItem.Data
+	}
+
+	shouldRefund := false
+	shouldSettle := false
+	switch task.Status {
+	case model.TaskStatusFailure:
+		logger.LogInfo(ctx, task.TaskID+" 构建失败，"+task.FailReason)
+		task.Progress = "100%"
+		if task.FinishTime == 0 {
+			task.FinishTime = time.Now().Unix()
+		}
+		if task.Quota != 0 {
+			shouldRefund = true
+		}
+	case model.TaskStatusSuccess:
+		task.Progress = "100%"
+		if task.FinishTime == 0 {
+			task.FinishTime = time.Now().Unix()
+		}
+		shouldSettle = true
+	}
+
+	isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
+	if isDone && snap.Status != task.Status {
+		won, err := task.UpdateWithStatus(snap.Status)
+		if err != nil {
+			return false, err
+		}
+		if !won {
+			logger.LogWarn(ctx, fmt.Sprintf("Suno task %s already transitioned by another process, skip billing", task.TaskID))
+			return false, nil
+		}
+		if shouldSettle && adaptor != nil {
+			settleTaskBillingOnComplete(ctx, adaptor, task, &relaycommon.TaskInfo{
+				TaskID:   task.TaskID,
+				Status:   string(task.Status),
+				Reason:   task.FailReason,
+				Progress: task.Progress,
+			})
+		}
+		if shouldRefund {
+			RefundTaskQuota(ctx, task, task.FailReason)
+		}
+		return true, nil
+	}
+
+	if !snap.Equal(task.Snapshot()) {
+		won, err := task.UpdateWithStatus(snap.Status)
+		if err != nil {
+			return false, err
+		}
+		return won, nil
+	}
+	return false, nil
 }
 
 // taskNeedsUpdate 检查 Suno 任务是否需要更新

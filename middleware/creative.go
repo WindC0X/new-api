@@ -24,6 +24,8 @@ const (
 	creativeSessionTokenSize = 48
 )
 
+const ContextKeyCreativeRelayModelOverride = "creative_relay_model_override"
+
 // EnsureCreativeSessionAuthMaterial returns the per-browser-session material
 // used by embedded /creative calls. It is generated lazily during bootstrap and
 // saved in the server-side session cookie payload; opentu receives only opaque
@@ -164,6 +166,10 @@ func CreativeRelaySessionBroker() gin.HandlerFunc {
 }
 
 func readCreativeRelayModel(c *gin.Context) (string, error) {
+	if override := strings.TrimSpace(c.GetString(ContextKeyCreativeRelayModelOverride)); override != "" {
+		return override, nil
+	}
+
 	switch c.Request.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return "", nil

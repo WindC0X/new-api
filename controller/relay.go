@@ -496,11 +496,18 @@ func RelayTask(c *gin.Context) {
 		return
 	}
 
-	if publicTaskID := c.GetString(creativeVideoPublicTaskIDContextKey); publicTaskID != "" && relayInfo.TaskRelayInfo != nil {
+	if publicTaskID := c.GetString(creativeTaskPublicTaskIDContextKey); publicTaskID != "" && relayInfo.TaskRelayInfo != nil {
+		relayInfo.PublicTaskID = publicTaskID
+	} else if publicTaskID := c.GetString(creativeVideoPublicTaskIDContextKey); publicTaskID != "" && relayInfo.TaskRelayInfo != nil {
 		relayInfo.PublicTaskID = publicTaskID
 	}
-	if idempotencyKey := c.GetString(creativeVideoIdempotencyKeyContextKey); idempotencyKey != "" && relayInfo.TaskRelayInfo != nil {
+	if idempotencyKey := c.GetString(creativeTaskIdempotencyKeyContextKey); idempotencyKey != "" && relayInfo.TaskRelayInfo != nil {
 		relayInfo.IdempotencyKey = idempotencyKey
+	} else if idempotencyKey := c.GetString(creativeVideoIdempotencyKeyContextKey); idempotencyKey != "" && relayInfo.TaskRelayInfo != nil {
+		relayInfo.IdempotencyKey = idempotencyKey
+	}
+	if idempotencyScope := c.GetString(creativeTaskIdempotencyScopeContextKey); idempotencyScope != "" && relayInfo.TaskRelayInfo != nil {
+		relayInfo.IdempotencyScope = idempotencyScope
 	}
 
 	if taskErr := relay.ResolveOriginTask(c, relayInfo); taskErr != nil {
@@ -605,7 +612,7 @@ func RelayTask(c *gin.Context) {
 		if insertErr := task.Insert(); insertErr != nil {
 			taskErr = service.TaskErrorWrapper(insertErr, "insert_task_failed", http.StatusInternalServerError)
 		} else if relayInfo.TaskRelayInfo != nil && relayInfo.IdempotencyKey != "" {
-			if err := model.CompleteCreativeVideoIdempotency(relayInfo.UserId, relayInfo.IdempotencyKey, task.TaskID); err != nil {
+			if err := model.CompleteCreativeVideoIdempotencyScoped(relayInfo.UserId, relayInfo.IdempotencyScope, relayInfo.IdempotencyKey, task.TaskID); err != nil {
 				taskErr = service.TaskErrorWrapper(err, "complete_idempotency_failed", http.StatusInternalServerError)
 			}
 		}
@@ -626,7 +633,7 @@ func RelayTask(c *gin.Context) {
 
 	if taskErr != nil {
 		if relayInfo.TaskRelayInfo != nil && relayInfo.IdempotencyKey != "" {
-			if err := model.DeleteCreativeVideoIdempotency(relayInfo.UserId, relayInfo.IdempotencyKey); err != nil {
+			if err := model.DeleteCreativeVideoIdempotencyScoped(relayInfo.UserId, relayInfo.IdempotencyScope, relayInfo.IdempotencyKey); err != nil {
 				common.SysError("delete creative video idempotency error: " + err.Error())
 			}
 		}

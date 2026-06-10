@@ -2,6 +2,8 @@ package controller
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -13,8 +15,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-contrib/sessions"
@@ -1405,6 +1409,166 @@ func TestCreativeVideoSubmitIdempotencyCleansRecordWhenSessionBrokerRejects(t *t
 	require.Equal(t, int64(0), count)
 }
 
+func TestCreativeSunoSubmitRequiresIdempotencyAndInfersGroupBeforeRelay(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 70)
+	seedCreativeControllerModelPool(t)
+	seedCreativeControllerSunoModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 70, func(c *gin.Context) {
+		relayReachedCount++
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		require.NoError(t, err)
+		var payload map[string]any
+		require.NoError(t, common.Unmarshal(bodyBytes, &payload))
+		c.JSON(http.StatusOK, gin.H{
+			"bodyModel":  payload["model"],
+			"action":     c.Param("action"),
+			"usingGroup": common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+			"tokenGroup": common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
+		})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	missingKey := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/suno/submit/music", map[string]any{
+		"prompt": "safe song prompt",
+	}, auth.cookies, creativeSameOriginNonceHeaders(auth))
+	require.Equal(t, http.StatusBadRequest, missingKey.Code)
+	require.Equal(t, 0, relayReachedCount)
+	missingKeyError := creativeResponseObject(t, decodeCreativeResponse(t, missingKey), "error")
+	require.Contains(t, missingKeyError["message"], "Idempotency-Key")
+
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "suno-music-submit-1"
+	accepted := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/suno/submit/music", map[string]any{
+		"prompt": "safe song prompt",
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusOK, accepted.Code)
+	require.Equal(t, 1, relayReachedCount)
+	payload := decodeCreativeResponse(t, accepted)
+	require.Nil(t, payload["bodyModel"])
+	require.Equal(t, "music", payload["action"])
+	require.Equal(t, "vip", payload["usingGroup"])
+	require.Equal(t, "vip", payload["tokenGroup"])
+
+	var record model.CreativeVideoIdempotency
+	require.NoError(t, model.DB.Where("user_id = ? AND scope = ? AND request_id = ?", 70, "suno.submit.music", "suno-music-submit-1").First(&record).Error)
+	require.Equal(t, "suno.submit.music", record.Scope)
+	require.NotEmpty(t, record.TaskID)
+}
+
+func TestCreativeSunoSubmitRejectsBrowserSuppliedModelBeforeRelay(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 71)
+	seedCreativeControllerModelPool(t)
+	seedCreativeControllerSunoModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 71, func(c *gin.Context) {
+		relayReachedCount++
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "suno-model-override"
+
+	recorder := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/suno/submit/music", map[string]any{
+		"model":  "suno_lyrics",
+		"prompt": "safe song prompt",
+	}, auth.cookies, headers)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, 0, relayReachedCount)
+	errorObject := creativeResponseObject(t, decodeCreativeResponse(t, recorder), "error")
+	require.Contains(t, errorObject["message"], "forbidden field model")
+}
+
+func TestCreativeSunoSubmitIdempotencyIsScopedByActionAndReplaysPublicTask(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 72)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	emptyBodyHash := creativeTestPayloadHash([]byte("{}"))
+
+	music, existed, err := model.PrepareCreativeVideoIdempotencyScoped(72, "suno.submit.music", "same-request", emptyBodyHash)
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.NoError(t, model.DB.Create(&model.Task{TaskID: music.TaskID, UserId: 72, Status: model.TaskStatusSubmitted, ChannelId: 1, Platform: constant.TaskPlatformSuno}).Error)
+
+	lyrics, existed, err := model.PrepareCreativeVideoIdempotencyScoped(72, "suno.submit.lyrics", "same-request", "hash-lyrics")
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.NotEqual(t, music.TaskID, lyrics.TaskID)
+
+	router := newCreativeRelayBrokerTestRouter(t, 72, func(c *gin.Context) {
+		c.JSON(http.StatusInternalServerError, gin.H{"unexpected": "relay should not be reached on replay"})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "same-request"
+	replay := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/suno/submit/music", map[string]any{}, auth.cookies, headers)
+
+	require.Equal(t, http.StatusOK, replay.Code)
+	var replayPayload dto.TaskResponse[string]
+	require.NoError(t, common.Unmarshal(replay.Body.Bytes(), &replayPayload))
+	require.Equal(t, dto.TaskSuccessCode, replayPayload.Code)
+	require.Equal(t, music.TaskID, replayPayload.Data)
+}
+
+func TestCreativeRelaySunoFetchIsOwnerScoped(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}))
+	require.NoError(t, model.DB.Create(&model.Task{
+		TaskID:    "task_suno_owner",
+		UserId:    73,
+		Status:    model.TaskStatusSuccess,
+		ChannelId: 1,
+		Platform:  constant.TaskPlatformSuno,
+		Progress:  "100%",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Task{
+		TaskID:    "task_suno_other_user",
+		UserId:    7302,
+		Status:    model.TaskStatusSuccess,
+		ChannelId: 1,
+		Platform:  constant.TaskPlatformSuno,
+		Progress:  "100%",
+	}).Error)
+
+	performFetch := func(userID int, taskID string) *httptest.ResponseRecorder {
+		gin.SetMode(gin.TestMode)
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/creative/relay/v1/suno/fetch/"+taskID, nil)
+		ctx.Params = gin.Params{{Key: "id", Value: taskID}}
+		ctx.Set("id", userID)
+		ctx.Set("group", "default")
+		ctx.Set("relay_mode", relayconstant.RelayModeSunoFetchByID)
+		common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+		common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "default")
+		CreativeRelaySunoFetch(ctx)
+		return recorder
+	}
+
+	sameUser := performFetch(73, "task_suno_owner")
+	require.Equal(t, http.StatusOK, sameUser.Code)
+	require.Contains(t, sameUser.Body.String(), "task_suno_owner")
+
+	crossUser := performFetch(73, "task_suno_other_user")
+	require.Equal(t, http.StatusBadRequest, crossUser.Code)
+	require.Contains(t, crossUser.Body.String(), "task_not_exist")
+	require.NotContains(t, crossUser.Body.String(), "7302")
+
+	missing := performFetch(73, "task_suno_missing")
+	require.Equal(t, http.StatusBadRequest, missing.Code)
+	require.Contains(t, missing.Body.String(), "task_not_exist")
+}
+
+func creativeTestPayloadHash(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
 func TestCreativeImageRelayRejectsNonceAndForbiddenFieldsBeforeSessionBroker(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 59)
@@ -1697,6 +1861,23 @@ func seedCreativeControllerModelPool(t *testing.T) []string {
 	return expected
 }
 
+func seedCreativeControllerSunoModelPool(t *testing.T) {
+	t.Helper()
+
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group:     "vip",
+		Model:     "suno_music",
+		ChannelId: 7001,
+		Enabled:   true,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group:     "default",
+		Model:     "suno_lyrics",
+		ChannelId: 7002,
+		Enabled:   true,
+	}).Error)
+}
+
 type creativeSessionAuthFixture struct {
 	csrfToken string
 	nonce     string
@@ -1755,6 +1936,10 @@ func newCreativeRelayBrokerTestRouter(t *testing.T, userId int, relayHandler gin
 	videoRelayRouter.POST("", relayHandler)
 	videoRelayRouter.GET("/:task_id", relayHandler)
 	videoRelayRouter.GET("/:task_id/content", relayHandler)
+	sunoRelayRouter := relayRouter.Group("/suno")
+	sunoRelayRouter.POST("/submit/:action", CreativeSunoSubmitGuard(), middleware.CreativeRelaySessionBroker(), relayHandler)
+	sunoRelayRouter.GET("/fetch/:id", middleware.CreativeRelaySessionBroker(), relayHandler)
+	sunoRelayRouter.POST("/fetch", middleware.CreativeRelaySessionBroker(), relayHandler)
 	return router
 }
 

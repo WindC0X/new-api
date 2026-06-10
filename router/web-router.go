@@ -94,6 +94,11 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 		creativeVideoRelayRouter.POST("", controller.CreativeRelayVideos)
 		creativeVideoRelayRouter.GET("/:task_id", controller.CreativeRelayVideoFetch)
 		creativeVideoRelayRouter.GET("/:task_id/content", controller.CreativeRelayVideoContent)
+
+		creativeSunoRelayRouter := creativeRelayRouter.Group("/suno")
+		creativeSunoRelayRouter.POST("/submit/:action", controller.CreativeSunoSubmitGuard(), middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoSubmit)
+		creativeSunoRelayRouter.GET("/fetch/:id", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
+		creativeSunoRelayRouter.POST("/fetch", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
 	}
 
 	serveCreative := func(c *gin.Context) {

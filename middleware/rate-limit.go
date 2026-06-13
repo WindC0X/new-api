@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -89,9 +90,57 @@ func rateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gi
 
 func GlobalWebRateLimit() func(c *gin.Context) {
 	if common.GlobalWebRateLimitEnable {
-		return rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
+		limiter := rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
+		return func(c *gin.Context) {
+			if shouldBypassGlobalWebRateLimit(c.Request.Method, c.Request.URL.Path) {
+				c.Next()
+				return
+			}
+			if isCreativeAPIRelayPath(c.Request.URL.Path) {
+				c.Header("Cache-Control", "private, no-store")
+				c.Header("Pragma", "no-cache")
+				c.Header("Expires", "0")
+			}
+			limiter(c)
+		}
 	}
 	return defNext
+}
+
+func shouldBypassGlobalWebRateLimit(method string, path string) bool {
+	if method != http.MethodGet && method != http.MethodHead {
+		return false
+	}
+
+	if path == "/creative" || path == "/creative/" {
+		return true
+	}
+	if isCreativeAPIRelayPath(path) {
+		return false
+	}
+	if strings.HasPrefix(path, "/creative/") {
+		return true
+	}
+
+	if strings.HasPrefix(path, "/assets/") ||
+		strings.HasPrefix(path, "/static/") ||
+		strings.HasPrefix(path, "/theme/") {
+		return true
+	}
+
+	switch path {
+	case "/favicon.ico", "/manifest.json", "/robots.txt", "/logo.png", "/logo.svg":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCreativeAPIRelayPath(path string) bool {
+	return path == "/creative/api" ||
+		strings.HasPrefix(path, "/creative/api/") ||
+		path == "/creative/relay" ||
+		strings.HasPrefix(path, "/creative/relay/")
 }
 
 func GlobalAPIRateLimit() func(c *gin.Context) {

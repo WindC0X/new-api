@@ -528,30 +528,50 @@ func GetCreativeDocumentByClientMutationId(userId int, clientMutationId string) 
 }
 
 func CreateCreativeDocument(document *CreativeDocument) (*CreativeDocument, error) {
+	return CreateCreativeDocumentWithAssetRefs(document, nil)
+}
+
+func CreateCreativeDocumentWithAssetRefs(document *CreativeDocument, assetIds []string) (*CreativeDocument, error) {
 	if document == nil {
 		return nil, errors.New("document is nil")
 	}
-	if existing, exists, err := GetCreativeDocumentByClientMutationId(document.UserId, document.ClientMutationId); err != nil || exists {
-		return existing, err
-	}
-	if strings.TrimSpace(document.DocumentId) == "" {
-		document.DocumentId = fmt.Sprintf("doc_%d_%s", time.Now().UnixNano(), common.GetRandomString(8))
-	}
-	if document.Revision <= 0 {
-		document.Revision = 1
-	}
-	now := time.Now().Unix()
-	if document.CreatedTime == 0 {
-		document.CreatedTime = now
-	}
-	document.UpdatedTime = now
-	if err := ensureCreativeDocumentJSON(document); err != nil {
-		return nil, err
-	}
-	if err := DB.Create(document).Error; err != nil {
-		return nil, err
-	}
-	return document, nil
+	var result *CreativeDocument
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if strings.TrimSpace(document.ClientMutationId) != "" {
+			var existing CreativeDocument
+			err := tx.Where("user_id = ? AND client_mutation_id = ?", document.UserId, document.ClientMutationId).First(&existing).Error
+			if err == nil {
+				result = &existing
+				return nil
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
+		if strings.TrimSpace(document.DocumentId) == "" {
+			document.DocumentId = fmt.Sprintf("doc_%d_%s", time.Now().UnixNano(), common.GetRandomString(8))
+		}
+		if document.Revision <= 0 {
+			document.Revision = 1
+		}
+		now := time.Now().Unix()
+		if document.CreatedTime == 0 {
+			document.CreatedTime = now
+		}
+		document.UpdatedTime = now
+		if err := ensureCreativeDocumentJSON(document); err != nil {
+			return err
+		}
+		if err := tx.Create(document).Error; err != nil {
+			return err
+		}
+		if err := refreshCreativeDocumentAssetRefsTx(tx, document.UserId, document.DocumentId, assetIds); err != nil {
+			return err
+		}
+		result = document
+		return nil
+	})
+	return result, err
 }
 
 func UpdateCreativeDocumentSnapshot(userId int, documentId string, baseRevision int, patch CreativeDocumentPatch) (*CreativeDocument, bool, error) {
@@ -606,6 +626,61 @@ func UpdateCreativeDocumentSnapshot(userId int, documentId string, baseRevision 
 	return result, conflict, err
 }
 
+func UpdateCreativeDocumentSnapshotWithAssetRefs(userId int, documentId string, baseRevision int, patch CreativeDocumentPatch, assetIds []string) (*CreativeDocument, bool, error) {
+	var result *CreativeDocument
+	conflict := false
+	now := time.Now().Unix()
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current CreativeDocument
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND document_id = ?", userId, documentId).First(&current).Error
+		if err != nil {
+			return err
+		}
+		if patch.ClientMutationId != "" && current.ClientMutationId == patch.ClientMutationId {
+			result = &current
+			return nil
+		}
+		if current.Revision != baseRevision {
+			result = &current
+			conflict = true
+			return nil
+		}
+		if patch.Title != nil {
+			current.Title = strings.TrimSpace(*patch.Title)
+			if len(current.Title) > 255 {
+				current.Title = current.Title[:255]
+			}
+		}
+		if patch.SnapshotJSON != nil {
+			current.SnapshotJSON = *patch.SnapshotJSON
+		}
+		if patch.MetadataJSON != nil {
+			current.MetadataJSON = *patch.MetadataJSON
+		}
+		current.ClientMutationId = strings.TrimSpace(patch.ClientMutationId)
+		current.Revision++
+		current.UpdatedTime = now
+		if current.CreatedTime == 0 {
+			current.CreatedTime = now
+		}
+		if err := ensureCreativeDocumentJSON(&current); err != nil {
+			return err
+		}
+		if err := tx.Save(&current).Error; err != nil {
+			return err
+		}
+		if err := refreshCreativeDocumentAssetRefsTx(tx, userId, documentId, assetIds); err != nil {
+			return err
+		}
+		result = &current
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, err
+	}
+	return result, conflict, err
+}
+
 func DeleteCreativeDocument(userId int, documentId string, baseRevision *int) (*CreativeDocument, bool, bool, error) {
 	var deleted *CreativeDocument
 	conflict := false
@@ -628,6 +703,40 @@ func DeleteCreativeDocument(userId int, documentId string, baseRevision *int) (*
 		return tx.Delete(&current).Error
 	})
 	return deleted, found, conflict, err
+}
+
+func DeleteCreativeDocumentWithAssetRefs(userId int, documentId string, baseRevision *int) (*CreativeDocument, bool, bool, error) {
+	var deleted *CreativeDocument
+	conflict := false
+	found := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current CreativeDocument
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND document_id = ?", userId, documentId).First(&current).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		if baseRevision != nil && current.Revision != *baseRevision {
+			deleted = &current
+			conflict = true
+			return nil
+		}
+		if err := tx.Delete(&current).Error; err != nil {
+			return err
+		}
+		if err := deleteCreativeDocumentAssetRefsTx(tx, userId, documentId); err != nil {
+			return err
+		}
+		deleted = &current
+		return nil
+	})
+	if err != nil {
+		return nil, false, false, err
+	}
+	return deleted, found, conflict, nil
 }
 
 func ensureCreativeDocumentJSON(document *CreativeDocument) error {

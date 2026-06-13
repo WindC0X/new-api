@@ -94,6 +94,44 @@ func TestUpdateVideoSingleTaskUsesStoredChannelKeyAffinity(t *testing.T) {
 	require.Equal(t, string(task.Action), adaptor.body["action"])
 }
 
+func TestUpdateVideoSingleTaskCreativeMissingStoredKeyFailsClosed(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 911, 911, 911
+	const initQuota, preConsumed, tokenRemain = 10000, 2000, 5000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_public_missing_key"
+	task.PrivateData.UpstreamTaskID = "upstream_missing_key"
+	task.PrivateData.IdempotencyKey = "creative-request-id"
+	task.PrivateData.Key = ""
+	task.Status = model.TaskStatusSubmitted
+	require.NoError(t, model.DB.Create(task).Error)
+
+	adaptor := &recordingVideoPollingAdaptor{}
+	err := updateVideoSingleTask(ctx, adaptor, &model.Channel{
+		Id:     channelID,
+		Key:    "sk-fresh-random-key",
+		Status: common.ChannelStatusEnabled,
+		Type:   constant.ChannelTypeOpenAI,
+	}, "upstream_missing_key", map[string]*model.Task{
+		"upstream_missing_key": task,
+	})
+
+	require.Error(t, err)
+	require.Empty(t, adaptor.key, "provider fetch must not use the current channel key for a creative task")
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	require.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	require.Equal(t, int64(1), countLogs(t))
+}
+
 type recordingSunoPollingAdaptor struct {
 	calls []recordingSunoPollingCall
 }
@@ -196,6 +234,56 @@ func TestUpdateSunoTasksGroupsByStoredKeyAndUsesChannelBaseURL(t *testing.T) {
 	}
 	require.Equal(t, []string{"upstream_suno_a"}, seen["sk-selected-a"])
 	require.Equal(t, []string{"upstream_suno_b"}, seen["sk-selected-b"])
+}
+
+func TestUpdateSunoTasksCreativeMissingStoredKeyFailsClosed(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 912, 912, 912
+	const initQuota, preConsumed, tokenRemain = 10000, 1500, 4000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token", tokenRemain)
+	baseURL := "https://suno-upstream.example"
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Name:    "multi-key-suno",
+		Key:     "sk-fresh-a\nsk-fresh-b",
+		BaseURL: &baseURL,
+		Status:  common.ChannelStatusEnabled,
+		Type:    constant.ChannelTypeSunoAPI,
+	}).Error)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_public_suno_missing_key"
+	task.PrivateData.UpstreamTaskID = "upstream_suno_missing_key"
+	task.PrivateData.IdempotencyKey = "creative-suno-request-id"
+	task.PrivateData.Key = ""
+	task.Status = model.TaskStatusSubmitted
+	require.NoError(t, model.DB.Create(task).Error)
+
+	adaptor := &recordingSunoPollingAdaptor{}
+	originalGetTaskAdaptor := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(platform constant.TaskPlatform) TaskPollingAdaptor {
+		require.Equal(t, constant.TaskPlatformSuno, platform)
+		return adaptor
+	}
+	t.Cleanup(func() { GetTaskAdaptorFunc = originalGetTaskAdaptor })
+
+	err := UpdateSunoTasks(ctx, map[int][]string{
+		channelID: []string{"upstream_suno_missing_key"},
+	}, map[string]*model.Task{
+		"upstream_suno_missing_key": task,
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, adaptor.calls, "provider fetch must not use the current channel key for a creative Suno task")
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	require.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	require.Equal(t, int64(1), countLogs(t))
 }
 
 func TestDispatchPlatformUpdateForMidjourneyUsesGenericStoredKeyAffinity(t *testing.T) {
@@ -444,6 +532,80 @@ func TestUpdateMidjourneySingleTaskSuccessSettlesOnlyCASWinner(t *testing.T) {
 	require.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
 	require.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
 	require.Equal(t, int64(1), countLogs(t))
+}
+
+func TestUpdateVideoTasksChannelMissingFailsEachTaskWithCASAndRefund(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, missingChannelID = 913, 913, 913
+	const initQuota, preConsumed, tokenRemain = 10000, 1800, 5000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token", tokenRemain)
+
+	task := makeTask(userID, missingChannelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_public_channel_missing"
+	task.PrivateData.UpstreamTaskID = "upstream_channel_missing"
+	task.PrivateData.Key = "sk-selected-key"
+	task.Status = model.TaskStatusInProgress
+	require.NoError(t, model.DB.Create(task).Error)
+
+	err := UpdateVideoTasks(ctx, constant.TaskPlatform("openai"), map[int][]string{
+		missingChannelID: []string{"upstream_channel_missing"},
+	}, map[string]*model.Task{
+		"upstream_channel_missing": task,
+	})
+
+	require.NoError(t, err)
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	require.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	require.Equal(t, int64(1), countLogs(t))
+}
+
+func TestMarkTasksFailedWithCASAndRefundNullUpstreamOnlyOnce(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 914, 914, 914
+	const initQuota, preConsumed, tokenRemain = 10000, 1200, 4000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_public_null_upstream"
+	task.PrivateData.UpstreamTaskID = ""
+	task.Status = model.TaskStatusSubmitted
+	require.NoError(t, model.DB.Create(task).Error)
+
+	var first model.Task
+	require.NoError(t, model.DB.First(&first, task.ID).Error)
+	var second model.Task
+	require.NoError(t, model.DB.First(&second, task.ID).Error)
+
+	require.Equal(t, 1, markTasksFailedWithCASAndRefund(ctx, []*model.Task{&first}, "upstream task id is empty"))
+	require.Equal(t, 0, markTasksFailedWithCASAndRefund(ctx, []*model.Task{&second}, "upstream task id is empty"))
+
+	require.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	require.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	require.Equal(t, int64(1), countLogs(t))
+}
+
+func TestCollectPollingTaskBucketsCreativeMissingUpstreamDoesNotFallbackToPublicTaskID(t *testing.T) {
+	task := makeTask(1, 2, 1000, 0, BillingSourceWallet, 0)
+	task.TaskID = "task_public_should_not_be_upstream"
+	task.PrivateData.IdempotencyKey = "creative-request-id"
+	task.PrivateData.UpstreamTaskID = ""
+
+	taskChannelM, taskM, nullTasks := collectPollingTaskBuckets([]*model.Task{task})
+
+	require.Empty(t, taskChannelM)
+	require.Empty(t, taskM)
+	require.Len(t, nullTasks, 1)
+	require.Equal(t, task.TaskID, nullTasks[0].TaskID)
 }
 
 func TestUpdateSunoTaskFromResponseRefundsOnlyCASWinner(t *testing.T) {

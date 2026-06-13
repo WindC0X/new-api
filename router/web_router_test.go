@@ -113,6 +113,118 @@ func TestSetWebRouterKeepsCreativeRoutesGinSafe(t *testing.T) {
 	requireNoCreativeFixtureMarkersInText(t, wrongMethodImageRelay.Body.String(), "GET /creative/relay/v1/images/generations")
 }
 
+func TestSetRouterKeepsCreativeRoutesWhenFrontendBaseURLIsConfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalMaster := common.IsMasterNode
+	originalRedisEnabled := common.RedisEnabled
+	originalWebRateLimit := common.GlobalWebRateLimitEnable
+	common.IsMasterNode = false
+	common.RedisEnabled = false
+	common.GlobalWebRateLimitEnable = false
+	t.Setenv("FRONTEND_BASE_URL", "https://frontend.example")
+	t.Cleanup(func() {
+		common.IsMasterNode = originalMaster
+		common.RedisEnabled = originalRedisEnabled
+		common.GlobalWebRateLimitEnable = originalWebRateLimit
+	})
+
+	engine := gin.New()
+	engine.Use(sessions.Sessions("session", cookie.NewStore([]byte("creative-router-frontend-base-url-secret"))))
+	SetRouter(engine, ThemeAssets{
+		DefaultBuildFS:    testDefaultBuildFS,
+		DefaultIndexPage:  testDefaultIndexPage,
+		ClassicBuildFS:    testClassicBuildFS,
+		ClassicIndexPage:  testClassicIndexPage,
+		CreativeBuildFS:   testCreativeBuildFS,
+		CreativeIndexPage: testCreativeIndexPage,
+	})
+
+	creativeAPI := httptest.NewRecorder()
+	engine.ServeHTTP(creativeAPI, httptest.NewRequest(http.MethodGet, "/creative/api/bootstrap", nil))
+	require.Equal(t, http.StatusUnauthorized, creativeAPI.Code)
+	require.Empty(t, creativeAPI.Header().Get("Location"))
+	require.NotContains(t, creativeAPI.Header().Get("Location"), "frontend.example")
+	require.NotEqual(t, "max-age=604800", creativeAPI.Header().Get("Cache-Control"))
+	require.Contains(t, creativeAPI.Header().Get("Content-Type"), "application/json")
+
+	creativeRelay := httptest.NewRecorder()
+	relayRequest := httptest.NewRequest(http.MethodPost, "/creative/relay/v1/suno/submit/music", strings.NewReader(`{"prompt":"safe"}`))
+	relayRequest.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(creativeRelay, relayRequest)
+	require.Equal(t, http.StatusUnauthorized, creativeRelay.Code)
+	require.Empty(t, creativeRelay.Header().Get("Location"))
+	require.NotContains(t, creativeRelay.Header().Get("Location"), "frontend.example")
+	require.NotEqual(t, "max-age=604800", creativeRelay.Header().Get("Cache-Control"))
+
+	missingCreativeAPI := httptest.NewRecorder()
+	engine.ServeHTTP(missingCreativeAPI, httptest.NewRequest(http.MethodGet, "/creative/api/missing", nil))
+	require.Equal(t, http.StatusNotFound, missingCreativeAPI.Code)
+	require.Empty(t, missingCreativeAPI.Header().Get("Location"))
+	require.NotContains(t, missingCreativeAPI.Header().Get("Location"), "frontend.example")
+	require.Contains(t, missingCreativeAPI.Header().Get("Cache-Control"), "no-store")
+
+	missingCreativeRelay := httptest.NewRecorder()
+	missingRelayRequest := httptest.NewRequest(http.MethodPost, "/creative/relay/v1/v1/videos", strings.NewReader(`{"model":"sora-2"}`))
+	missingRelayRequest.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(missingCreativeRelay, missingRelayRequest)
+	require.Equal(t, http.StatusNotFound, missingCreativeRelay.Code)
+	require.Empty(t, missingCreativeRelay.Header().Get("Location"))
+	require.NotContains(t, missingCreativeRelay.Header().Get("Location"), "frontend.example")
+	require.Contains(t, missingCreativeRelay.Header().Get("Cache-Control"), "no-store")
+
+	wrongMethodRelay := httptest.NewRecorder()
+	engine.ServeHTTP(wrongMethodRelay, httptest.NewRequest(http.MethodGet, "/creative/relay/v1/images/generations", nil))
+	require.Equal(t, http.StatusNotFound, wrongMethodRelay.Code)
+	require.Empty(t, wrongMethodRelay.Header().Get("Location"))
+	require.NotContains(t, wrongMethodRelay.Header().Get("Location"), "frontend.example")
+	require.Contains(t, wrongMethodRelay.Header().Get("Cache-Control"), "no-store")
+
+	trailingSlashAPI := httptest.NewRecorder()
+	engine.ServeHTTP(trailingSlashAPI, httptest.NewRequest(http.MethodGet, "/creative/api/bootstrap/", nil))
+	require.Contains(t, []int{http.StatusUnauthorized, http.StatusNotFound}, trailingSlashAPI.Code)
+	require.Empty(t, trailingSlashAPI.Header().Get("Location"))
+	require.NotContains(t, trailingSlashAPI.Header().Get("Location"), "frontend.example")
+	require.Contains(t, trailingSlashAPI.Header().Get("Cache-Control"), "no-store")
+
+	trailingSlashRelay := httptest.NewRecorder()
+	trailingSlashRelayRequest := httptest.NewRequest(http.MethodPost, "/creative/relay/v1/images/generations/", strings.NewReader(`{"model":"gpt-image-1","prompt":"safe"}`))
+	trailingSlashRelayRequest.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(trailingSlashRelay, trailingSlashRelayRequest)
+	require.Contains(t, []int{http.StatusUnauthorized, http.StatusNotFound}, trailingSlashRelay.Code)
+	require.Empty(t, trailingSlashRelay.Header().Get("Location"))
+	require.NotContains(t, trailingSlashRelay.Header().Get("Location"), "frontend.example")
+	require.Contains(t, trailingSlashRelay.Header().Get("Cache-Control"), "no-store")
+
+	spaFallback := httptest.NewRecorder()
+	engine.ServeHTTP(spaFallback, httptest.NewRequest(http.MethodGet, "/not-creative", nil))
+	require.Equal(t, http.StatusMovedPermanently, spaFallback.Code)
+	require.Equal(t, "https://frontend.example/not-creative", spaFallback.Header().Get("Location"))
+}
+
+func TestCreativeAPIRelayDoNotInheritLongLivedWebCache(t *testing.T) {
+	engine := newCreativeWebTestEngine(t)
+
+	for _, tt := range []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "api", method: http.MethodGet, path: "/creative/api/bootstrap"},
+		{name: "relay", method: http.MethodPost, path: "/creative/relay/v1/images/generations", body: `{"model":"gpt-image-1","prompt":"safe"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			request.Header.Set("Content-Type", "application/json")
+			engine.ServeHTTP(recorder, request)
+
+			require.NotEqual(t, "max-age=604800", recorder.Header().Get("Cache-Control"))
+			require.Contains(t, recorder.Header().Get("Cache-Control"), "no-store")
+		})
+	}
+}
+
 func TestCreativeEmbeddedNoCacheHeaders(t *testing.T) {
 	engine := newCreativeWebTestEngine(t)
 

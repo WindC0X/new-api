@@ -255,6 +255,10 @@ func migrateDB() error {
 		return err
 	}
 
+	if err := migrateTaskBillingOutboxOwnerIndex(); err != nil {
+		return err
+	}
+
 	err := DB.AutoMigrate(
 		&Channel{},
 		&Token{},
@@ -269,6 +273,7 @@ func migrateDB() error {
 		&QuotaData{},
 		&Task{},
 		&CreativeVideoIdempotency{},
+		&TaskBillingOutbox{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},
@@ -285,7 +290,9 @@ func migrateDB() error {
 		&CreativeModelPreference{},
 		&CreativeDocument{},
 		&CreativeAsset{},
+		&CreativeAssetQuota{},
 		&CreativeDocumentAssetRef{},
+		&CreativeAssetLifecycleOutbox{},
 	)
 	if err != nil {
 		return err
@@ -322,6 +329,8 @@ func migrateDBFast() error {
 		{&TopUp{}, "TopUp"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
+		{&CreativeVideoIdempotency{}, "CreativeVideoIdempotency"},
+		{&TaskBillingOutbox{}, "TaskBillingOutbox"},
 		{&Model{}, "Model"},
 		{&Vendor{}, "Vendor"},
 		{&PrefillGroup{}, "PrefillGroup"},
@@ -338,7 +347,9 @@ func migrateDBFast() error {
 		{&CreativeModelPreference{}, "CreativeModelPreference"},
 		{&CreativeDocument{}, "CreativeDocument"},
 		{&CreativeAsset{}, "CreativeAsset"},
+		{&CreativeAssetQuota{}, "CreativeAssetQuota"},
 		{&CreativeDocumentAssetRef{}, "CreativeDocumentAssetRef"},
+		{&CreativeAssetLifecycleOutbox{}, "CreativeAssetLifecycleOutbox"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -363,6 +374,9 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := migrateTaskBillingOutboxOwnerIndex(); err != nil {
+		return err
+	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -380,6 +394,20 @@ func migrateLOGDB() error {
 	var err error
 	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
 		return err
+	}
+	return nil
+}
+
+func migrateTaskBillingOutboxOwnerIndex() error {
+	if DB == nil || !DB.Migrator().HasTable(&TaskBillingOutbox{}) {
+		return nil
+	}
+	legacyName := "idx_task_billing_outbox_task_op"
+	if !DB.Migrator().HasIndex(&TaskBillingOutbox{}, legacyName) {
+		return nil
+	}
+	if err := DB.Migrator().DropIndex(&TaskBillingOutbox{}, legacyName); err != nil {
+		return fmt.Errorf("drop legacy task billing outbox unique index %s: %w", legacyName, err)
 	}
 	return nil
 }

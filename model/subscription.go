@@ -1295,27 +1295,86 @@ func GetSubscriptionPlanInfoByUserSubscriptionId(userSubscriptionId int) (*Subsc
 
 // Update subscription used amount by delta (positive consume more, negative refund).
 func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
+	return postConsumeUserSubscriptionDelta(userSubscriptionId, 0, false, delta)
+}
+
+// PostConsumeUserSubscriptionDeltaForUser updates a subscription only when it
+// belongs to the expected owner. Use this from task billing paths where the
+// task owner is known, so a stale/mismatched subscription id cannot adjust
+// another user's balance.
+func PostConsumeUserSubscriptionDeltaForUser(userSubscriptionId int, userId int, delta int64) error {
+	return postConsumeUserSubscriptionDelta(userSubscriptionId, userId, true, delta)
+}
+
+func PostConsumeUserSubscriptionDeltaForUserTx(tx *gorm.DB, userSubscriptionId int, userId int, delta int64) error {
+	return postConsumeUserSubscriptionDeltaTx(tx, userSubscriptionId, userId, true, delta)
+}
+
+func postConsumeUserSubscriptionDelta(userSubscriptionId int, userId int, requireUser bool, delta int64) error {
 	if userSubscriptionId <= 0 {
 		return errors.New("invalid userSubscriptionId")
+	}
+	if requireUser && userId <= 0 {
+		return errors.New("invalid userId")
 	}
 	if delta == 0 {
 		return nil
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
-		var sub UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
-			Where("id = ?", userSubscriptionId).
-			First(&sub).Error; err != nil {
-			return err
-		}
-		newUsed := sub.AmountUsed + delta
-		if newUsed < 0 {
-			newUsed = 0
-		}
-		if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
-			return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
-		}
-		sub.AmountUsed = newUsed
-		return tx.Save(&sub).Error
+		return postConsumeUserSubscriptionDeltaTx(tx, userSubscriptionId, userId, requireUser, delta)
 	})
+}
+
+func postConsumeUserSubscriptionDeltaTx(tx *gorm.DB, userSubscriptionId int, userId int, requireUser bool, delta int64) error {
+	if tx == nil {
+		tx = DB
+	}
+	if userSubscriptionId <= 0 {
+		return errors.New("invalid userSubscriptionId")
+	}
+	if requireUser && userId <= 0 {
+		return errors.New("invalid userId")
+	}
+	if delta == 0 {
+		return nil
+	}
+
+	query := tx.Model(&UserSubscription{}).Where("id = ?", userSubscriptionId)
+	if requireUser {
+		query = query.Where("user_id = ?", userId)
+	}
+
+	var result *gorm.DB
+	if delta > 0 {
+		result = query.
+			Where("amount_total <= 0 OR amount_used + ? <= amount_total", delta).
+			Update("amount_used", gorm.Expr("amount_used + ?", delta))
+	} else {
+		refund := -delta
+		result = query.Update("amount_used", gorm.Expr("CASE WHEN amount_used >= ? THEN amount_used - ? ELSE 0 END", refund, refund))
+	}
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return subscriptionDeltaNoRowsError(tx, userSubscriptionId, userId, requireUser, delta)
+	}
+	return nil
+}
+
+func subscriptionDeltaNoRowsError(tx *gorm.DB, userSubscriptionId int, userId int, requireUser bool, delta int64) error {
+	var sub UserSubscription
+	if err := tx.Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
+		return err
+	}
+	if requireUser && sub.UserId != userId {
+		return fmt.Errorf("subscription %d does not belong to user %d", userSubscriptionId, userId)
+	}
+	if delta > 0 && sub.AmountTotal > 0 && sub.AmountUsed+delta > sub.AmountTotal {
+		return fmt.Errorf("subscription used exceeds total, used=%d total=%d", sub.AmountUsed+delta, sub.AmountTotal)
+	}
+	if delta < 0 && sub.AmountUsed == 0 {
+		return nil
+	}
+	return fmt.Errorf("subscription update affected no rows")
 }

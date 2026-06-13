@@ -42,11 +42,11 @@ const (
 var (
 	ErrCreativeAssetDisabled            = errors.New("creative asset sync is disabled")
 	ErrCreativeAssetNotFound            = errors.New("creative asset not found")
-	ErrCreativeAssetQuotaExceeded       = errors.New("creative_asset_quota_exceeded")
+	ErrCreativeAssetQuotaExceeded       = model.ErrCreativeAssetQuotaExceeded
 	ErrCreativeAssetTooLarge            = errors.New("creative asset is too large")
 	ErrCreativeAssetInvalid             = errors.New("creative asset is invalid")
 	ErrCreativeAssetRangeNotSatisfiable = errors.New("creative asset range is not satisfiable")
-	ErrCreativeAssetReferenced          = errors.New("creative asset is referenced")
+	ErrCreativeAssetReferenced          = model.ErrCreativeAssetReferenced
 )
 
 type CreativeAssetConfig struct {
@@ -321,16 +321,30 @@ func (runtime *CreativeAssetRuntime) CreateOrGet(ctx context.Context, userId int
 	asset.ObjectETag = info.ETag
 	asset.ObjectVersion = info.Version
 
-	if err := model.DB.Create(asset).Error; err != nil {
+	created, duplicate, err := model.CreateCreativeAssetWithQuota(asset, model.CreativeAssetQuotaLimits{
+		MaxAssets:              runtime.cfg.UserMaxAssets,
+		MaxBytes:               runtime.cfg.UserMaxBytes,
+		DatabaseUserMaxBytes:   runtime.cfg.DatabaseUserMaxBytes,
+		DatabaseGlobalMaxBytes: runtime.cfg.DatabaseGlobalMaxBytes,
+		EnforceDatabaseLimits:  asset.StorageBackend == model.CreativeAssetStorageDatabase,
+	})
+	if err != nil {
 		if asset.StorageBackend == model.CreativeAssetStorageS3Compatible {
-			_ = runtime.storage.Delete(context.Background(), asset)
+			runtime.cleanupStoredObjectOrEnqueue(context.Background(), asset)
 		}
 		if existing, exists, lookupErr := model.GetCreativeAssetByContentHash(userId, contentHash); lookupErr == nil && exists {
 			return existing, true, nil
 		}
 		return nil, false, err
 	}
-	return asset, false, nil
+	if duplicate {
+		if asset.StorageBackend == model.CreativeAssetStorageS3Compatible {
+			runtime.cleanupStoredObjectOrEnqueue(context.Background(), asset)
+		}
+		_ = model.TouchCreativeAssetAccessedTime(userId, created.AssetId)
+		return created, true, nil
+	}
+	return created, false, nil
 }
 
 func (runtime *CreativeAssetRuntime) Get(ctx context.Context, userId int, assetId string) (*model.CreativeAsset, error) {
@@ -366,24 +380,109 @@ func (runtime *CreativeAssetRuntime) OpenContent(ctx context.Context, userId int
 }
 
 func (runtime *CreativeAssetRuntime) DeleteIfUnreferenced(ctx context.Context, userId int, assetId string) error {
-	asset, err := runtime.Get(ctx, userId, assetId)
+	if err := runtime.ready(); err != nil {
+		return err
+	}
+	asset, exists, err := model.MarkCreativeAssetPendingDelete(userId, assetId)
 	if err != nil {
 		return err
 	}
-	count, err := model.CountCreativeAssetRefs(userId, assetId)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		return ErrCreativeAssetReferenced
-	}
-	if err := model.DeleteCreativeAssetMetadata(userId, assetId); err != nil {
-		return err
+	if !exists {
+		return ErrCreativeAssetNotFound
 	}
 	if err := runtime.storage.Delete(ctx, asset); err != nil {
-		return scrubCreativeAssetError(err)
+		scrubbed := scrubCreativeAssetError(err)
+		_ = model.MarkCreativeAssetDeleteFailed(userId, assetId, scrubbed)
+		return scrubbed
 	}
-	return nil
+	return model.FinalizeCreativeAssetDelete(userId, assetId)
+}
+
+func (runtime *CreativeAssetRuntime) ProcessPendingLifecycleOutboxes(ctx context.Context, limit int) int {
+	if err := runtime.ready(); err != nil {
+		return 0
+	}
+	outboxes, err := model.ListPendingCreativeAssetLifecycleOutboxes(limit)
+	if err != nil {
+		common.SysError(fmt.Sprintf("list creative asset lifecycle outboxes failed: %v", scrubCreativeAssetError(err)))
+		return 0
+	}
+	processed := 0
+	for _, outbox := range outboxes {
+		claimed, err := model.ClaimCreativeAssetLifecycleOutbox(outbox.ID)
+		if err != nil {
+			common.SysError(fmt.Sprintf("claim creative asset lifecycle outbox failed: %v", scrubCreativeAssetError(err)))
+			continue
+		}
+		if !claimed {
+			continue
+		}
+		if outbox.Operation != model.CreativeAssetLifecycleOperationUploadCleanup ||
+			outbox.StorageBackend != model.CreativeAssetStorageS3Compatible ||
+			outbox.StorageBackend != runtime.storage.Backend() {
+			lifecycleErr := errors.New("creative asset lifecycle outbox storage backend or operation is unsupported")
+			_ = model.MarkCreativeAssetLifecycleOutboxFailed(outbox.ID, lifecycleErr)
+			continue
+		}
+		asset := &model.CreativeAsset{
+			UserId:         outbox.UserId,
+			AssetId:        outbox.AssetId,
+			StorageBackend: outbox.StorageBackend,
+			ObjectKey:      outbox.ObjectKey,
+		}
+		if err := runtime.storage.Delete(ctx, asset); err != nil {
+			scrubbed := scrubCreativeAssetError(err)
+			_ = model.MarkCreativeAssetLifecycleOutboxFailed(outbox.ID, scrubbed)
+			continue
+		}
+		if err := model.MarkCreativeAssetLifecycleOutboxDone(outbox.ID); err != nil {
+			common.SysError(fmt.Sprintf("mark creative asset lifecycle outbox done failed: %v", scrubCreativeAssetError(err)))
+			continue
+		}
+		processed++
+	}
+	return processed
+}
+
+func (runtime *CreativeAssetRuntime) ProcessPendingDeletes(ctx context.Context, limit int) int {
+	if err := runtime.ready(); err != nil {
+		return 0
+	}
+	assets, err := model.ListPendingDeleteCreativeAssets(limit)
+	if err != nil {
+		common.SysError(fmt.Sprintf("list pending creative asset deletes failed: %v", scrubCreativeAssetError(err)))
+		return 0
+	}
+	processed := 0
+	for _, asset := range assets {
+		if asset.StorageBackend != runtime.storage.Backend() {
+			_ = model.MarkCreativeAssetDeleteFailed(asset.UserId, asset.AssetId, errors.New("creative asset storage backend is not configured for retry"))
+			continue
+		}
+		if err := runtime.storage.Delete(ctx, &asset); err != nil {
+			scrubbed := scrubCreativeAssetError(err)
+			_ = model.MarkCreativeAssetDeleteFailed(asset.UserId, asset.AssetId, scrubbed)
+			continue
+		}
+		if err := model.FinalizeCreativeAssetDelete(asset.UserId, asset.AssetId); err != nil {
+			common.SysError(fmt.Sprintf("finalize creative asset delete failed: %v", scrubCreativeAssetError(err)))
+			continue
+		}
+		processed++
+	}
+	return processed
+}
+
+func (runtime *CreativeAssetRuntime) cleanupStoredObjectOrEnqueue(ctx context.Context, asset *model.CreativeAsset) {
+	if runtime == nil || runtime.storage == nil || asset == nil || asset.StorageBackend != model.CreativeAssetStorageS3Compatible {
+		return
+	}
+	if err := runtime.storage.Delete(ctx, asset); err == nil {
+		return
+	}
+	if _, enqueueErr := model.EnqueueCreativeAssetLifecycleOutbox(asset, model.CreativeAssetLifecycleOperationUploadCleanup); enqueueErr != nil {
+		common.SysError(fmt.Sprintf("enqueue creative asset lifecycle cleanup failed: %v", scrubCreativeAssetError(enqueueErr)))
+	}
 }
 
 func (runtime *CreativeAssetRuntime) ready() error {
@@ -629,7 +728,7 @@ type HTTPS3CompatibleObjectClient struct {
 func NewHTTPS3CompatibleObjectClient(cfg CreativeAssetConfig) *HTTPS3CompatibleObjectClient {
 	return &HTTPS3CompatibleObjectClient{
 		cfg:        normalizeCreativeAssetConfig(cfg),
-		httpClient: http.DefaultClient,
+		httpClient: ensureHTTPClient(),
 		signer:     awsv4.NewSigner(),
 		credentials: aws.Credentials{
 			AccessKeyID:     strings.TrimSpace(cfg.S3AccessKeyID),

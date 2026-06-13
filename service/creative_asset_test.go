@@ -5,8 +5,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -32,7 +36,7 @@ func setupCreativeAssetServiceTestDB(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	model.DB = db
-	require.NoError(t, db.AutoMigrate(&model.CreativeAsset{}, &model.CreativeDocumentAssetRef{}))
+	require.NoError(t, db.AutoMigrate(&model.CreativeAsset{}, &model.CreativeAssetQuota{}, &model.CreativeDocumentAssetRef{}, &model.CreativeAssetLifecycleOutbox{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -66,6 +70,24 @@ func TestCreativeAssetConfigFailsClosedForProductionWithoutS3(t *testing.T) {
 	_, err = NewCreativeAssetRuntime(cfg, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "s3-compatible storage is not configured")
+}
+
+func TestCreativeAssetS3ClientUsesManagedRedirectPolicy(t *testing.T) {
+	previous := httpClient
+	httpClient = nil
+	t.Cleanup(func() { httpClient = previous })
+
+	client := NewHTTPS3CompatibleObjectClient(CreativeAssetConfig{
+		S3Endpoint:        "https://s3.example",
+		S3Region:          "auto",
+		S3Bucket:          "private-bucket",
+		S3AccessKeyID:     "test-ak",
+		S3SecretAccessKey: "test-sk",
+	})
+
+	require.NotNil(t, client.httpClient)
+	require.NotSame(t, http.DefaultClient, client.httpClient)
+	require.NotNil(t, client.httpClient.CheckRedirect)
 }
 
 func TestCreativeAssetDatabaseFallbackRequiresCanaryCapsAndDiskHeadroom(t *testing.T) {
@@ -160,6 +182,69 @@ func TestCreativeAssetCreateDeduplicatesAndDoesNotLeakObjectKey(t *testing.T) {
 	require.NotContains(t, body, "s3.example")
 }
 
+func TestCreativeAssetConcurrentUploadsCannotBypassUserAssetQuota(t *testing.T) {
+	setupCreativeAssetServiceTestDB(t)
+
+	const workers = 3
+	storage := newBarrierCreativeAssetStorage(workers)
+	runtime := &CreativeAssetRuntime{
+		cfg: normalizeCreativeAssetConfig(CreativeAssetConfig{
+			Enabled:                   true,
+			RolloutMode:               CreativeAssetRolloutLocal,
+			StorageBackend:            model.CreativeAssetStorageDatabase,
+			DatabaseGlobalMaxBytes:    1024,
+			DatabaseUserMaxBytes:      1024,
+			DatabaseReservedFreeBytes: 0,
+			UserMaxBytes:              1024,
+			UserMaxAssets:             1,
+			DiskSpaceProviderForWrites: func() common.DiskSpaceInfo {
+				return common.DiskSpaceInfo{Total: 1024, Free: 1024, UsedPercent: 1}
+			},
+		}),
+		storage: storage,
+	}
+
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			payload := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', byte(i), byte(i + 1), byte(i + 2)}
+			_, _, err := runtime.CreateOrGet(context.Background(), 701, CreativeAssetCreateRequest{
+				Reader:          bytes.NewReader(payload),
+				Size:            int64(len(payload)),
+				ClientMimeType:  "image/png",
+				ClientMediaType: "image",
+			})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	quotaFailures := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		if errors.Is(err, ErrCreativeAssetQuotaExceeded) {
+			quotaFailures++
+		} else {
+			require.NoError(t, err)
+		}
+	}
+	require.Equal(t, 1, successes)
+	require.Equal(t, workers-1, quotaFailures)
+
+	count, err := model.CountCreativeAssets(701)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+}
+
 func TestCreativeAssetFakeS3StorageSupportsRangeAndDelete(t *testing.T) {
 	setupCreativeAssetServiceTestDB(t)
 	fakeS3 := NewFakeS3CompatibleObjectClient()
@@ -207,10 +292,148 @@ func TestCreativeAssetFakeS3StorageSupportsRangeAndDelete(t *testing.T) {
 	require.True(t, errors.Is(err, ErrCreativeAssetNotFound))
 }
 
+func TestCreativeAssetDeleteFailureKeepsMetadataRetryable(t *testing.T) {
+	setupCreativeAssetServiceTestDB(t)
+	fakeS3 := NewFakeS3CompatibleObjectClient()
+	failDelete := &failingDeleteS3Client{FakeS3CompatibleObjectClient: fakeS3, deleteErr: errors.New("delete temporarily failed")}
+	runtime := mustCreativeAssetRuntimeForTest(t, CreativeAssetConfig{
+		Enabled:           true,
+		RolloutMode:       CreativeAssetRolloutProduction,
+		StorageBackend:    model.CreativeAssetStorageS3Compatible,
+		S3Endpoint:        "https://s3.example",
+		S3Region:          "auto",
+		S3Bucket:          "private-bucket",
+		S3Prefix:          "creative-test",
+		S3AccessKeyID:     "test-ak",
+		S3SecretAccessKey: "test-sk",
+		UserMaxBytes:      1024,
+		UserMaxAssets:     10,
+	}, failDelete)
+
+	mp4 := []byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 1, 2, 3, 4, 5, 6}
+	asset, duplicate, err := runtime.CreateOrGet(context.Background(), 801, CreativeAssetCreateRequest{
+		Reader:          bytes.NewReader(mp4),
+		Size:            int64(len(mp4)),
+		ClientMimeType:  "video/mp4",
+		ClientMediaType: "video",
+	})
+	require.NoError(t, err)
+	require.False(t, duplicate)
+
+	err = runtime.DeleteIfUnreferenced(context.Background(), 801, asset.AssetId)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "delete temporarily failed")
+
+	var stored model.CreativeAsset
+	require.NoError(t, model.DB.Where("user_id = ? AND asset_id = ?", 801, asset.AssetId).First(&stored).Error)
+	require.NotEmpty(t, stored.ObjectKey)
+
+	failDelete.deleteErr = nil
+	processed := runtime.ProcessPendingDeletes(context.Background(), 10)
+	require.Equal(t, 1, processed)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.CreativeAsset{}).Where("user_id = ? AND asset_id = ?", 801, asset.AssetId).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestCreativeAssetLifecycleOutboxDeletesOrphanS3Upload(t *testing.T) {
+	setupCreativeAssetServiceTestDB(t)
+	fakeS3 := NewFakeS3CompatibleObjectClient()
+	runtime := mustCreativeAssetRuntimeForTest(t, CreativeAssetConfig{
+		Enabled:           true,
+		RolloutMode:       CreativeAssetRolloutProduction,
+		StorageBackend:    model.CreativeAssetStorageS3Compatible,
+		S3Endpoint:        "https://s3.example",
+		S3Region:          "auto",
+		S3Bucket:          "private-bucket",
+		S3Prefix:          "creative-test",
+		S3AccessKeyID:     "test-ak",
+		S3SecretAccessKey: "test-sk",
+		UserMaxBytes:      1024,
+		UserMaxAssets:     10,
+	}, fakeS3)
+
+	key := "creative-test/orphan-upload"
+	_, err := fakeS3.PutObject(context.Background(), key, bytes.NewReader([]byte("orphan")), int64(len("orphan")), "image/png")
+	require.NoError(t, err)
+
+	orphan := &model.CreativeAsset{
+		UserId:         901,
+		AssetId:        "asset_orphan_upload",
+		StorageBackend: model.CreativeAssetStorageS3Compatible,
+		ObjectKey:      key,
+	}
+	_, err = model.EnqueueCreativeAssetLifecycleOutbox(orphan, model.CreativeAssetLifecycleOperationUploadCleanup)
+	require.NoError(t, err)
+
+	processed := runtime.ProcessPendingLifecycleOutboxes(context.Background(), 10)
+	require.Equal(t, 1, processed)
+	_, err = fakeS3.HeadObject(context.Background(), key)
+	require.ErrorIs(t, err, ErrCreativeAssetNotFound)
+
+	var outbox model.CreativeAssetLifecycleOutbox
+	require.NoError(t, model.DB.First(&outbox).Error)
+	require.Equal(t, model.CreativeAssetLifecycleStatusDone, outbox.Status)
+}
+
 func mustCreativeAssetRuntimeForTest(t *testing.T, cfg CreativeAssetConfig, client S3CompatibleObjectClient) *CreativeAssetRuntime {
 	t.Helper()
 
 	runtime, err := NewCreativeAssetRuntime(cfg, client)
 	require.NoError(t, err)
 	return runtime
+}
+
+type barrierCreativeAssetStorage struct {
+	target   int32
+	reached  int32
+	released chan struct{}
+	once     sync.Once
+	order    int32
+}
+
+func newBarrierCreativeAssetStorage(target int) *barrierCreativeAssetStorage {
+	return &barrierCreativeAssetStorage{target: int32(target), released: make(chan struct{})}
+}
+
+func (storage *barrierCreativeAssetStorage) Backend() string {
+	return model.CreativeAssetStorageDatabase
+}
+
+func (storage *barrierCreativeAssetStorage) Store(ctx context.Context, asset *model.CreativeAsset, data []byte) (CreativeAssetObjectInfo, error) {
+	if atomic.AddInt32(&storage.reached, 1) == storage.target {
+		storage.once.Do(func() { close(storage.released) })
+	}
+	select {
+	case <-storage.released:
+	case <-time.After(2 * time.Second):
+		return CreativeAssetObjectInfo{}, errors.New("timed out waiting for concurrent stores")
+	}
+	order := atomic.AddInt32(&storage.order, 1)
+	time.Sleep(time.Duration(order-1) * 25 * time.Millisecond)
+	return CreativeAssetObjectInfo{Size: int64(len(data))}, nil
+}
+
+func (storage *barrierCreativeAssetStorage) OpenRange(ctx context.Context, asset *model.CreativeAsset, rangeHeader string) (*CreativeAssetContent, error) {
+	return nil, ErrCreativeAssetNotFound
+}
+
+func (storage *barrierCreativeAssetStorage) Head(ctx context.Context, asset *model.CreativeAsset) (CreativeAssetObjectInfo, error) {
+	return CreativeAssetObjectInfo{}, nil
+}
+
+func (storage *barrierCreativeAssetStorage) Delete(ctx context.Context, asset *model.CreativeAsset) error {
+	return nil
+}
+
+type failingDeleteS3Client struct {
+	*FakeS3CompatibleObjectClient
+	deleteErr error
+}
+
+func (client *failingDeleteS3Client) DeleteObject(ctx context.Context, key string) error {
+	if client.deleteErr != nil {
+		return client.deleteErr
+	}
+	return client.FakeS3CompatibleObjectClient.DeleteObject(ctx, key)
 }

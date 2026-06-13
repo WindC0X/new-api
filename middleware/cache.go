@@ -1,13 +1,27 @@
 package middleware
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 )
 
 func Cache() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		if c.Request.RequestURI == "/" {
+		path := ""
+		if c.Request != nil && c.Request.URL != nil {
+			path = c.Request.URL.Path
+		}
+		if path == "" && c.Request != nil {
+			path = c.Request.RequestURI
+		}
+
+		if path == "/" {
 			c.Header("Cache-Control", "no-cache")
+		} else if path == "/creative/api" || strings.HasPrefix(path, "/creative/api/") ||
+			path == "/creative/relay" || strings.HasPrefix(path, "/creative/relay/") {
+			c.Header("Cache-Control", "private, no-store")
+			c.Header("Pragma", "no-cache")
 		} else {
 			c.Header("Cache-Control", "max-age=604800") // one week
 		}

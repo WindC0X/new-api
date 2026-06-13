@@ -1,10 +1,16 @@
 package controller
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,6 +25,106 @@ func confirmPaymentComplianceForTest(t *testing.T) {
 	})
 	paymentSetting.ComplianceConfirmed = true
 	paymentSetting.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+}
+
+func TestStripeWebhookMissingSignatureUsesSanitizedFailureLog(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	originalAPISecret := setting.StripeApiSecret
+	originalWebhookSecret := setting.StripeWebhookSecret
+	originalPriceID := setting.StripePriceId
+	originalMode := gin.Mode()
+	originalWriter := gin.DefaultWriter
+	originalErrorWriter := gin.DefaultErrorWriter
+	t.Cleanup(func() {
+		setting.StripeApiSecret = originalAPISecret
+		setting.StripeWebhookSecret = originalWebhookSecret
+		setting.StripePriceId = originalPriceID
+		gin.SetMode(originalMode)
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = originalWriter
+		gin.DefaultErrorWriter = originalErrorWriter
+		common.LogWriterMu.Unlock()
+	})
+
+	setting.StripeApiSecret = "sk_test_123"
+	setting.StripeWebhookSecret = "whsec_test_secret"
+	setting.StripePriceId = "price_123"
+
+	var logBuffer bytes.Buffer
+	common.LogWriterMu.Lock()
+	gin.DefaultWriter = &logBuffer
+	gin.DefaultErrorWriter = &logBuffer
+	common.LogWriterMu.Unlock()
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.POST("/stripe/webhook", StripeWebhook)
+
+	payload := `{"id":"evt_missing_signature_secret","object":"event","secret_field":"missing-signature-body-secret"}`
+	req := httptest.NewRequest(http.MethodPost, "/stripe/webhook?signature_secret=query-leak", strings.NewReader(payload))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	logs := logBuffer.String()
+	require.NotContains(t, logs, payload)
+	require.NotContains(t, logs, "missing-signature-body-secret")
+	require.NotContains(t, logs, "evt_missing_signature_secret")
+	require.NotContains(t, logs, "Stripe-Signature")
+	require.NotContains(t, logs, "signature_secret")
+	require.NotContains(t, logs, "query-leak")
+	require.Contains(t, logs, "verification_failed")
+}
+
+func TestStripeWebhookRejectsInvalidSignatureWithoutLoggingRawPayload(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	originalAPISecret := setting.StripeApiSecret
+	originalWebhookSecret := setting.StripeWebhookSecret
+	originalPriceID := setting.StripePriceId
+	originalMode := gin.Mode()
+	originalWriter := gin.DefaultWriter
+	originalErrorWriter := gin.DefaultErrorWriter
+	t.Cleanup(func() {
+		setting.StripeApiSecret = originalAPISecret
+		setting.StripeWebhookSecret = originalWebhookSecret
+		setting.StripePriceId = originalPriceID
+		gin.SetMode(originalMode)
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = originalWriter
+		gin.DefaultErrorWriter = originalErrorWriter
+		common.LogWriterMu.Unlock()
+	})
+
+	setting.StripeApiSecret = "sk_test_123"
+	setting.StripeWebhookSecret = "whsec_test_secret"
+	setting.StripePriceId = "price_123"
+
+	var logBuffer bytes.Buffer
+	common.LogWriterMu.Lock()
+	gin.DefaultWriter = &logBuffer
+	gin.DefaultErrorWriter = &logBuffer
+	common.LogWriterMu.Unlock()
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.POST("/stripe/webhook", StripeWebhook)
+
+	payload := `{"id":"evt_raw_payload_secret","object":"event","secret_field":"raw-body-secret"}`
+	req := httptest.NewRequest(http.MethodPost, "/stripe/webhook", strings.NewReader(payload))
+	req.Header.Set("Stripe-Signature", "t=12345,v1=signature-secret-value")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	logs := logBuffer.String()
+	require.NotContains(t, logs, payload)
+	require.NotContains(t, logs, "raw-body-secret")
+	require.NotContains(t, logs, "evt_raw_payload_secret")
+	require.NotContains(t, logs, "signature-secret-value")
+	require.NotContains(t, logs, "Stripe-Signature")
+	require.Contains(t, logs, "body_bytes=")
 }
 
 func TestStripeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {

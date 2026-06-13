@@ -3,6 +3,7 @@ package taskcommon
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -17,9 +18,12 @@ func UnmarshalMetadata(metadata map[string]any, target any) error {
 	if metadata == nil {
 		return nil
 	}
-	// Prevent metadata from overriding model fields to avoid billing bypass.
-	delete(metadata, "model")
-	metaBytes, err := common.Marshal(metadata)
+	// Prevent metadata from overriding server-selected model fields to avoid
+	// model-pool and billing bypasses. Providers use several non-"model" names
+	// for the upstream model selector (for example Kling's model_name and
+	// Jimeng's req_key), so sanitize aliases before the JSON round-trip merge.
+	sanitizedMetadata := sanitizeServerSelectedModelMetadata(metadata)
+	metaBytes, err := common.Marshal(sanitizedMetadata)
 	if err != nil {
 		return fmt.Errorf("marshal metadata failed: %w", err)
 	}
@@ -27,6 +31,61 @@ func UnmarshalMetadata(metadata map[string]any, target any) error {
 		return fmt.Errorf("unmarshal metadata failed: %w", err)
 	}
 	return nil
+}
+
+func sanitizeServerSelectedModelMetadata(metadata map[string]any) map[string]any {
+	if metadata == nil {
+		return nil
+	}
+	sanitized := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		if metadataKeyOverridesServerSelectedModel(key) {
+			continue
+		}
+		sanitized[key] = sanitizeServerSelectedModelMetadataValue(value)
+	}
+	return sanitized
+}
+
+func sanitizeServerSelectedModelMetadataValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return sanitizeServerSelectedModelMetadata(typed)
+	case []any:
+		sanitized := make([]any, 0, len(typed))
+		for _, item := range typed {
+			sanitized = append(sanitized, sanitizeServerSelectedModelMetadataValue(item))
+		}
+		return sanitized
+	default:
+		return value
+	}
+}
+
+func metadataKeyOverridesServerSelectedModel(key string) bool {
+	normalized := normalizeMetadataKey(key)
+	if normalized == "" {
+		return false
+	}
+	if strings.Contains(normalized, "model") {
+		return true
+	}
+	switch normalized {
+	case "reqkey", "requestkey", "upstream", "upstreamkey", "upstreammodel", "upstreammodelname":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeMetadataKey(key string) string {
+	var builder strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(key)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
 
 // DefaultString returns val if non-empty, otherwise fallback.

@@ -30,6 +30,14 @@ func videoProxyError(c *gin.Context, status int, errType, message string) {
 	})
 }
 
+func redactURLForLog(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "[redacted-url]"
+	}
+	return parsed.Scheme + "://" + parsed.Host + "/[redacted]"
+}
+
 func VideoProxy(c *gin.Context) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
@@ -135,6 +143,7 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
+	logVideoURL := redactURLForLog(videoURL)
 	fetchSetting := system_setting.GetFetchSetting()
 	if err := common.ValidateURLWithFetchSetting(videoURL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Video URL blocked for task %s: %v", taskID, err))
@@ -144,21 +153,21 @@ func VideoProxy(c *gin.Context) {
 
 	req.URL, err = url.Parse(videoURL)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to parse URL %s: %s", videoURL, err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to parse URL %s: %s", logVideoURL, err.Error()))
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to create proxy request")
 		return
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to fetch video from %s: %s", videoURL, err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to fetch video from %s: %s", logVideoURL, err.Error()))
 		videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch video content")
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for %s", resp.StatusCode, videoURL))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for %s", resp.StatusCode, logVideoURL))
 		videoProxyError(c, http.StatusBadGateway, "server_error",
 			fmt.Sprintf("Upstream service returned status %d", resp.StatusCode))
 		return
@@ -194,12 +203,8 @@ func videoProxyBlockedResponseHeader(key string) bool {
 }
 
 func applyVideoProxyCacheHeaders(c *gin.Context) {
-	if c.GetBool(creativeVideoContentContextKey) {
-		c.Writer.Header().Set("Cache-Control", "private, no-store")
-		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
-		return
-	}
-	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	c.Writer.Header().Set("Cache-Control", "private, no-store")
+	c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
 }
 
 func writeVideoDataURL(c *gin.Context, dataURL string) error {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,54 +23,108 @@ var (
 )
 
 func checkRedirect(req *http.Request, via []*http.Request) error {
+	stripSensitiveRedirectHeaders(req, via)
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after 10 redirects")
+	}
 	fetchSetting := system_setting.GetFetchSetting()
 	urlStr := req.URL.String()
 	if err := common.ValidateURLWithFetchSetting(urlStr, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
-		return fmt.Errorf("redirect to %s blocked: %v", urlStr, err)
-	}
-	if len(via) >= 10 {
-		return fmt.Errorf("stopped after 10 redirects")
+		return fmt.Errorf("redirect to %s blocked: %v", redactURLForClientError(urlStr), err)
 	}
 	return nil
 }
 
-func InitHttpClient() {
+func redactURLForClientError(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "[redacted-url]"
+	}
+	return parsed.Scheme + "://" + parsed.Host + "/[redacted]"
+}
+
+func stripSensitiveRedirectHeaders(req *http.Request, via []*http.Request) {
+	if req == nil || req.URL == nil || req.Header == nil || len(via) == 0 {
+		return
+	}
+	previous := via[len(via)-1]
+	if previous == nil || previous.URL == nil || strings.EqualFold(previous.URL.Host, req.URL.Host) {
+		return
+	}
+	for key := range req.Header {
+		if sensitiveRedirectHeaderKey(key) {
+			req.Header.Del(key)
+		}
+	}
+}
+
+func sensitiveRedirectHeaderKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	if strings.Contains(normalized, "apikey") ||
+		strings.Contains(normalized, "apisecret") ||
+		strings.Contains(normalized, "cookie") ||
+		strings.Contains(normalized, "mjsecret") {
+		return true
+	}
+	switch normalized {
+	case "authorization", "proxyauthorization", "cookie", "xgoogapikey":
+		return true
+	default:
+		return false
+	}
+}
+
+func newHTTPTransport(proxyFunc func(*http.Request) (*url.URL, error)) *http.Transport {
 	transport := &http.Transport{
 		MaxIdleConns:        common.RelayMaxIdleConns,
 		MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
 		IdleConnTimeout:     time.Duration(common.RelayIdleConnTimeout) * time.Second,
 		ForceAttemptHTTP2:   true,
-		Proxy:               http.ProxyFromEnvironment, // Support HTTP_PROXY, HTTPS_PROXY, NO_PROXY env vars
+		Proxy:               proxyFunc,
 	}
 	if common.TLSInsecureSkipVerify {
 		transport.TLSClientConfig = common.InsecureTLSConfig
 	}
+	return transport
+}
 
-	if common.RelayTimeout == 0 {
-		httpClient = &http.Client{
-			Transport:     transport,
-			CheckRedirect: checkRedirect,
-		}
-	} else {
-		httpClient = &http.Client{
-			Transport:     transport,
-			Timeout:       time.Duration(common.RelayTimeout) * time.Second,
-			CheckRedirect: checkRedirect,
-		}
+func newHTTPClient(transport http.RoundTripper) *http.Client {
+	client := &http.Client{
+		Transport:     transport,
+		CheckRedirect: checkRedirect,
 	}
+	if common.RelayTimeout != 0 {
+		client.Timeout = time.Duration(common.RelayTimeout) * time.Second
+	}
+	return client
+}
+
+func InitHttpClient() {
+	httpClient = newHTTPClient(newHTTPTransport(http.ProxyFromEnvironment))
 }
 
 func GetHttpClient() *http.Client {
 	return httpClient
 }
 
+func ensureHTTPClient() *http.Client {
+	if client := GetHttpClient(); client != nil {
+		return client
+	}
+	proxyClientLock.Lock()
+	defer proxyClientLock.Unlock()
+	if httpClient == nil {
+		httpClient = newHTTPClient(nil)
+	}
+	return httpClient
+}
+
 // GetHttpClientWithProxy returns the default client or a proxy-enabled one when proxyURL is provided.
 func GetHttpClientWithProxy(proxyURL string) (*http.Client, error) {
 	if proxyURL == "" {
-		if client := GetHttpClient(); client != nil {
-			return client, nil
-		}
-		return http.DefaultClient, nil
+		return ensureHTTPClient(), nil
 	}
 	return NewProxyHttpClient(proxyURL)
 }
@@ -89,10 +144,7 @@ func ResetProxyClientCache() {
 // NewProxyHttpClient 创建支持代理的 HTTP 客户端
 func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 	if proxyURL == "" {
-		if client := GetHttpClient(); client != nil {
-			return client, nil
-		}
-		return http.DefaultClient, nil
+		return ensureHTTPClient(), nil
 	}
 
 	proxyClientLock.Lock()
@@ -109,21 +161,7 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 
 	switch parsedURL.Scheme {
 	case "http", "https":
-		transport := &http.Transport{
-			MaxIdleConns:        common.RelayMaxIdleConns,
-			MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
-			IdleConnTimeout:     time.Duration(common.RelayIdleConnTimeout) * time.Second,
-			ForceAttemptHTTP2:   true,
-			Proxy:               http.ProxyURL(parsedURL),
-		}
-		if common.TLSInsecureSkipVerify {
-			transport.TLSClientConfig = common.InsecureTLSConfig
-		}
-		client := &http.Client{
-			Transport:     transport,
-			CheckRedirect: checkRedirect,
-		}
-		client.Timeout = time.Duration(common.RelayTimeout) * time.Second
+		client := newHTTPClient(newHTTPTransport(http.ProxyURL(parsedURL)))
 		proxyClientLock.Lock()
 		proxyClients[proxyURL] = client
 		proxyClientLock.Unlock()
@@ -149,21 +187,12 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 			return nil, err
 		}
 
-		transport := &http.Transport{
-			MaxIdleConns:        common.RelayMaxIdleConns,
-			MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
-			IdleConnTimeout:     time.Duration(common.RelayIdleConnTimeout) * time.Second,
-			ForceAttemptHTTP2:   true,
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialer.Dial(network, addr)
-			},
-		}
-		if common.TLSInsecureSkipVerify {
-			transport.TLSClientConfig = common.InsecureTLSConfig
+		transport := newHTTPTransport(nil)
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.Dial(network, addr)
 		}
 
-		client := &http.Client{Transport: transport, CheckRedirect: checkRedirect}
-		client.Timeout = time.Duration(common.RelayTimeout) * time.Second
+		client := newHTTPClient(transport)
 		proxyClientLock.Lock()
 		proxyClients[proxyURL] = client
 		proxyClientLock.Unlock()

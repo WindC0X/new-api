@@ -2,10 +2,12 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -222,8 +224,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
 	}
 	if resp != nil && resp.StatusCode != http.StatusOK {
-		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		return nil, taskSubmitNonOKResponseError(resp)
 	}
 
 	// 10. 返回 OtherRatios 给下游（header 必须在 DoResponse 写 body 之前设置）
@@ -255,6 +256,18 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+func taskSubmitNonOKResponseError(resp *http.Response) *dto.TaskError {
+	if resp == nil {
+		return service.TaskErrorWrapper(fmt.Errorf("upstream returned nil response"), "fail_to_fetch_task", http.StatusBadGateway)
+	}
+	var responseBody []byte
+	if resp.Body != nil {
+		defer resp.Body.Close()
+		responseBody, _ = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	}
+	return service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。
@@ -320,13 +333,21 @@ func sunoFetchRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.Ta
 	}
 	var tasks []any
 	if len(condition.IDs) > 0 {
-		taskModels, err := model.GetByTaskIds(userId, condition.IDs)
+		taskIDs, err := service.NormalizeCreativeTaskIDList(condition.IDs)
+		if err != nil {
+			taskResp = service.TaskErrorWrapper(err, "invalid_request", http.StatusBadRequest)
+			return
+		}
+		taskModels, err := model.GetByTaskIds(userId, taskIDs)
 		if err != nil {
 			taskResp = service.TaskErrorWrapper(err, "get_tasks_failed", http.StatusInternalServerError)
 			return
 		}
 		for _, task := range taskModels {
-			tasks = append(tasks, TaskModel2Dto(task))
+			if task == nil || task.Platform != constant.TaskPlatformSuno {
+				continue
+			}
+			tasks = append(tasks, SunoTaskModel2Dto(task))
 		}
 	} else {
 		tasks = make([]any, 0)
@@ -347,16 +368,45 @@ func sunoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dt
 		taskResp = service.TaskErrorWrapper(err, "get_task_failed", http.StatusInternalServerError)
 		return
 	}
-	if !exist {
+	if !exist || originTask == nil || originTask.Platform != constant.TaskPlatformSuno {
 		taskResp = service.TaskErrorWrapperLocal(errors.New("task_not_exist"), "task_not_exist", http.StatusBadRequest)
 		return
 	}
 
 	respBody, err = common.Marshal(dto.TaskResponse[any]{
 		Code: "success",
-		Data: TaskModel2Dto(originTask),
+		Data: SunoTaskModel2Dto(originTask),
 	})
 	return
+}
+
+type SunoTaskDto struct {
+	TaskID     string          `json:"task_id"`
+	Action     string          `json:"action,omitempty"`
+	Status     string          `json:"status"`
+	FailReason string          `json:"fail_reason,omitempty"`
+	SubmitTime int64           `json:"submit_time,omitempty"`
+	StartTime  int64           `json:"start_time,omitempty"`
+	FinishTime int64           `json:"finish_time,omitempty"`
+	Progress   string          `json:"progress,omitempty"`
+	Data       json.RawMessage `json:"data,omitempty"`
+}
+
+func SunoTaskModel2Dto(task *model.Task) *SunoTaskDto {
+	if task == nil {
+		return nil
+	}
+	return &SunoTaskDto{
+		TaskID:     task.TaskID,
+		Action:     task.Action,
+		Status:     string(task.Status),
+		FailReason: task.FailReason,
+		SubmitTime: task.SubmitTime,
+		StartTime:  task.StartTime,
+		FinishTime: task.FinishTime,
+		Progress:   task.Progress,
+		Data:       task.Data,
+	}
 }
 
 func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.TaskError) {
@@ -376,8 +426,9 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
+	isCreativeOpenAIVideoAPI := strings.HasPrefix(c.Request.URL.Path, "/creative/relay/v1/videos/")
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.URL.Path, "/v1/videos/") ||
-		strings.HasPrefix(c.Request.URL.Path, "/creative/relay/v1/videos/")
+		isCreativeOpenAIVideoAPI
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
 	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
@@ -398,6 +449,13 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 				taskResp = service.TaskErrorWrapper(err, "convert_to_openai_video_failed", http.StatusInternalServerError)
 				return
 			}
+			if isCreativeOpenAIVideoAPI {
+				openAIVideoData, err = sanitizeCreativeOpenAIVideoResponse(originTask.TaskID, openAIVideoData)
+				if err != nil {
+					taskResp = service.TaskErrorWrapper(err, "sanitize_openai_video_failed", http.StatusInternalServerError)
+					return
+				}
+			}
 			respBody = openAIVideoData
 			return
 		}
@@ -414,6 +472,49 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
 	}
 	return
+}
+
+func creativeVideoContentProxyPath(taskID string) string {
+	return "/creative/relay/v1/videos/" + url.PathEscape(strings.TrimSpace(taskID)) + "/content"
+}
+
+func sanitizeCreativeOpenAIVideoResponse(taskID string, respBody []byte) ([]byte, error) {
+	var payload map[string]any
+	if err := common.Unmarshal(respBody, &payload); err != nil {
+		return nil, err
+	}
+	for key := range payload {
+		if creativeVideoRawURLKey(key) {
+			delete(payload, key)
+		}
+	}
+	metadata, _ := payload["metadata"].(map[string]any)
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	for key := range metadata {
+		if creativeVideoRawURLKey(key) {
+			delete(metadata, key)
+		}
+	}
+	metadata["url"] = creativeVideoContentProxyPath(taskID)
+	payload["metadata"] = metadata
+	if id, ok := payload["id"].(string); !ok || strings.TrimSpace(id) == "" {
+		payload["id"] = strings.TrimSpace(taskID)
+	}
+	return common.Marshal(payload)
+}
+
+func creativeVideoRawURLKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	switch normalized {
+	case "url", "videourl", "resulturl", "providerurl", "sourceurl", "remoteurl", "signedurl", "downloadurl":
+		return true
+	default:
+		return false
+	}
 }
 
 // tryRealtimeFetch 尝试从上游实时拉取 Gemini/Vertex 任务状态。
@@ -438,12 +539,12 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 
-	key := channelModel.Key
-	if task.PrivateData.Key != "" {
-		key = task.PrivateData.Key
+	key, upstreamTaskID, ok := realtimeFetchKeyAndTaskID(task, channelModel)
+	if !ok {
+		return nil
 	}
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
-		"task_id": task.GetUpstreamTaskID(),
+		"task_id": upstreamTaskID,
 		"action":  task.Action,
 	}, proxy)
 	if err != nil || resp == nil {
@@ -502,13 +603,34 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		"metadata": nil,
 		"status":   mapTaskStatusToSimple(task.Status),
 		"task_id":  task.TaskID,
-		"url":      task.GetResultURL(),
+		"url":      taskResultURLForDTO(task),
 	}
 	respBody, _ := common.Marshal(dto.TaskResponse[any]{
 		Code: "success",
 		Data: out,
 	})
 	return respBody
+}
+
+func realtimeFetchKeyAndTaskID(task *model.Task, channelModel *model.Channel) (string, string, bool) {
+	if task == nil || channelModel == nil {
+		return "", "", false
+	}
+	key := strings.TrimSpace(task.PrivateData.Key)
+	upstreamTaskID := strings.TrimSpace(task.GetUpstreamTaskID())
+	if strings.TrimSpace(task.PrivateData.IdempotencyKey) != "" {
+		if key == "" || strings.TrimSpace(task.PrivateData.UpstreamTaskID) == "" {
+			return "", "", false
+		}
+		upstreamTaskID = strings.TrimSpace(task.PrivateData.UpstreamTaskID)
+	}
+	if key == "" {
+		key = strings.TrimSpace(channelModel.Key)
+	}
+	if key == "" || upstreamTaskID == "" {
+		return "", "", false
+	}
+	return key, upstreamTaskID, true
 }
 
 // detectVideoFormat 从 Gemini/Vertex 原始响应中探测视频格式
@@ -564,7 +686,7 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 		Action:     task.Action,
 		Status:     string(task.Status),
 		FailReason: task.FailReason,
-		ResultURL:  task.GetResultURL(),
+		ResultURL:  taskResultURLForDTO(task),
 		SubmitTime: task.SubmitTime,
 		StartTime:  task.StartTime,
 		FinishTime: task.FinishTime,
@@ -573,4 +695,28 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 		Username:   task.Username,
 		Data:       task.Data,
 	}
+}
+
+func taskResultURLForDTO(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	raw := strings.TrimSpace(task.GetResultURL())
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "/v1/videos/") || strings.HasPrefix(raw, "/creative/relay/v1/videos/") {
+		return raw
+	}
+	if strings.HasPrefix(raw, "data:") {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err == nil && parsed != nil && parsed.Scheme != "" && parsed.Host != "" {
+		if strings.TrimSpace(task.TaskID) == "" {
+			return ""
+		}
+		return "/v1/videos/" + url.PathEscape(strings.TrimSpace(task.TaskID)) + "/content"
+	}
+	return raw
 }

@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +46,7 @@ func TestMain(m *testing.M) {
 		&model.Channel{},
 		&model.TopUp{},
 		&model.UserSubscription{},
+		&model.TaskBillingOutbox{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -65,6 +68,7 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM channels")
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM user_subscriptions")
+		model.DB.Exec("DELETE FROM task_billing_outboxes")
 	}
 	cleanup()
 	t.Cleanup(cleanup)
@@ -72,7 +76,7 @@ func truncate(t *testing.T) {
 
 func seedUser(t *testing.T, id int, quota int) {
 	t.Helper()
-	user := &model.User{Id: id, Username: "test_user", Quota: quota, Status: common.UserStatusEnabled}
+	user := &model.User{Id: id, Username: fmt.Sprintf("test_user_%d", id), AffCode: fmt.Sprintf("aff_%d", id), Quota: quota, Status: common.UserStatusEnabled}
 	require.NoError(t, model.DB.Create(user).Error)
 }
 
@@ -248,6 +252,36 @@ func TestRefundTaskQuota_Subscription(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestRefundTaskQuotaSubscriptionRejectsOwnerMismatch(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const ownerUserID = 2101
+	const taskUserID = 2102
+	const tokenID = 2102
+	const channelID = 2102
+	const subID = 2101
+	const preConsumed = 2000
+	const subTotal, subUsed int64 = 100000, 50000
+	const tokenRemain = 8000
+
+	seedUser(t, ownerUserID, 0)
+	seedUser(t, taskUserID, 0)
+	seedToken(t, tokenID, taskUserID, "sk-sub-owner-mismatch", tokenRemain)
+	seedChannel(t, channelID)
+	seedSubscription(t, subID, ownerUserID, subTotal, subUsed)
+
+	task := makeTask(taskUserID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
+
+	err := RefundTaskQuota(ctx, task, "subscription task failed")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "subscription")
+	assert.Equal(t, subUsed, getSubscriptionUsed(t, subID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, int64(0), countLogs(t))
 }
 
 func TestRefundTaskQuota_ZeroQuota(t *testing.T) {
@@ -715,4 +749,239 @@ func TestSettle_NonPerCall_AdaptorAdjustWorks(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestTaskBillingOutboxLegacyMissingOwnerFailsClosedForSharedTaskID(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const sharedTaskID = "legacy_shared_upstream_task_id"
+	const userA, userB = 9201, 9202
+	const channelA, channelB = 9201, 9202
+	const quotaA, quotaB = 800, 1600
+	const initQuotaA, initQuotaB = 10000, 20000
+
+	seedUser(t, userA, initQuotaA)
+	seedUser(t, userB, initQuotaB)
+	seedChannel(t, channelA)
+	seedChannel(t, channelB)
+
+	taskA := makeTask(userA, channelA, quotaA, 0, BillingSourceWallet, 0)
+	taskA.TaskID = sharedTaskID
+	taskA.Status = model.TaskStatusFailure
+	require.NoError(t, model.DB.Create(taskA).Error)
+
+	taskB := makeTask(userB, channelB, quotaB, 0, BillingSourceWallet, 0)
+	taskB.TaskID = sharedTaskID
+	taskB.Status = model.TaskStatusFailure
+	require.NoError(t, model.DB.Create(taskB).Error)
+
+	legacyOutbox := &model.TaskBillingOutbox{
+		TaskID:           sharedTaskID,
+		Operation:        model.TaskBillingOutboxOperationTerminalRefund,
+		Status:           model.TaskBillingOutboxStatusPending,
+		ActualQuota:      0,
+		PreConsumedQuota: quotaB,
+		Reason:           "legacy missing owner refund",
+	}
+	require.NoError(t, model.DB.Create(legacyOutbox).Error)
+	require.Zero(t, legacyOutbox.TaskRowID)
+	require.Zero(t, legacyOutbox.UserId)
+
+	err := ProcessTaskBillingOutbox(ctx, legacyOutbox)
+	require.Error(t, err)
+
+	assert.Equal(t, initQuotaA, getUserQuota(t, userA), "legacy ownerless outbox must not guess owner A by task_id")
+	assert.Equal(t, initQuotaB, getUserQuota(t, userB), "legacy ownerless outbox must not guess owner B by task_id")
+
+	var reloaded model.TaskBillingOutbox
+	require.NoError(t, model.DB.First(&reloaded, legacyOutbox.ID).Error)
+	assert.Equal(t, model.TaskBillingOutboxStatusFailed, reloaded.Status)
+	assert.Contains(t, reloaded.LastError, "owner")
+}
+
+func TestTaskBillingOutboxUsesTaskRowIDAndUserIDForSharedTaskID(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const sharedTaskID = "shared_upstream_task_id"
+	const userA, userB = 9101, 9102
+	const channelA, channelB = 9101, 9102
+	const quotaA, quotaB = 700, 1300
+	const initQuotaA, initQuotaB = 10000, 20000
+
+	seedUser(t, userA, initQuotaA)
+	seedUser(t, userB, initQuotaB)
+	seedChannel(t, channelA)
+	seedChannel(t, channelB)
+
+	taskA := makeTask(userA, channelA, quotaA, 0, BillingSourceWallet, 0)
+	taskA.TaskID = sharedTaskID
+	taskA.Status = model.TaskStatusFailure
+	require.NoError(t, model.DB.Create(taskA).Error)
+
+	taskB := makeTask(userB, channelB, quotaB, 0, BillingSourceWallet, 0)
+	taskB.TaskID = sharedTaskID
+	taskB.Status = model.TaskStatusFailure
+	require.NoError(t, model.DB.Create(taskB).Error)
+
+	outboxA, err := model.EnqueueTaskBillingOutbox(taskA, model.TaskBillingOutboxOperationTerminalRefund, 0, quotaA, "owner A refund")
+	require.NoError(t, err)
+	outboxB, err := model.EnqueueTaskBillingOutbox(taskB, model.TaskBillingOutboxOperationTerminalRefund, 0, quotaB, "owner B refund")
+	require.NoError(t, err)
+
+	require.NotEqual(t, outboxA.ID, outboxB.ID, "shared provider task ids must not collapse distinct owner/task outboxes")
+	require.Equal(t, taskA.ID, outboxA.TaskRowID)
+	require.Equal(t, taskB.ID, outboxB.TaskRowID)
+	require.Equal(t, userA, outboxA.UserId)
+	require.Equal(t, userB, outboxB.UserId)
+
+	require.NoError(t, ProcessTaskBillingOutbox(ctx, outboxB))
+
+	assert.Equal(t, initQuotaA, getUserQuota(t, userA), "processing owner B outbox must not refund owner A")
+	assert.Equal(t, initQuotaB+quotaB, getUserQuota(t, userB), "owner B refund should apply to owner B task row")
+
+	var processed model.TaskBillingOutbox
+	require.NoError(t, model.DB.First(&processed, outboxB.ID).Error)
+	assert.Equal(t, model.TaskBillingOutboxStatusDone, processed.Status)
+	assert.True(t, processed.FundingDone)
+	assert.True(t, processed.LogDone)
+}
+
+func TestTaskBillingOutboxRefundIsIdempotent(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 40, 40, 40
+	const initQuota, preConsumed, tokenRemain = 10000, 2500, 5000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-outbox-refund", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_outbox_refund"
+	task.Status = model.TaskStatusFailure
+	require.NoError(t, model.DB.Create(task).Error)
+
+	outbox, err := model.EnqueueTaskBillingOutbox(task, model.TaskBillingOutboxOperationTerminalRefund, 0, preConsumed, "outbox refund")
+	require.NoError(t, err)
+	require.NoError(t, ProcessTaskBillingOutbox(ctx, outbox))
+	require.NoError(t, ProcessTaskBillingOutbox(ctx, outbox))
+
+	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, int64(1), countLogs(t))
+
+	var reloaded model.TaskBillingOutbox
+	require.NoError(t, model.DB.First(&reloaded, outbox.ID).Error)
+	assert.Equal(t, model.TaskBillingOutboxStatusDone, reloaded.Status)
+	assert.True(t, reloaded.FundingDone)
+	assert.True(t, reloaded.TokenDone)
+	assert.True(t, reloaded.LogDone)
+}
+
+func TestTaskBillingOutboxConcurrentProcessingAppliesRefundOnce(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 42, 42, 42
+	const initQuota, preConsumed, tokenRemain = 10000, 2200, 5000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-outbox-concurrent", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_outbox_concurrent_refund"
+	task.Status = model.TaskStatusFailure
+	require.NoError(t, model.DB.Create(task).Error)
+
+	outbox, err := model.EnqueueTaskBillingOutbox(task, model.TaskBillingOutboxOperationTerminalRefund, 0, preConsumed, "outbox concurrent refund")
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			local := *outbox
+			_ = ProcessTaskBillingOutbox(ctx, &local)
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, int64(1), countLogs(t))
+}
+
+func TestTaskBillingOutboxSubmitSettleAdjustsPreConsumeDelta(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 41, 41, 41
+	const initQuota, preConsumed, actualQuota, tokenRemain = 10000, 3000, 1000, 5000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-outbox-submit", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, actualQuota, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_outbox_submit_settle"
+	task.Status = model.TaskStatusSubmitted
+	require.NoError(t, model.DB.Create(task).Error)
+
+	outbox, err := model.EnqueueTaskBillingOutbox(task, model.TaskBillingOutboxOperationSubmitSettle, actualQuota, preConsumed, "submit settle")
+	require.NoError(t, err)
+	require.NoError(t, ProcessTaskBillingOutbox(ctx, outbox))
+	require.NoError(t, ProcessTaskBillingOutbox(ctx, outbox))
+
+	assert.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, int64(0), countLogs(t), "submit settle outbox should not duplicate consumption logs")
+}
+
+func TestTaskAdjustFundingTxSubscriptionRejectsOwnerMismatch(t *testing.T) {
+	truncate(t)
+
+	const ownerUserID = 4101
+	const taskUserID = 4102
+	const subscriptionID = 4101
+	seedUser(t, ownerUserID, 0)
+	seedUser(t, taskUserID, 0)
+	seedSubscription(t, subscriptionID, ownerUserID, 10000, 1000)
+
+	task := makeTask(taskUserID, 0, 0, 0, BillingSourceSubscription, subscriptionID)
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		return taskAdjustFundingTx(tx, task, 500)
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "subscription")
+	assert.Equal(t, int64(1000), getSubscriptionUsed(t, subscriptionID))
+}
+
+func TestTaskAdjustFundingTxSubscriptionDeltaAndBounds(t *testing.T) {
+	truncate(t)
+
+	const userID = 4103
+	const subscriptionID = 4103
+	seedUser(t, userID, 0)
+	seedSubscription(t, subscriptionID, userID, 2000, 1000)
+	task := makeTask(userID, 0, 0, 0, BillingSourceSubscription, subscriptionID)
+
+	require.NoError(t, model.DB.Transaction(func(tx *gorm.DB) error {
+		return taskAdjustFundingTx(tx, task, 500)
+	}))
+	assert.Equal(t, int64(1500), getSubscriptionUsed(t, subscriptionID))
+
+	require.NoError(t, model.DB.Transaction(func(tx *gorm.DB) error {
+		return taskAdjustFundingTx(tx, task, -2500)
+	}))
+	assert.Equal(t, int64(0), getSubscriptionUsed(t, subscriptionID))
+
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		return taskAdjustFundingTx(tx, task, 2500)
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds total")
+	assert.Equal(t, int64(0), getSubscriptionUsed(t, subscriptionID))
 }

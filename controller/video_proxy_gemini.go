@@ -210,6 +210,9 @@ func getVertexTaskKey(channel *model.Channel, task *model.Task) string {
 		if key := strings.TrimSpace(task.PrivateData.Key); key != "" {
 			return key
 		}
+		if strings.TrimSpace(task.PrivateData.IdempotencyKey) != "" {
+			return ""
+		}
 	}
 	if channel == nil {
 		return ""

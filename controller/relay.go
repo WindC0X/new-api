@@ -517,9 +517,15 @@ func RelayTask(c *gin.Context) {
 
 	var result *relay.TaskSubmitResult
 	var taskErr *dto.TaskError
+	taskPersisted := false
 	defer func() {
-		if taskErr != nil && relayInfo.Billing != nil {
+		if relayInfo.Billing == nil {
+			return
+		}
+		if shouldRefundTaskSubmitBilling(taskErr, result, taskPersisted) {
 			relayInfo.Billing.Refund(c)
+		} else if taskErr != nil && result != nil && taskPersisted {
+			common.SysError(fmt.Sprintf("accepted upstream task persisted locally; continuing without refund (public_task_id=%s upstream_task_id=%s err=%s)", relayInfo.PublicTaskID, result.UpstreamTaskID, taskErr.Code))
 		}
 	}()
 
@@ -568,6 +574,9 @@ func RelayTask(c *gin.Context) {
 		c.Writer = bufferedWriter
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
 		c.Writer = originalWriter
+		if result != nil {
+			creativeMarkTaskProviderAccepted(c)
+		}
 		if taskErr == nil {
 			c.Set(taskSubmitBufferedResponseContextKey, bufferedWriter)
 			break
@@ -599,12 +608,13 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:      relayInfo.PriceData.ModelPrice,
-			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:      relayInfo.PriceData.ModelRatio,
-			OtherRatios:     relayInfo.PriceData.OtherRatios,
-			OriginModelName: relayInfo.OriginModelName,
-			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			ModelPrice:       relayInfo.PriceData.ModelPrice,
+			GroupRatio:       relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			ModelRatio:       relayInfo.PriceData.ModelRatio,
+			OtherRatios:      relayInfo.PriceData.OtherRatios,
+			OriginModelName:  relayInfo.OriginModelName,
+			PerCallBilling:   common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			PreConsumedQuota: service.TaskSubmitPreConsumedQuota(relayInfo),
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData
@@ -612,14 +622,20 @@ func RelayTask(c *gin.Context) {
 		if insertErr := task.Insert(); insertErr != nil {
 			taskErr = service.TaskErrorWrapper(insertErr, "insert_task_failed", http.StatusInternalServerError)
 		} else if relayInfo.TaskRelayInfo != nil && relayInfo.IdempotencyKey != "" {
+			taskPersisted = true
 			if err := model.CompleteCreativeVideoIdempotencyScoped(relayInfo.UserId, relayInfo.IdempotencyScope, relayInfo.IdempotencyKey, task.TaskID); err != nil {
-				taskErr = service.TaskErrorWrapper(err, "complete_idempotency_failed", http.StatusInternalServerError)
+				common.SysError(fmt.Sprintf("complete creative task idempotency failed after task persistence (public_task_id=%s upstream_task_id=%s err=%s)", task.TaskID, result.UpstreamTaskID, err.Error()))
+			}
+		} else {
+			taskPersisted = true
+		}
+		if taskErr == nil {
+			if _, settleErr := service.SettleSubmittedTaskBillingDurably(c.Request.Context(), task, relayInfo, result.Quota); settleErr != nil {
+				common.SysError(fmt.Sprintf("settle submitted task billing enqueue failed after task persistence (public_task_id=%s upstream_task_id=%s err=%s)", task.TaskID, result.UpstreamTaskID, settleErr.Error()))
+				taskErr = taskSubmitSettleFailureError(settleErr)
 			}
 		}
 		if taskErr == nil {
-			if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-				common.SysError("settle task billing error: " + settleErr.Error())
-			}
 			service.LogTaskConsumption(c, relayInfo)
 			if bufferedWriter, ok := c.Get(taskSubmitBufferedResponseContextKey); ok {
 				if writer, ok := bufferedWriter.(*taskSubmitBufferedResponseWriter); ok {
@@ -632,13 +648,41 @@ func RelayTask(c *gin.Context) {
 	}
 
 	if taskErr != nil {
-		if relayInfo.TaskRelayInfo != nil && relayInfo.IdempotencyKey != "" {
+		if shouldDeleteCreativeTaskIdempotencyOnRelayError(relayInfo, taskPersisted, result) {
 			if err := model.DeleteCreativeVideoIdempotencyScoped(relayInfo.UserId, relayInfo.IdempotencyScope, relayInfo.IdempotencyKey); err != nil {
 				common.SysError("delete creative video idempotency error: " + err.Error())
 			}
 		}
 		respondTaskError(c, taskErr)
 	}
+}
+
+func shouldDeleteCreativeTaskIdempotencyOnRelayError(relayInfo *relaycommon.RelayInfo, taskPersisted bool, result *relay.TaskSubmitResult) bool {
+	return relayInfo != nil &&
+		relayInfo.TaskRelayInfo != nil &&
+		relayInfo.IdempotencyKey != "" &&
+		!taskPersisted
+}
+
+func shouldRefundTaskSubmitBilling(taskErr *dto.TaskError, result *relay.TaskSubmitResult, taskPersisted bool) bool {
+	if taskErr == nil {
+		return false
+	}
+	if result == nil {
+		return true
+	}
+	// If the upstream accepted but no local task row exists, the user cannot
+	// poll or receive the result through new-api. Refund and delete the
+	// idempotency record so the user can retry instead of leaving a permanent
+	// reservation tied to an inaccessible provider task.
+	return !taskPersisted
+}
+
+func taskSubmitSettleFailureError(err error) *dto.TaskError {
+	if err == nil {
+		return nil
+	}
+	return service.TaskErrorWrapper(err, "settle_task_billing_failed", http.StatusInternalServerError)
 }
 
 const taskSubmitBufferedResponseContextKey = "task_submit_buffered_response_writer"

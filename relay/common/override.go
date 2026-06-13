@@ -1271,16 +1271,41 @@ func deleteHeaderOverrideInContext(context map[string]interface{}, headerName st
 	return nil
 }
 
+func shouldSkipPassThroughHeaderName(name string) bool {
+	normalized := normalizeHeaderContextKey(name)
+	if normalized == "" {
+		return true
+	}
+	switch normalized {
+	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+		"te", "trailer", "transfer-encoding", "upgrade",
+		"cookie", "set-cookie", "host", "content-length", "accept-encoding",
+		"authorization", "x-api-key", "x-goog-api-key", "x-selected-key", "x-upstream-key":
+		return true
+	default:
+		return strings.HasPrefix(normalized, "x-creative") ||
+			strings.Contains(normalized, "api-key") ||
+			strings.Contains(normalized, "apikey") ||
+			strings.Contains(normalized, "api-secret") ||
+			strings.Contains(normalized, "apisecret")
+	}
+}
+
 func parseHeaderPassThroughNames(value interface{}) ([]string, error) {
-	normalizeNames := func(values []string) []string {
+	normalizeNames := func(values []string) ([]string, bool) {
+		seenNonEmpty := false
 		names := lo.FilterMap(values, func(item string, _ int) (string, bool) {
 			headerName := normalizeHeaderContextKey(item)
 			if headerName == "" {
 				return "", false
 			}
+			seenNonEmpty = true
+			if shouldSkipPassThroughHeaderName(headerName) {
+				return "", false
+			}
 			return headerName, true
 		})
-		return lo.Uniq(names)
+		return lo.Uniq(names), seenNonEmpty
 	}
 
 	switch raw := value.(type) {
@@ -1297,61 +1322,54 @@ func parseHeaderPassThroughNames(value interface{}) ([]string, error) {
 				return parseHeaderPassThroughNames(parsed)
 			}
 		}
-		names := normalizeNames(strings.Split(trimmed, ","))
-		if len(names) == 0 {
+		names, seen := normalizeNames(strings.Split(trimmed, ","))
+		if !seen {
 			return nil, fmt.Errorf("pass_headers value is invalid")
 		}
 		return names, nil
 	case []interface{}:
-		names := lo.FilterMap(raw, func(item interface{}, _ int) (string, bool) {
-			headerName := normalizeHeaderContextKey(fmt.Sprintf("%v", item))
-			if headerName == "" {
-				return "", false
-			}
-			return headerName, true
+		values := lo.FilterMap(raw, func(item interface{}, _ int) (string, bool) {
+			return fmt.Sprintf("%v", item), true
 		})
-		names = lo.Uniq(names)
-		if len(names) == 0 {
+		names, seen := normalizeNames(values)
+		if !seen {
 			return nil, fmt.Errorf("pass_headers value is invalid")
 		}
 		return names, nil
 	case []string:
-		names := lo.FilterMap(raw, func(item string, _ int) (string, bool) {
-			headerName := normalizeHeaderContextKey(item)
-			if headerName == "" {
-				return "", false
-			}
-			return headerName, true
-		})
-		names = lo.Uniq(names)
-		if len(names) == 0 {
+		names, seen := normalizeNames(raw)
+		if !seen {
 			return nil, fmt.Errorf("pass_headers value is invalid")
 		}
 		return names, nil
 	case map[string]interface{}:
 		candidates := make([]string, 0, 8)
+		seenCandidate := false
 		if headersRaw, ok := raw["headers"]; ok {
 			names, err := parseHeaderPassThroughNames(headersRaw)
 			if err == nil {
+				seenCandidate = true
 				candidates = append(candidates, names...)
 			}
 		}
 		if namesRaw, ok := raw["names"]; ok {
 			names, err := parseHeaderPassThroughNames(namesRaw)
 			if err == nil {
+				seenCandidate = true
 				candidates = append(candidates, names...)
 			}
 		}
 		if headerRaw, ok := raw["header"]; ok {
 			names, err := parseHeaderPassThroughNames(headerRaw)
 			if err == nil {
+				seenCandidate = true
 				candidates = append(candidates, names...)
 			}
 		}
-		names := normalizeNames(candidates)
-		if len(names) == 0 {
+		if !seenCandidate {
 			return nil, fmt.Errorf("pass_headers value is invalid")
 		}
+		names, _ := normalizeNames(candidates)
 		return names, nil
 	default:
 		return nil, fmt.Errorf("pass_headers value must be string, array or object")

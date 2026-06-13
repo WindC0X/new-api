@@ -32,6 +32,7 @@ const (
 	creativeTaskPublicTaskIDContextKey     = "creative_task_public_task_id"
 	creativeTaskIdempotencyKeyContextKey   = "creative_task_idempotency_key"
 	creativeTaskIdempotencyScopeContextKey = "creative_task_idempotency_scope"
+	creativeTaskProviderAcceptedContextKey = "creative_task_provider_accepted"
 )
 
 const (
@@ -57,6 +58,16 @@ func SetCreativeVideoRelayEnabledForTest(enabled bool) func() {
 	return func() { creativeVideoRelayEnabled.Store(previous) }
 }
 
+func creativeMarkTaskProviderAccepted(c *gin.Context) {
+	if c != nil {
+		c.Set(creativeTaskProviderAcceptedContextKey, true)
+	}
+}
+
+func creativeTaskProviderAccepted(c *gin.Context) bool {
+	return c != nil && c.GetBool(creativeTaskProviderAcceptedContextKey)
+}
+
 func CreativeVideoRelayGate() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !creativeVideoRelayEnabled.Load() {
@@ -77,7 +88,7 @@ func CreativeVideoSubmitIdempotency() gin.HandlerFunc {
 			requestID := c.GetString(creativeVideoIdempotencyKeyContextKey)
 			userID := c.GetInt("id")
 			c.Next()
-			if requestID != "" && c.Writer.Status() >= http.StatusBadRequest {
+			if requestID != "" && c.Writer.Status() >= http.StatusBadRequest && !creativeTaskProviderAccepted(c) {
 				if err := model.DeleteCreativeVideoIdempotency(userID, requestID); err != nil {
 					common.SysError("cleanup failed creative video idempotency error: " + err.Error())
 				}
@@ -113,7 +124,7 @@ func CreativeSunoSubmitGuard() gin.HandlerFunc {
 		requestID := c.GetString(creativeTaskIdempotencyKeyContextKey)
 		userID := c.GetInt("id")
 		c.Next()
-		if requestID != "" && c.Writer.Status() >= http.StatusBadRequest {
+		if requestID != "" && c.Writer.Status() >= http.StatusBadRequest && !creativeTaskProviderAccepted(c) {
 			if err := model.DeleteCreativeVideoIdempotencyScoped(userID, scope, requestID); err != nil {
 				common.SysError("cleanup failed creative Suno idempotency error: " + err.Error())
 			}
@@ -141,7 +152,7 @@ func CreativeMJSubmitImagineGuard() gin.HandlerFunc {
 		requestID := c.GetString(creativeTaskIdempotencyKeyContextKey)
 		userID := c.GetInt("id")
 		c.Next()
-		if requestID != "" && c.Writer.Status() >= http.StatusBadRequest {
+		if requestID != "" && c.Writer.Status() >= http.StatusBadRequest && !creativeTaskProviderAccepted(c) {
 			if err := model.DeleteCreativeVideoIdempotencyScoped(userID, creativeMJSubmitScopeImagine, requestID); err != nil {
 				common.SysError("cleanup failed creative MJ idempotency error: " + err.Error())
 			}
@@ -185,6 +196,9 @@ func CreativeBootstrap(c *gin.Context) {
 			},
 			"profile": gin.H{
 				"brokerBaseUrl": creativeBrokerBaseURL,
+			},
+			"capabilities": gin.H{
+				"videoRelayEnabled": creativeVideoRelayEnabled.Load(),
 			},
 			"catalogVersion": catalogVersion,
 			"models":         models,
@@ -351,19 +365,15 @@ func CreativeCreateDocument(c *gin.Context) {
 		creativeAPIError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	document, err := model.CreateCreativeDocument(&model.CreativeDocument{
+	document, err := model.CreateCreativeDocumentWithAssetRefs(&model.CreativeDocument{
 		UserId:           c.GetInt("id"),
 		DocumentId:       documentId,
 		Title:            creativeTitle(payload["title"]),
 		SnapshotJSON:     snapshotJSON,
 		MetadataJSON:     metadataJSON,
 		ClientMutationId: clientMutationId,
-	})
+	}, assetIds)
 	if err != nil {
-		creativeAPIError(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := model.RefreshCreativeDocumentAssetRefs(c.GetInt("id"), document.DocumentId, assetIds); err != nil {
 		creativeAPIError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -442,7 +452,7 @@ func CreativeUpdateDocument(c *gin.Context) {
 		creativeAPIError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	document, conflict, err := model.UpdateCreativeDocumentSnapshot(c.GetInt("id"), c.Param("id"), baseRevision, patch)
+	document, conflict, err := model.UpdateCreativeDocumentSnapshotWithAssetRefs(c.GetInt("id"), c.Param("id"), baseRevision, patch, assetIds)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			creativeAPIError(c, http.StatusNotFound, "document not found")
@@ -455,10 +465,6 @@ func CreativeUpdateDocument(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "revision conflict", "data": gin.H{"document": creativeDocumentResponse(document, true)}})
 		return
 	}
-	if err := model.RefreshCreativeDocumentAssetRefs(c.GetInt("id"), document.DocumentId, assetIds); err != nil {
-		creativeAPIError(c, http.StatusInternalServerError, err.Error())
-		return
-	}
 	creativeAPISuccess(c, gin.H{"document": creativeDocumentResponse(document, true)})
 }
 
@@ -467,7 +473,7 @@ func CreativeDeleteDocument(c *gin.Context) {
 		return
 	}
 	baseRevision := creativeDeleteBaseRevision(c)
-	document, found, conflict, err := model.DeleteCreativeDocument(c.GetInt("id"), c.Param("id"), baseRevision)
+	document, found, conflict, err := model.DeleteCreativeDocumentWithAssetRefs(c.GetInt("id"), c.Param("id"), baseRevision)
 	if err != nil {
 		creativeAPIError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -478,10 +484,6 @@ func CreativeDeleteDocument(c *gin.Context) {
 	}
 	if conflict {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "revision conflict", "data": gin.H{"document": creativeDocumentResponse(document, true)}})
-		return
-	}
-	if err := model.DeleteCreativeDocumentAssetRefs(c.GetInt("id"), c.Param("id")); err != nil {
-		creativeAPIError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	creativeAPISuccess(c, gin.H{"id": c.Param("id")})
@@ -593,7 +595,12 @@ func CreativeRelayMJListByCondition(c *gin.Context) {
 	}
 	tasks := make([]dto.MidjourneyDto, 0)
 	if len(condition.IDs) > 0 {
-		taskModels, err := model.GetByTaskIds(c.GetInt("id"), condition.IDs)
+		taskIDs, err := service.NormalizeCreativeTaskIDList(condition.IDs)
+		if err != nil {
+			creativeMidjourneyError(c, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		taskModels, err := model.GetByTaskIds(c.GetInt("id"), taskIDs)
 		if err != nil {
 			creativeMidjourneyError(c, http.StatusInternalServerError, "get_tasks_failed")
 			return
@@ -640,7 +647,12 @@ func CreativeRelayMJImage(c *gin.Context) {
 
 	httpClient := creativeMJImageHTTPClient()
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		var clientErr error
+		httpClient, clientErr = service.GetHttpClientWithProxy("")
+		if clientErr != nil {
+			creativeMidjourneyError(c, http.StatusInternalServerError, "http_client_unavailable")
+			return
+		}
 	}
 	if channel, err := model.CacheGetChannel(task.ChannelId); err == nil {
 		if proxy := channel.GetSetting().Proxy; proxy != "" {
@@ -736,6 +748,36 @@ func creativeSetupSessionBrokerToken(c *gin.Context) bool {
 	return true
 }
 
+func creativeSanitizedOpenAIVideo(task *model.Task) *dto.OpenAIVideo {
+	video := task.ToOpenAIVideo()
+	if video.Metadata == nil {
+		video.Metadata = map[string]any{}
+	}
+	for key := range video.Metadata {
+		if creativeVideoRawURLMetadataKey(key) {
+			delete(video.Metadata, key)
+		}
+	}
+	video.SetMetadata("url", creativeVideoContentProxyPath(task.TaskID))
+	return video
+}
+
+func creativeVideoContentProxyPath(taskID string) string {
+	return creativeBrokerBaseURL + "/videos/" + url.PathEscape(strings.TrimSpace(taskID)) + "/content"
+}
+
+func creativeVideoRawURLMetadataKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	switch normalized {
+	case "url", "videourl", "resulturl", "providerurl", "sourceurl", "remoteurl", "signedurl", "downloadurl":
+		return true
+	default:
+		return false
+	}
+}
+
 func creativePrepareVideoSubmitIdempotency(c *gin.Context) bool {
 	requestID := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if requestID == "" {
@@ -786,7 +828,7 @@ func creativePrepareVideoSubmitIdempotency(c *gin.Context) bool {
 			return false
 		}
 		if task, ok, taskErr := model.GetByTaskId(c.GetInt("id"), record.TaskID); taskErr == nil && ok && task != nil {
-			c.JSON(http.StatusOK, task.ToOpenAIVideo())
+			c.JSON(http.StatusOK, creativeSanitizedOpenAIVideo(task))
 			c.Abort()
 			return false
 		}
@@ -1102,9 +1144,6 @@ func creativeMJTaskDTO(c *gin.Context, task *model.Task) dto.MidjourneyDto {
 	if creativeMJTaskIsSuccess(task) && creativeMJTaskHasResultURL(task) {
 		taskDTO.ImageUrl = creativeMJImageProxyURL(c, task.TaskID)
 	}
-	if videoURL := creativeMJTaskDataString(task, "videoUrl"); videoURL != "" {
-		taskDTO.VideoUrl = videoURL
-	}
 	if props := creativeMJTaskProperties(task); props != nil {
 		taskDTO.Properties = props
 	}
@@ -1254,12 +1293,12 @@ func creativeSunoForbiddenSubmitField(c *gin.Context) (string, error) {
 		}
 		defer form.RemoveAll()
 		for key := range form.Value {
-			if creativeNormalizeRelayFieldName(key) == "model" {
+			if creativeSunoForbiddenSubmitKey(key) {
 				return key, nil
 			}
 		}
 		for key := range form.File {
-			if creativeNormalizeRelayFieldName(key) == "model" {
+			if creativeSunoForbiddenSubmitKey(key) {
 				return key, nil
 			}
 		}
@@ -1269,22 +1308,73 @@ func creativeSunoForbiddenSubmitField(c *gin.Context) (string, error) {
 			return "", err
 		}
 		for key := range values {
-			if creativeNormalizeRelayFieldName(key) == "model" {
+			if creativeSunoForbiddenSubmitKey(key) {
 				return key, nil
 			}
 		}
 	case strings.Contains(contentType, "json") || contentType == "":
-		var payload map[string]any
+		var payload any
 		if err := common.Unmarshal(body, &payload); err != nil {
 			return "", err
 		}
-		for key := range payload {
-			if creativeNormalizeRelayFieldName(key) == "model" {
-				return key, nil
-			}
+		if field, forbidden := containsCreativeSunoForbiddenSubmitField(payload); forbidden {
+			return field, nil
 		}
 	}
 	return "", nil
+}
+
+func containsCreativeSunoForbiddenSubmitField(value any) (string, bool) {
+	return containsCreativeSunoForbiddenSubmitFieldAt(value, "")
+}
+
+func containsCreativeSunoForbiddenSubmitFieldAt(value any, path string) (string, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			childPath := key
+			if path != "" {
+				childPath = path + "." + key
+			}
+			if creativeSunoForbiddenSubmitKey(key) {
+				return childPath, true
+			}
+			if found, ok := containsCreativeSunoForbiddenSubmitFieldAt(child, childPath); ok {
+				return found, true
+			}
+		}
+	case []any:
+		for i, child := range typed {
+			childPath := fmt.Sprintf("%s[%d]", path, i)
+			if path == "" {
+				childPath = fmt.Sprintf("[%d]", i)
+			}
+			if found, ok := containsCreativeSunoForbiddenSubmitFieldAt(child, childPath); ok {
+				return found, true
+			}
+		}
+	case string:
+		if creativeStringLooksLikeSecret(typed) {
+			if path == "" {
+				return "value", true
+			}
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func creativeSunoForbiddenSubmitKey(key string) bool {
+	normalized := creativeNormalizeRelayFieldName(key)
+	if creativeForbiddenRelayBodyNormalizedKey(normalized) {
+		return true
+	}
+	for _, segment := range creativeRelayFieldSegments(key) {
+		if creativeForbiddenRelayBodyNormalizedKey(segment) {
+			return true
+		}
+	}
+	return false
 }
 
 func creativeModelsForUser(c *gin.Context) ([]dto.OpenAIModels, string, error) {
@@ -1546,7 +1636,7 @@ func creativeForbiddenKey(key string) bool {
 		return true
 	}
 	switch normalized {
-	case "apikey", "apikeys", "authorization", "bearer", "bearertoken", "baseurl", "channel", "channelid", "channeloverride", "channeltype", "provider", "providerid", "provideroverride", "providertype", "token", "accesstoken", "refreshtoken", "idtoken", "internaltoken", "secret", "secretkey", "sourceurl", "objectkey", "bucketurl", "signedurl", "presignedurl", "accesskeyid", "secretaccesskey", "s3endpoint", "storagebackend":
+	case "apikey", "apikeys", "apisecret", "mjapisecret", "authorization", "bearer", "bearertoken", "baseurl", "channel", "channelid", "channeloverride", "channeltype", "provider", "providerid", "provideroverride", "providertype", "modelname", "modeloverride", "token", "accesstoken", "refreshtoken", "idtoken", "internaltoken", "secret", "secretkey", "sourceurl", "objectkey", "bucketurl", "signedurl", "presignedurl", "accesskeyid", "secretaccesskey", "s3endpoint", "storagebackend", "notify", "notifyhook", "notifyurl", "callback", "callbackurl", "webhook", "webhookurl", "owner", "ownerid", "user", "userid", "reqkey", "requestkey":
 		return true
 	default:
 		return false
@@ -1605,19 +1695,28 @@ func creativeForbiddenRelayBodyNormalizedKey(normalized string) bool {
 	}
 	if strings.HasPrefix(normalized, "upstream") ||
 		strings.HasPrefix(strings.TrimPrefix(normalized, "x"), "upstream") ||
+		strings.Contains(normalized, "model") ||
 		strings.Contains(normalized, "apikey") ||
+		strings.Contains(normalized, "apisecret") ||
+		strings.Contains(normalized, "mjsecret") ||
+		strings.Contains(normalized, "mjapisecret") ||
+		strings.Contains(normalized, "notifyhook") ||
+		strings.Contains(normalized, "callback") ||
+		strings.Contains(normalized, "webhook") ||
 		strings.Contains(normalized, "accesstoken") {
 		return true
 	}
 	switch normalized {
-	case "apikey", "apikeys", "apitoken", "key", "authorization", "proxyauthorization", "bearer", "bearertoken",
+	case "apikey", "apikeys", "apisecret", "xapisecret", "mjapisecret", "xmjapisecret", "apitoken", "key", "authorization", "proxyauthorization", "bearer", "bearertoken",
 		"baseurl", "xbaseurl", "upstreambaseurl", "provider", "xprovider", "providerid", "xproviderid", "providername", "xprovidername", "provideroverride", "xprovideroverride", "providertype",
 		"channel", "xchannel", "channelid", "xchannelid", "channeloverride", "xchanneloverride", "channeltype",
-		"group", "xgroup", "groupid", "xgroupid", "model", "xmodel", "modelid", "xmodelid", "modeloverride", "xmodeloverride",
+		"group", "xgroup", "groupid", "xgroupid", "model", "xmodel", "modelid", "xmodelid", "modelname", "xmodelname", "modeloverride", "xmodeloverride", "reqkey", "xreqkey", "requestkey", "xrequestkey",
 		"endpoint", "xendpoint", "url", "xurl", "proxy", "xproxy", "headers", "requestheaders",
 		"token", "xtoken", "accesstoken", "xaccesstoken", "refreshtoken", "idtoken", "internaltoken",
 		"secret", "secretkey", "sourceurl", "objectkey", "bucketurl", "signedurl",
-		"presignedurl", "accesskeyid", "secretaccesskey", "s3endpoint", "storagebackend", "organization", "openaiorganization":
+		"presignedurl", "accesskeyid", "secretaccesskey", "s3endpoint", "storagebackend", "organization", "openaiorganization",
+		"notify", "xnotify", "notifyhook", "xnotifyhook", "notifyurl", "xnotifyurl", "callback", "xcallback", "callbackurl", "xcallbackurl", "webhook", "xwebhook", "webhookurl", "xwebhookurl",
+		"owner", "xowner", "ownerid", "xownerid", "user", "xuser", "userid", "xuserid":
 		return true
 	default:
 		return false
@@ -1884,9 +1983,13 @@ func creativeConflictMessage(conflict bool) string {
 }
 
 func creativeAPIRequestOrigin(c *gin.Context) string {
-	scheme := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto"))
-	if commaIndex := strings.IndexByte(scheme, ','); commaIndex >= 0 {
-		scheme = strings.TrimSpace(scheme[:commaIndex])
+	if c == nil || c.Request == nil {
+		return ""
+	}
+
+	scheme := ""
+	if c.Request.URL != nil {
+		scheme = strings.TrimSpace(c.Request.URL.Scheme)
 	}
 	if scheme == "" {
 		if c.Request.TLS != nil {
@@ -1895,13 +1998,7 @@ func creativeAPIRequestOrigin(c *gin.Context) string {
 			scheme = "http"
 		}
 	}
-	host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
-	if commaIndex := strings.IndexByte(host, ','); commaIndex >= 0 {
-		host = strings.TrimSpace(host[:commaIndex])
-	}
-	if host == "" && c.Request != nil {
-		host = strings.TrimSpace(c.Request.Host)
-	}
+	host := strings.TrimSpace(c.Request.Host)
 	if host == "" {
 		return ""
 	}

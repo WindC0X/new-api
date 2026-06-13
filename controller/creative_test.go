@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -131,6 +132,21 @@ func TestContainsCreativeForbiddenFieldDetectsNestedSecrets(t *testing.T) {
 			name:      "snake case channel override in nested array object",
 			payload:   nestedSecretPayload("channel_override", "vip-channel"),
 			wantField: nestedSecretPath("channel_override"),
+		},
+		{
+			name:      "snake case model name in nested array object",
+			payload:   nestedSecretPayload("model_name", "expensive-upstream-model"),
+			wantField: nestedSecretPath("model_name"),
+		},
+		{
+			name:      "camel case model name in nested array object",
+			payload:   nestedSecretPayload("modelName", "expensive-upstream-model"),
+			wantField: nestedSecretPath("modelName"),
+		},
+		{
+			name:      "provider request key in nested array object",
+			payload:   nestedSecretPayload("req_key", "jimeng_expensive_model"),
+			wantField: nestedSecretPath("req_key"),
 		},
 		{
 			name:      "provider override in nested array object",
@@ -429,6 +445,28 @@ func TestCreativeVideoRelayEnvDefaultIsFailClosed(t *testing.T) {
 
 	t.Setenv("CREATIVE_VIDEO_RELAY_ENABLED", "true")
 	require.True(t, loadCreativeVideoRelayEnabledFromEnv())
+}
+
+func TestCreativeBootstrapReportsVideoRelayCapability(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 36)
+	router := newCreativeSessionTestRouter(36)
+
+	restoreDisabled := SetCreativeVideoRelayEnabledForTest(false)
+	disabled := httptest.NewRecorder()
+	router.ServeHTTP(disabled, httptest.NewRequest(http.MethodGet, "/creative/api/bootstrap", nil))
+	restoreDisabled()
+	require.Equal(t, http.StatusOK, disabled.Code)
+	disabledCapabilities := creativeResponseObject(t, creativeResponseData(t, decodeCreativeResponse(t, disabled)), "capabilities")
+	require.Equal(t, false, disabledCapabilities["videoRelayEnabled"])
+
+	restoreEnabled := SetCreativeVideoRelayEnabledForTest(true)
+	enabled := httptest.NewRecorder()
+	router.ServeHTTP(enabled, httptest.NewRequest(http.MethodGet, "/creative/api/bootstrap", nil))
+	restoreEnabled()
+	require.Equal(t, http.StatusOK, enabled.Code)
+	enabledCapabilities := creativeResponseObject(t, creativeResponseData(t, decodeCreativeResponse(t, enabled)), "capabilities")
+	require.Equal(t, true, enabledCapabilities["videoRelayEnabled"])
 }
 
 func TestCreativeNonceMiddlewareRequiresSameOriginSignalForUnsafeMethods(t *testing.T) {
@@ -884,6 +922,30 @@ func TestCreativeRelayRejectsForbiddenFieldsBeforeSessionBroker(t *testing.T) {
 			wantStatus: http.StatusBadRequest,
 		},
 		{
+			name: "nested model_name billing override variant",
+			body: map[string]any{
+				"model":    "creative-model-05",
+				"messages": []any{map[string]any{"role": "user", "content": "hello"}},
+				"metadata": map[string]any{
+					"model_name": "expensive-upstream-model",
+				},
+			},
+			wantField:  "metadata.model_name",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "nested req_key provider model override variant",
+			body: map[string]any{
+				"model":    "creative-model-05",
+				"messages": []any{map[string]any{"role": "user", "content": "hello"}},
+				"metadata": map[string]any{
+					"req_key": "jimeng_expensive_model",
+				},
+			},
+			wantField:  "metadata.req_key",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
 			name: "nested provider id variant",
 			body: map[string]any{
 				"model":    "creative-model-05",
@@ -924,6 +986,45 @@ func TestCreativeRelayRejectsForbiddenFieldsBeforeSessionBroker(t *testing.T) {
 			require.Contains(t, errorObject["message"], "forbidden field "+tt.wantField)
 		})
 	}
+}
+
+func TestCreativeRelayAppliesUserModelRequestRateLimit(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 5301)
+	seedCreativeControllerModelPool(t)
+
+	originalEnabled := setting.ModelRequestRateLimitEnabled
+	originalDuration := setting.ModelRequestRateLimitDurationMinutes
+	originalTotal := setting.ModelRequestRateLimitCount
+	originalSuccess := setting.ModelRequestRateLimitSuccessCount
+	originalRedisEnabled := common.RedisEnabled
+	setting.ModelRequestRateLimitEnabled = true
+	setting.ModelRequestRateLimitDurationMinutes = 1
+	setting.ModelRequestRateLimitCount = 0
+	setting.ModelRequestRateLimitSuccessCount = 1
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		setting.ModelRequestRateLimitEnabled = originalEnabled
+		setting.ModelRequestRateLimitDurationMinutes = originalDuration
+		setting.ModelRequestRateLimitCount = originalTotal
+		setting.ModelRequestRateLimitSuccessCount = originalSuccess
+		common.RedisEnabled = originalRedisEnabled
+	})
+
+	router := newCreativeRelayBrokerTestRouter(t, 5301, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	body := map[string]any{
+		"model":    "creative-model-05",
+		"messages": []any{map[string]any{"role": "user", "content": "hello"}},
+	}
+
+	first := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/chat/completions", body, auth.cookies, creativeSameOriginNonceHeaders(auth))
+	require.Equal(t, http.StatusOK, first.Code)
+
+	second := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/chat/completions", body, auth.cookies, creativeSameOriginNonceHeaders(auth))
+	require.Equal(t, http.StatusTooManyRequests, second.Code)
 }
 
 func TestCreativeRelayRejectsProviderOverrideBeforeDistributionAndBilling(t *testing.T) {
@@ -1249,6 +1350,58 @@ func TestCreativeRelayVideoContentUsesStoredKeyAffinity(t *testing.T) {
 	require.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
 }
 
+func TestCreativeRelayVideoFetchRewritesRawResultURLToContentProxy(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}))
+
+	rawURL := "https://private.example/video.mp4?X-Amz-Signature=secret"
+	task := &model.Task{
+		TaskID:    "task_video_private_url",
+		UserId:    6504,
+		Status:    model.TaskStatusSuccess,
+		Platform:  constant.TaskPlatform(fmt.Sprintf("%d", constant.ChannelTypeSora)),
+		Progress:  "100%",
+		ChannelId: 1,
+		PrivateData: model.TaskPrivateData{
+			ResultURL: rawURL,
+		},
+	}
+	task.SetData(map[string]any{
+		"id":     "upstream_private_url",
+		"object": "video",
+		"model":  "sora-test",
+		"status": "completed",
+		"url":    rawURL,
+		"metadata": map[string]any{
+			"url":          rawURL,
+			"provider_url": rawURL,
+			"duration":     4,
+		},
+	})
+	require.NoError(t, model.DB.Create(task).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/creative/relay/v1/videos/task_video_private_url", nil)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_video_private_url"}}
+	ctx.Set("id", 6504)
+	ctx.Set("group", "default")
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "default")
+
+	CreativeRelayVideoFetch(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	payload := decodeCreativeResponse(t, recorder)
+	metadata := creativeResponseObject(t, payload, "metadata")
+	require.Equal(t, "/creative/relay/v1/videos/task_video_private_url/content", metadata["url"])
+	require.Equal(t, float64(4), metadata["duration"])
+	require.NotContains(t, recorder.Body.String(), rawURL)
+	require.NotContains(t, recorder.Body.String(), "provider_url")
+	require.NotContains(t, recorder.Body.String(), "X-Amz-Signature")
+}
+
 func TestCreativeVideoRelayRequiresSameOriginForGet(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 64)
@@ -1385,6 +1538,63 @@ func TestCreativeVideoSubmitIdempotencyIsScopedByAction(t *testing.T) {
 	require.Equal(t, "hash-video", replay.PayloadHash)
 }
 
+func TestCreativeVideoSubmitIdempotencyReplayRewritesRawResultURL(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+
+	body := `{"model":"creative-model-05","prompt":"safe video"}`
+	sum := sha256.Sum256([]byte(body))
+	payloadHash := hex.EncodeToString(sum[:])
+	record, existed, err := model.PrepareCreativeVideoIdempotency(169, "replay-private-url", payloadHash)
+	require.NoError(t, err)
+	require.False(t, existed)
+
+	rawURL := "https://private.example/replay.mp4?token=secret"
+	task := &model.Task{
+		TaskID:   record.TaskID,
+		UserId:   169,
+		Status:   model.TaskStatusSuccess,
+		Platform: constant.TaskPlatform(fmt.Sprintf("%d", constant.ChannelTypeSora)),
+		Progress: "100%",
+		PrivateData: model.TaskPrivateData{
+			ResultURL: rawURL,
+		},
+	}
+	task.SetData(map[string]any{
+		"object": "video",
+		"status": "completed",
+		"metadata": map[string]any{
+			"url": rawURL,
+		},
+	})
+	require.NoError(t, model.DB.Create(task).Error)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.BodyStorageCleanup())
+	router.Use(func(c *gin.Context) {
+		c.Set("id", 169)
+		c.Set("group", "default")
+		c.Next()
+	})
+	router.POST("/creative/relay/v1/videos", CreativeVideoSubmitIdempotency(), func(c *gin.Context) {
+		t.Fatal("idempotency replay must short-circuit before relay handler")
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/creative/relay/v1/videos", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "replay-private-url")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	payload := decodeCreativeResponse(t, recorder)
+	metadata := creativeResponseObject(t, payload, "metadata")
+	require.Equal(t, "/creative/relay/v1/videos/"+record.TaskID+"/content", metadata["url"])
+	require.NotContains(t, recorder.Body.String(), rawURL)
+	require.NotContains(t, recorder.Body.String(), "token=secret")
+}
+
 func TestCreativeVideoSubmitIdempotencyCleansRecordWhenSessionBrokerRejects(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 68)
@@ -1408,6 +1618,80 @@ func TestCreativeVideoSubmitIdempotencyCleansRecordWhenSessionBrokerRejects(t *t
 		Where("user_id = ? AND request_id = ?", 68, "session-broker-reject").
 		Count(&count).Error)
 	require.Equal(t, int64(0), count)
+}
+
+func TestCreativeSubmitIdempotencyKeepsRecordAfterProviderAcceptedLocalFailure(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+
+	tests := []struct {
+		name      string
+		path      string
+		body      string
+		requestID string
+		scope     string
+		install   func(*gin.Engine, gin.HandlerFunc)
+	}{
+		{
+			name:      "video",
+			path:      "/creative/relay/v1/videos",
+			body:      `{"model":"creative-model-05","prompt":"safe video"}`,
+			requestID: "video-provider-accepted-local-failure",
+			scope:     model.CreativeVideoIdempotencyScopeVideoSubmit,
+			install: func(router *gin.Engine, handler gin.HandlerFunc) {
+				router.POST("/creative/relay/v1/videos", CreativeVideoSubmitIdempotency(), handler)
+			},
+		},
+		{
+			name:      "suno",
+			path:      "/creative/relay/v1/suno/submit/music",
+			body:      `{"prompt":"safe song"}`,
+			requestID: "suno-provider-accepted-local-failure",
+			scope:     "suno.submit.music",
+			install: func(router *gin.Engine, handler gin.HandlerFunc) {
+				router.POST("/creative/relay/v1/suno/submit/:action", CreativeSunoSubmitGuard(), handler)
+			},
+		},
+		{
+			name:      "mj",
+			path:      "/creative/relay/v1/mj/submit/imagine",
+			body:      `{"prompt":"safe image"}`,
+			requestID: "mj-provider-accepted-local-failure",
+			scope:     creativeMJSubmitScopeImagine,
+			install: func(router *gin.Engine, handler gin.HandlerFunc) {
+				router.POST("/creative/relay/v1/mj/submit/imagine", CreativeMJSubmitImagineGuard(), handler)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			router.Use(middleware.BodyStorageCleanup())
+			router.Use(func(c *gin.Context) {
+				c.Set("id", 91)
+				c.Next()
+			})
+			tt.install(router, func(c *gin.Context) {
+				c.Set("creative_task_provider_accepted", true)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "local persistence failure"})
+			})
+
+			request := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Idempotency-Key", tt.requestID)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusInternalServerError, recorder.Code)
+			var count int64
+			require.NoError(t, model.DB.Model(&model.CreativeVideoIdempotency{}).
+				Where("user_id = ? AND scope = ? AND request_id = ?", 91, tt.scope, tt.requestID).
+				Count(&count).Error)
+			require.Equal(t, int64(1), count)
+		})
+	}
 }
 
 func TestCreativeSunoSubmitRequiresIdempotencyAndInfersGroupBeforeRelay(t *testing.T) {
@@ -1600,6 +1884,160 @@ func TestCreativeMJSubmitRejectsBrowserModelAndNotifyHookBeforeRelay(t *testing.
 	require.Contains(t, notifyError["message"], "forbidden field notifyHook")
 }
 
+func TestCreativeSunoSubmitRejectsNotifyCallbackOwnerAliasesBeforeRelay(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 7501)
+	seedCreativeControllerSunoModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 7501, func(c *gin.Context) {
+		relayReachedCount++
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	tests := []struct {
+		name      string
+		body      map[string]any
+		wantField string
+	}{
+		{
+			name: "notifyHook top level",
+			body: map[string]any{
+				"prompt":     "safe song prompt",
+				"notifyHook": "https://evil.example/callback",
+			},
+			wantField: "notifyHook",
+		},
+		{
+			name: "notify hook snake nested",
+			body: map[string]any{
+				"prompt": "safe song prompt",
+				"params": map[string]any{"notify_hook": "https://evil.example/callback"},
+			},
+			wantField: "params.notify_hook",
+		},
+		{
+			name: "bare notify top level",
+			body: map[string]any{
+				"prompt": "safe song prompt",
+				"notify": "https://evil.example/callback",
+			},
+			wantField: "notify",
+		},
+		{
+			name: "callback top level",
+			body: map[string]any{
+				"prompt":   "safe song prompt",
+				"callback": "https://evil.example/callback",
+			},
+			wantField: "callback",
+		},
+		{
+			name: "webhook nested",
+			body: map[string]any{
+				"prompt": "safe song prompt",
+				"params": map[string]any{"webhook": "https://evil.example/callback"},
+			},
+			wantField: "params.webhook",
+		},
+		{
+			name: "owner id alias",
+			body: map[string]any{
+				"prompt":  "safe song prompt",
+				"ownerId": 999,
+			},
+			wantField: "ownerId",
+		},
+		{
+			name: "user id snake alias",
+			body: map[string]any{
+				"prompt":  "safe song prompt",
+				"user_id": 999,
+			},
+			wantField: "user_id",
+		},
+		{
+			name: "api secret alias",
+			body: map[string]any{
+				"prompt":    "safe song prompt",
+				"apiSecret": "secret-value",
+			},
+			wantField: "apiSecret",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := creativeSameOriginNonceHeaders(auth)
+			headers["Idempotency-Key"] = "suno-forbidden-" + strings.NewReplacer(" ", "-", "_", "-", ".", "-").Replace(tt.name)
+			recorder := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/suno/submit/music", tt.body, auth.cookies, headers)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			errorObject := creativeResponseObject(t, decodeCreativeResponse(t, recorder), "error")
+			require.Contains(t, errorObject["message"], "forbidden field "+tt.wantField)
+		})
+	}
+	require.Equal(t, 0, relayReachedCount)
+}
+
+func TestCreativeRelayRejectsForbiddenAliasesInHeaderQueryFormAndFileNames(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 7502)
+	seedCreativeControllerModelPool(t)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 7502, func(c *gin.Context) {
+		relayReachedCount++
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	headerCaseHeaders := creativeSameOriginNonceHeaders(auth)
+	headerCaseHeaders["X-Notify-Hook"] = "https://evil.example/callback"
+	headerCase := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/generations", map[string]any{
+		"model":  "creative-model-05",
+		"prompt": "safe image prompt",
+	}, auth.cookies, headerCaseHeaders)
+	require.Equal(t, http.StatusBadRequest, headerCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, headerCase), "error")["message"], "forbidden field X-Notify-Hook")
+
+	bareNotifyHeaderCaseHeaders := creativeSameOriginNonceHeaders(auth)
+	bareNotifyHeaderCaseHeaders["X-Notify"] = "https://evil.example/bare-notify"
+	bareNotifyHeaderCase := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/generations", map[string]any{
+		"model":  "creative-model-05",
+		"prompt": "safe image prompt",
+	}, auth.cookies, bareNotifyHeaderCaseHeaders)
+	require.Equal(t, http.StatusBadRequest, bareNotifyHeaderCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, bareNotifyHeaderCase), "error")["message"], "forbidden field X-Notify")
+
+	queryCase := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/generations?ownerId=999", map[string]any{
+		"model":  "creative-model-05",
+		"prompt": "safe image prompt",
+	}, auth.cookies, creativeSameOriginNonceHeaders(auth))
+	require.Equal(t, http.StatusBadRequest, queryCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, queryCase), "error")["message"], "forbidden field ownerId")
+
+	formCase := performCreativeSessionMultipart(t, router, http.MethodPost, "/creative/relay/v1/images/generations", auth.cookies, creativeSameOriginNonceHeaders(auth), map[string]string{
+		"model":         "creative-model-05",
+		"prompt":        "safe image prompt",
+		"mj-api-secret": "leaked-secret",
+	})
+	require.Equal(t, http.StatusBadRequest, formCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, formCase), "error")["message"], "forbidden field mj-api-secret")
+
+	fileCase := performCreativeSessionMultipartWithFiles(t, router, http.MethodPost, "/creative/relay/v1/images/generations", auth.cookies, creativeSameOriginNonceHeaders(auth), map[string]string{
+		"model":  "creative-model-05",
+		"prompt": "safe image prompt",
+	}, map[string]string{
+		"callback": "file contents",
+	})
+	require.Equal(t, http.StatusBadRequest, fileCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, fileCase), "error")["message"], "forbidden field callback")
+
+	require.Equal(t, 0, relayReachedCount)
+}
+
 func TestCreativeMJSubmitIdempotencyIsScopedAndReplaysPublicTask(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 76)
@@ -1654,7 +2092,7 @@ func TestCreativeRelayMJFetchIsOwnerScopedAndSanitized(t *testing.T) {
 			UpstreamTaskID: "upstream-mj-secret",
 			ResultURL:      "https://upstream.example/private-image.png",
 		},
-		Data: []byte(`{"id":"upstream-mj-secret","prompt":"safe","imageUrl":"https://upstream.example/private-image.png"}`),
+		Data: []byte(`{"id":"upstream-mj-secret","prompt":"safe","imageUrl":"https://upstream.example/private-image.png","videoUrl":"https://upstream.example/private-video.mp4?X-Amz-Signature=secret"}`),
 	}).Error)
 	require.NoError(t, model.DB.Create(&model.Task{
 		TaskID:    "task_mj_other_user",
@@ -1686,9 +2124,11 @@ func TestCreativeRelayMJFetchIsOwnerScopedAndSanitized(t *testing.T) {
 	require.NoError(t, common.Unmarshal(sameUser.Body.Bytes(), &samePayload))
 	require.Equal(t, "task_mj_owner", samePayload.MjId)
 	require.Equal(t, "/creative/relay/v1/mj/image/task_mj_owner", samePayload.ImageUrl)
+	require.Empty(t, samePayload.VideoUrl)
 	require.NotContains(t, sameUser.Body.String(), "sk-selected-secret")
 	require.NotContains(t, sameUser.Body.String(), "upstream-mj-secret")
 	require.NotContains(t, sameUser.Body.String(), "upstream.example")
+	require.NotContains(t, sameUser.Body.String(), "private-video")
 
 	crossUser := performFetch(77, "task_mj_other_user")
 	require.Equal(t, http.StatusNotFound, crossUser.Code)
@@ -1798,6 +2238,100 @@ func TestCreativeRelayMJImageIsOwnerScopedAndPrivate(t *testing.T) {
 	require.Equal(t, 1, hits)
 }
 
+func TestCreativeRelayMJImageFallbackClientBlocksUnsafeRedirect(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}))
+
+	imageURL := "http://93.184.216.34/image.png"
+	privateHits := 0
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = creativeRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.String() {
+		case imageURL:
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{"Location": []string{"http://127.0.0.1/private.png"}},
+				Body:       io.NopCloser(strings.NewReader("")),
+				Request:    r,
+			}, nil
+		case "http://127.0.0.1/private.png":
+			privateHits++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"image/png"}},
+				Body:       io.NopCloser(strings.NewReader("private-image-bytes")),
+				Request:    r,
+			}, nil
+		default:
+			require.Failf(t, "unexpected request", "url=%s", r.URL.String())
+			return nil, fmt.Errorf("unexpected request %s", r.URL.String())
+		}
+	})
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+
+	previousHTTPClient := creativeMJImageHTTPClient
+	creativeMJImageHTTPClient = func() *http.Client { return nil }
+	t.Cleanup(func() { creativeMJImageHTTPClient = previousHTTPClient })
+
+	fetchSetting := system_setting.GetFetchSetting()
+	previousSSRFProtection := fetchSetting.EnableSSRFProtection
+	previousAllowPrivate := fetchSetting.AllowPrivateIp
+	fetchSetting.EnableSSRFProtection = true
+	fetchSetting.AllowPrivateIp = false
+	t.Cleanup(func() {
+		fetchSetting.EnableSSRFProtection = previousSSRFProtection
+		fetchSetting.AllowPrivateIp = previousAllowPrivate
+	})
+
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:     33,
+		Type:   constant.ChannelTypeMidjourney,
+		Key:    "sk-fresh-mj-key",
+		Status: common.ChannelStatusEnabled,
+		Name:   "mj-image-proxy-redirect",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Task{
+		TaskID:    "task_mj_image_redirect",
+		UserId:    7803,
+		Status:    model.TaskStatusSuccess,
+		ChannelId: 33,
+		Platform:  constant.TaskPlatformMidjourney,
+		Progress:  "100%",
+		PrivateData: model.TaskPrivateData{
+			ResultURL: imageURL,
+		},
+	}).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/creative/relay/v1/mj/image/task_mj_image_redirect", nil)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_mj_image_redirect"}}
+	ctx.Set("id", 7803)
+	ctx.Set("group", "default")
+	ctx.Set("relay_mode", relayconstant.RelayModeMidjourneyImage)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "default")
+
+	CreativeRelayMJImage(ctx)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, 0, privateHits)
+	require.NotContains(t, recorder.Body.String(), "private-image-bytes")
+}
+
+func TestCreativeAPIRequestOriginIgnoresUntrustedForwardedHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "http://internal.example/creative/api/documents", nil)
+	ctx.Request.Host = "internal.example"
+	ctx.Request.Header.Set("X-Forwarded-Proto", "https")
+	ctx.Request.Header.Set("X-Forwarded-Host", "evil.example")
+
+	require.Equal(t, "http://internal.example", creativeAPIRequestOrigin(ctx))
+}
+
 func TestCreativeRelayMJUnsupportedIsExplicit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -1833,9 +2367,14 @@ func TestCreativeRelaySunoFetchIsOwnerScoped(t *testing.T) {
 		TaskID:    "task_suno_owner",
 		UserId:    73,
 		Status:    model.TaskStatusSuccess,
-		ChannelId: 1,
+		ChannelId: 111,
+		Quota:     22222,
 		Platform:  constant.TaskPlatformSuno,
 		Progress:  "100%",
+		Data:      []byte(`[{"id":"clip-1","audio_url":"https://cdn.example/clip-1.mp3","status":"complete"}]`),
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://private.example/suno.mp3?X-Amz-Signature=secret",
+		},
 	}).Error)
 	require.NoError(t, model.DB.Create(&model.Task{
 		TaskID:    "task_suno_other_user",
@@ -1844,6 +2383,19 @@ func TestCreativeRelaySunoFetchIsOwnerScoped(t *testing.T) {
 		ChannelId: 1,
 		Platform:  constant.TaskPlatformSuno,
 		Progress:  "100%",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Task{
+		TaskID:    "task_mj_same_user",
+		UserId:    73,
+		Status:    model.TaskStatusSuccess,
+		ChannelId: 999,
+		Quota:     12345,
+		Platform:  constant.TaskPlatformMidjourney,
+		Progress:  "100%",
+		Data:      []byte(`{"imageUrl":"https://private.example/mj.png?X-Amz-Signature=secret"}`),
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://private.example/mj.png?X-Amz-Signature=secret",
+		},
 	}).Error)
 
 	performFetch := func(userID int, taskID string) *httptest.ResponseRecorder {
@@ -1864,6 +2416,13 @@ func TestCreativeRelaySunoFetchIsOwnerScoped(t *testing.T) {
 	sameUser := performFetch(73, "task_suno_owner")
 	require.Equal(t, http.StatusOK, sameUser.Code)
 	require.Contains(t, sameUser.Body.String(), "task_suno_owner")
+	require.Contains(t, sameUser.Body.String(), "clip-1")
+	require.NotContains(t, sameUser.Body.String(), "channel_id")
+	require.NotContains(t, sameUser.Body.String(), "quota")
+	require.NotContains(t, sameUser.Body.String(), "user_id")
+	require.NotContains(t, sameUser.Body.String(), "result_url")
+	require.NotContains(t, sameUser.Body.String(), "private.example")
+	require.NotContains(t, sameUser.Body.String(), "22222")
 
 	crossUser := performFetch(73, "task_suno_other_user")
 	require.Equal(t, http.StatusBadRequest, crossUser.Code)
@@ -1873,6 +2432,14 @@ func TestCreativeRelaySunoFetchIsOwnerScoped(t *testing.T) {
 	missing := performFetch(73, "task_suno_missing")
 	require.Equal(t, http.StatusBadRequest, missing.Code)
 	require.Contains(t, missing.Body.String(), "task_not_exist")
+
+	nonSuno := performFetch(73, "task_mj_same_user")
+	require.Equal(t, http.StatusBadRequest, nonSuno.Code)
+	require.Contains(t, nonSuno.Body.String(), "task_not_exist")
+	require.NotContains(t, nonSuno.Body.String(), "Midjourney")
+	require.NotContains(t, nonSuno.Body.String(), "private.example")
+	require.NotContains(t, nonSuno.Body.String(), "channel_id")
+	require.NotContains(t, nonSuno.Body.String(), "12345")
 }
 
 func creativeTestPayloadHash(body []byte) string {
@@ -2111,7 +2678,7 @@ func setupCreativeControllerTestDB(t *testing.T) {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Ability{}, &model.CreativeModelPreference{}, &model.CreativeDocument{}, &model.CreativeAsset{}, &model.CreativeDocumentAssetRef{}, &model.CreativeVideoIdempotency{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Ability{}, &model.CreativeModelPreference{}, &model.CreativeDocument{}, &model.CreativeAsset{}, &model.CreativeAssetQuota{}, &model.CreativeDocumentAssetRef{}, &model.CreativeVideoIdempotency{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -2244,6 +2811,7 @@ func newCreativeRelayBrokerTestRouter(t *testing.T, userId int, relayHandler gin
 	relayRouter := router.Group("/creative/relay/v1")
 	relayRouter.Use(middleware.BodyStorageCleanup())
 	relayRouter.Use(middleware.CreativeSessionHeaderBridge(), middleware.UserAuth())
+	relayRouter.Use(middleware.ModelRequestRateLimit())
 	relayRouter.Use(middleware.CreativeRequireSameOrigin())
 	relayRouter.Use(middleware.CreativeRequireNonce())
 	relayRouter.Use(CreativeRejectForbiddenRelayFields())

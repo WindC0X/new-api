@@ -92,6 +92,28 @@ func CreativeRequireSameOrigin() gin.HandlerFunc {
 	}
 }
 
+// CreativeRejectCrossOriginWhenPresent allows originless safe browser GETs
+// (for navigation/bootstrap compatibility) while rejecting explicit cross-site
+// Origin/Referer signals on session-bound Creative API reads.
+func CreativeRejectCrossOriginWhenPresent() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if strings.TrimSpace(c.GetHeader("Origin")) == "" &&
+			strings.TrimSpace(c.GetHeader("Referer")) == "" {
+			c.Next()
+			return
+		}
+		if !creativeUnsafeRequestOriginIsValid(c) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "creative request origin is invalid",
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 func CreativeRequireNonce() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		switch c.Request.Method {
@@ -169,6 +191,9 @@ func readCreativeRelayModel(c *gin.Context) (string, error) {
 	if override := strings.TrimSpace(c.GetString(ContextKeyCreativeRelayModelOverride)); override != "" {
 		return override, nil
 	}
+	if creativeRelayPathIsUnsupportedMJAction(c.Request.URL.Path) {
+		return "", nil
+	}
 
 	switch c.Request.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -214,6 +239,27 @@ func readCreativeRelayModel(c *gin.Context) (string, error) {
 	return strings.TrimSpace(modelName), nil
 }
 
+func creativeRelayPathIsUnsupportedMJAction(path string) bool {
+	normalized := "/" + strings.Trim(strings.TrimSpace(path), "/")
+	switch normalized {
+	case "/creative/relay/v1/mj/submit/action",
+		"/creative/relay/v1/mj/submit/change",
+		"/creative/relay/v1/mj/submit/simple-change",
+		"/creative/relay/v1/mj/submit/modal",
+		"/creative/relay/v1/mj/submit/shorten",
+		"/creative/relay/v1/mj/submit/blend",
+		"/creative/relay/v1/mj/submit/describe",
+		"/creative/relay/v1/mj/submit/edits",
+		"/creative/relay/v1/mj/submit/video",
+		"/creative/relay/v1/mj/submit/upload-discord-images",
+		"/creative/relay/v1/mj/insight-face/swap",
+		"/creative/relay/v1/mj/task/image-seed":
+		return true
+	default:
+		return false
+	}
+}
+
 func creativeSessionString(value any) string {
 	text, ok := value.(string)
 	if !ok {
@@ -245,8 +291,12 @@ func creativeUnsafeRequestOriginIsValid(c *gin.Context) bool {
 }
 
 func creativeRequestOrigin(c *gin.Context) string {
-	scheme := creativeFirstHeaderValue(c.GetHeader("X-Forwarded-Proto"))
-	if scheme == "" && c.Request.URL != nil {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+
+	scheme := ""
+	if c.Request.URL != nil {
 		scheme = strings.TrimSpace(c.Request.URL.Scheme)
 	}
 	if scheme == "" {
@@ -257,10 +307,7 @@ func creativeRequestOrigin(c *gin.Context) string {
 		}
 	}
 
-	host := creativeFirstHeaderValue(c.GetHeader("X-Forwarded-Host"))
-	if host == "" {
-		host = strings.TrimSpace(c.Request.Host)
-	}
+	host := strings.TrimSpace(c.Request.Host)
 	if host == "" {
 		return ""
 	}
@@ -292,12 +339,4 @@ func creativeParsedOrigin(rawURL string) (string, bool) {
 		return "", false
 	}
 	return parsed.Scheme + "://" + parsed.Host, true
-}
-
-func creativeFirstHeaderValue(value string) string {
-	value = strings.TrimSpace(value)
-	if commaIndex := strings.IndexByte(value, ','); commaIndex >= 0 {
-		value = strings.TrimSpace(value[:commaIndex])
-	}
-	return value
 }

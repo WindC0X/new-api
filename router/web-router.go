@@ -33,6 +33,133 @@ type ThemeAssets struct {
 	CreativeIndexPage []byte
 }
 
+func creativeNoStore() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		setCreativeNoStoreHeaders(c)
+		c.Next()
+	}
+}
+
+func setCreativeNoStoreHeaders(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+}
+
+func creativeRouteNotFound(c *gin.Context) {
+	controller.RelayNotFound(c)
+}
+
+func SetCreativeRouter(router *gin.Engine) {
+	creativeAPIRouter := router.Group("/creative/api")
+	creativeAPIRouter.Use(middleware.RouteTag("api"))
+	creativeAPIRouter.Use(creativeNoStore())
+	creativeAPIRouter.Use(middleware.BodyStorageCleanup())
+	creativeAPIRouter.Use(middleware.CreativeSessionHeaderBridge(), middleware.UserAuth())
+	creativeAPIRouter.Use(middleware.CreativeRejectCrossOriginWhenPresent())
+	{
+		creativeAPIRouter.GET("/bootstrap", controller.CreativeBootstrap)
+		creativeAPIRouter.GET("/models", controller.CreativeListModels)
+		creativeAPIRouter.GET("/preferences/model", controller.CreativeGetModelPreference)
+		creativeAPIRouter.PATCH("/preferences/model", middleware.CreativeRequireNonce(), controller.CreativePatchModelPreference)
+		creativeAPIRouter.GET("/documents", controller.CreativeListDocuments)
+		creativeAPIRouter.POST("/documents", middleware.CreativeRequireNonce(), controller.CreativeCreateDocument)
+		creativeAPIRouter.GET("/documents/:id", controller.CreativeGetDocument)
+		creativeAPIRouter.PUT("/documents/:id", middleware.CreativeRequireNonce(), controller.CreativeUpdateDocument)
+		creativeAPIRouter.DELETE("/documents/:id", middleware.CreativeRequireNonce(), controller.CreativeDeleteDocument)
+		creativeAPIRouter.POST("/assets", middleware.CreativeRequireNonce(), controller.CreativeUploadAsset)
+		creativeAPIRouter.GET("/assets/:id", controller.CreativeGetAsset)
+		creativeAPIRouter.GET("/assets/:id/content", controller.CreativeGetAssetContent)
+		creativeAPIRouter.DELETE("/assets/:id", middleware.CreativeRequireNonce(), controller.CreativeDeleteAsset)
+
+		creativeAPIRouter.GET("/bootstrap/", creativeRouteNotFound)
+		creativeAPIRouter.GET("/models/", creativeRouteNotFound)
+		creativeAPIRouter.GET("/preferences/model/", creativeRouteNotFound)
+		creativeAPIRouter.PATCH("/preferences/model/", creativeRouteNotFound)
+		creativeAPIRouter.GET("/documents/", creativeRouteNotFound)
+		creativeAPIRouter.POST("/documents/", creativeRouteNotFound)
+		creativeAPIRouter.GET("/documents/:id/", creativeRouteNotFound)
+		creativeAPIRouter.PUT("/documents/:id/", creativeRouteNotFound)
+		creativeAPIRouter.DELETE("/documents/:id/", creativeRouteNotFound)
+		creativeAPIRouter.POST("/assets/", creativeRouteNotFound)
+		creativeAPIRouter.GET("/assets/:id/", creativeRouteNotFound)
+		creativeAPIRouter.GET("/assets/:id/content/", creativeRouteNotFound)
+		creativeAPIRouter.DELETE("/assets/:id/", creativeRouteNotFound)
+	}
+
+	creativeRelayRouter := router.Group("/creative/relay/v1")
+	creativeRelayRouter.Use(middleware.RouteTag("relay"))
+	creativeRelayRouter.Use(creativeNoStore())
+	creativeRelayRouter.Use(middleware.BodyStorageCleanup())
+	creativeRelayRouter.Use(middleware.SystemPerformanceCheck())
+	creativeRelayRouter.Use(middleware.CreativeSessionHeaderBridge(), middleware.UserAuth())
+	creativeRelayRouter.Use(middleware.ModelRequestRateLimit())
+	creativeRelayRouter.Use(middleware.CreativeRequireSameOrigin())
+	creativeRelayRouter.Use(middleware.CreativeRequireNonce())
+	creativeRelayRouter.Use(controller.CreativeRejectForbiddenRelayFields())
+	{
+		creativeDistributedRelayRouter := creativeRelayRouter.Group("")
+		creativeDistributedRelayRouter.Use(middleware.CreativeRelaySessionBroker(), middleware.Distribute())
+		creativeDistributedRelayRouter.POST("/chat/completions", controller.CreativeRelayChatCompletions)
+		creativeDistributedRelayRouter.POST("/images/generations", controller.CreativeRelayImagesGenerations)
+		creativeDistributedRelayRouter.POST("/chat/completions/", creativeRouteNotFound)
+		creativeDistributedRelayRouter.POST("/images/generations/", creativeRouteNotFound)
+
+		creativeVideoRelayRouter := creativeRelayRouter.Group("/videos")
+		creativeVideoRelayRouter.Use(controller.CreativeVideoRelayGate())
+		creativeVideoRelayRouter.Use(controller.CreativeVideoSubmitIdempotency())
+		creativeVideoRelayRouter.Use(middleware.CreativeRelaySessionBroker(), middleware.Distribute())
+		creativeVideoRelayRouter.POST("", controller.CreativeRelayVideos)
+		creativeVideoRelayRouter.GET("/:task_id", controller.CreativeRelayVideoFetch)
+		creativeVideoRelayRouter.GET("/:task_id/content", controller.CreativeRelayVideoContent)
+		creativeVideoRelayRouter.POST("/", creativeRouteNotFound)
+		creativeVideoRelayRouter.GET("/:task_id/", creativeRouteNotFound)
+		creativeVideoRelayRouter.GET("/:task_id/content/", creativeRouteNotFound)
+
+		creativeSunoRelayRouter := creativeRelayRouter.Group("/suno")
+		creativeSunoRelayRouter.POST("/submit/:action", controller.CreativeSunoSubmitGuard(), middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoSubmit)
+		creativeSunoRelayRouter.GET("/fetch/:id", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
+		creativeSunoRelayRouter.POST("/fetch", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
+		creativeSunoRelayRouter.POST("/submit/:action/", creativeRouteNotFound)
+		creativeSunoRelayRouter.GET("/fetch/:id/", creativeRouteNotFound)
+		creativeSunoRelayRouter.POST("/fetch/", creativeRouteNotFound)
+
+		creativeMJRelayRouter := creativeRelayRouter.Group("/mj")
+		creativeMJRelayRouter.POST("/submit/imagine", controller.CreativeMJSubmitImagineGuard(), middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJSubmitImagine)
+		creativeMJRelayRouter.GET("/task/:task_id/fetch", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJFetch)
+		creativeMJRelayRouter.POST("/task/list-by-condition", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJListByCondition)
+		creativeMJRelayRouter.GET("/image/:task_id", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJImage)
+		creativeMJRelayRouter.POST("/submit/action", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/change", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/simple-change", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/modal", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/shorten", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/blend", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/describe", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/edits", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/video", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/upload-discord-images", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/insight-face/swap", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.GET("/task/:task_id/image-seed", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
+		creativeMJRelayRouter.POST("/submit/imagine/", creativeRouteNotFound)
+		creativeMJRelayRouter.GET("/task/:task_id/fetch/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/task/list-by-condition/", creativeRouteNotFound)
+		creativeMJRelayRouter.GET("/image/:task_id/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/action/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/change/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/simple-change/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/modal/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/shorten/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/blend/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/describe/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/edits/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/video/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/submit/upload-discord-images/", creativeRouteNotFound)
+		creativeMJRelayRouter.POST("/insight-face/swap/", creativeRouteNotFound)
+		creativeMJRelayRouter.GET("/task/:task_id/image-seed/", creativeRouteNotFound)
+	}
+}
+
 func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	defaultFS := common.EmbedFolder(assets.DefaultBuildFS, "web/default/dist")
 	classicFS := common.EmbedFolder(assets.ClassicBuildFS, "web/classic/dist")
@@ -53,71 +180,7 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	// behaviour here is undefined by design — choose to mount on a unique prefix.
 	creativeServer := http.StripPrefix("/creative", http.FileServer(creativeFS))
 
-	creativeAPIRouter := router.Group("/creative/api")
-	creativeAPIRouter.Use(middleware.RouteTag("api"))
-	creativeAPIRouter.Use(middleware.BodyStorageCleanup())
-	creativeAPIRouter.Use(middleware.CreativeSessionHeaderBridge(), middleware.UserAuth())
-	{
-		creativeAPIRouter.GET("/bootstrap", controller.CreativeBootstrap)
-		creativeAPIRouter.GET("/models", controller.CreativeListModels)
-		creativeAPIRouter.GET("/preferences/model", controller.CreativeGetModelPreference)
-		creativeAPIRouter.PATCH("/preferences/model", middleware.CreativeRequireNonce(), controller.CreativePatchModelPreference)
-		creativeAPIRouter.GET("/documents", controller.CreativeListDocuments)
-		creativeAPIRouter.POST("/documents", middleware.CreativeRequireNonce(), controller.CreativeCreateDocument)
-		creativeAPIRouter.GET("/documents/:id", controller.CreativeGetDocument)
-		creativeAPIRouter.PUT("/documents/:id", middleware.CreativeRequireNonce(), controller.CreativeUpdateDocument)
-		creativeAPIRouter.DELETE("/documents/:id", middleware.CreativeRequireNonce(), controller.CreativeDeleteDocument)
-		creativeAPIRouter.POST("/assets", middleware.CreativeRequireNonce(), controller.CreativeUploadAsset)
-		creativeAPIRouter.GET("/assets/:id", controller.CreativeGetAsset)
-		creativeAPIRouter.GET("/assets/:id/content", controller.CreativeGetAssetContent)
-		creativeAPIRouter.DELETE("/assets/:id", middleware.CreativeRequireNonce(), controller.CreativeDeleteAsset)
-	}
-
-	creativeRelayRouter := router.Group("/creative/relay/v1")
-	creativeRelayRouter.Use(middleware.RouteTag("relay"))
-	creativeRelayRouter.Use(middleware.BodyStorageCleanup())
-	creativeRelayRouter.Use(middleware.SystemPerformanceCheck())
-	creativeRelayRouter.Use(middleware.CreativeSessionHeaderBridge(), middleware.UserAuth())
-	creativeRelayRouter.Use(middleware.CreativeRequireSameOrigin())
-	creativeRelayRouter.Use(middleware.CreativeRequireNonce())
-	creativeRelayRouter.Use(controller.CreativeRejectForbiddenRelayFields())
-	{
-		creativeDistributedRelayRouter := creativeRelayRouter.Group("")
-		creativeDistributedRelayRouter.Use(middleware.CreativeRelaySessionBroker(), middleware.Distribute())
-		creativeDistributedRelayRouter.POST("/chat/completions", controller.CreativeRelayChatCompletions)
-		creativeDistributedRelayRouter.POST("/images/generations", controller.CreativeRelayImagesGenerations)
-
-		creativeVideoRelayRouter := creativeRelayRouter.Group("/videos")
-		creativeVideoRelayRouter.Use(controller.CreativeVideoRelayGate())
-		creativeVideoRelayRouter.Use(controller.CreativeVideoSubmitIdempotency())
-		creativeVideoRelayRouter.Use(middleware.CreativeRelaySessionBroker(), middleware.Distribute())
-		creativeVideoRelayRouter.POST("", controller.CreativeRelayVideos)
-		creativeVideoRelayRouter.GET("/:task_id", controller.CreativeRelayVideoFetch)
-		creativeVideoRelayRouter.GET("/:task_id/content", controller.CreativeRelayVideoContent)
-
-		creativeSunoRelayRouter := creativeRelayRouter.Group("/suno")
-		creativeSunoRelayRouter.POST("/submit/:action", controller.CreativeSunoSubmitGuard(), middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoSubmit)
-		creativeSunoRelayRouter.GET("/fetch/:id", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
-		creativeSunoRelayRouter.POST("/fetch", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
-
-		creativeMJRelayRouter := creativeRelayRouter.Group("/mj")
-		creativeMJRelayRouter.POST("/submit/imagine", controller.CreativeMJSubmitImagineGuard(), middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJSubmitImagine)
-		creativeMJRelayRouter.GET("/task/:task_id/fetch", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJFetch)
-		creativeMJRelayRouter.POST("/task/list-by-condition", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJListByCondition)
-		creativeMJRelayRouter.GET("/image/:task_id", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelayMJImage)
-		creativeMJRelayRouter.POST("/submit/action", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/submit/change", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/submit/simple-change", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/submit/modal", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/submit/shorten", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/submit/blend", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/submit/describe", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/submit/edits", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/submit/video", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/submit/upload-discord-images", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.POST("/insight-face/swap", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-		creativeMJRelayRouter.GET("/task/:task_id/image-seed", middleware.CreativeRelaySessionBroker(), controller.CreativeRelayMJUnsupported)
-	}
+	SetCreativeRouter(router)
 
 	serveCreative := func(c *gin.Context) {
 		p := c.Request.URL.Path

@@ -41,6 +41,45 @@ func TestCreativeRelayModelReaderSupportsMultipartAndReplaysBody(t *testing.T) {
 	require.Equal(t, []string{"a cat playing piano"}, form.Value["prompt"])
 }
 
+func TestCreativeOriginIgnoresUntrustedForwardedHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "http://internal.example/creative/relay/v1/suno/fetch/task_1", nil)
+	ctx.Request.Host = "internal.example"
+	ctx.Request.Header.Set("Origin", "https://evil.example")
+	ctx.Request.Header.Set("X-Forwarded-Proto", "https")
+	ctx.Request.Header.Set("X-Forwarded-Host", "evil.example")
+
+	require.False(t, creativeUnsafeRequestOriginIsValid(ctx))
+	require.Equal(t, "http://internal.example", creativeRequestOrigin(ctx))
+}
+
+func TestCreativeRejectCrossOriginWhenPresentAllowsOriginlessSafeGet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(CreativeRejectCrossOriginWhenPresent())
+	router.GET("/creative/api/bootstrap", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	originless := httptest.NewRecorder()
+	router.ServeHTTP(originless, httptest.NewRequest(http.MethodGet, "http://example.com/creative/api/bootstrap", nil))
+	require.Equal(t, http.StatusOK, originless.Code)
+
+	sameOrigin := httptest.NewRecorder()
+	sameOriginRequest := httptest.NewRequest(http.MethodGet, "http://example.com/creative/api/bootstrap", nil)
+	sameOriginRequest.Header.Set("Origin", "http://example.com")
+	router.ServeHTTP(sameOrigin, sameOriginRequest)
+	require.Equal(t, http.StatusOK, sameOrigin.Code)
+
+	crossOrigin := httptest.NewRecorder()
+	crossOriginRequest := httptest.NewRequest(http.MethodGet, "http://example.com/creative/api/bootstrap", nil)
+	crossOriginRequest.Header.Set("Origin", "https://evil.example")
+	router.ServeHTTP(crossOrigin, crossOriginRequest)
+	require.Equal(t, http.StatusForbidden, crossOrigin.Code)
+}
+
 func TestCreativeRelayModelReaderAllowsGetWithoutBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -99,6 +138,22 @@ func TestCreativeMJDistributorReadsImagineModelAndRelayMode(t *testing.T) {
 	require.True(t, shouldSelectChannel)
 	require.Equal(t, "mj_imagine", req.Model)
 	require.Equal(t, relayconstant.RelayModeMidjourneyImagine, ctx.GetInt("relay_mode"))
+}
+
+func TestCreativeRelayModelReaderIgnoresUnsupportedMJActionModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/creative/relay/v1/mj/submit/action", strings.NewReader(`{"model":"mj-private-model","prompt":"safe"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	modelName, err := readCreativeRelayModel(ctx)
+
+	require.NoError(t, err)
+	require.Empty(t, modelName)
+	replayed, err := io.ReadAll(ctx.Request.Body)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"model":"mj-private-model","prompt":"safe"}`, string(replayed))
 }
 
 func TestCreativeMJDistributorDoesNotSelectChannelForFetchOrImage(t *testing.T) {

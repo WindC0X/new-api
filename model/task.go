@@ -113,12 +113,13 @@ type TaskPrivateData struct {
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
 type TaskBillingContext struct {
-	ModelPrice      float64            `json:"model_price,omitempty"`       // 模型单价
-	GroupRatio      float64            `json:"group_ratio,omitempty"`       // 分组倍率
-	ModelRatio      float64            `json:"model_ratio,omitempty"`       // 模型倍率
-	OtherRatios     map[string]float64 `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
-	OriginModelName string             `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
-	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
+	ModelPrice       float64            `json:"model_price,omitempty"`        // 模型单价
+	GroupRatio       float64            `json:"group_ratio,omitempty"`        // 分组倍率
+	ModelRatio       float64            `json:"model_ratio,omitempty"`        // 模型倍率
+	OtherRatios      map[string]float64 `json:"other_ratios,omitempty"`       // 附加倍率（时长、分辨率等）
+	OriginModelName  string             `json:"origin_model_name,omitempty"`  // 模型名称，必须为OriginModelName
+	PerCallBilling   bool               `json:"per_call_billing,omitempty"`   // 按次计费：跳过轮询阶段的差额结算
+	PreConsumedQuota int                `json:"pre_consumed_quota,omitempty"` // 提交阶段预扣额度快照，用于 durable settle 重试
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
@@ -521,6 +522,102 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+const (
+	TaskBillingOutboxOperationSubmitSettle   = "submit_settle"
+	TaskBillingOutboxOperationTerminalSettle = "terminal_settle"
+	TaskBillingOutboxOperationTerminalRefund = "terminal_refund"
+
+	TaskBillingOutboxStatusPending    = "pending"
+	TaskBillingOutboxStatusProcessing = "processing"
+	TaskBillingOutboxStatusDone       = "done"
+	TaskBillingOutboxStatusFailed     = "failed"
+)
+
+type TaskBillingOutbox struct {
+	ID               int64  `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
+	TaskRowID        int64  `json:"task_row_id" gorm:"index;uniqueIndex:idx_task_billing_outbox_owner_task_op,priority:1"`
+	TaskID           string `json:"task_id" gorm:"type:varchar(191);index;uniqueIndex:idx_task_billing_outbox_owner_task_op,priority:3"`
+	UserId           int    `json:"user_id" gorm:"index;uniqueIndex:idx_task_billing_outbox_owner_task_op,priority:2"`
+	Operation        string `json:"operation" gorm:"type:varchar(40);index;uniqueIndex:idx_task_billing_outbox_owner_task_op,priority:4"`
+	Status           string `json:"status" gorm:"type:varchar(20);index"`
+	ActualQuota      int    `json:"actual_quota"`
+	PreConsumedQuota int    `json:"pre_consumed_quota"`
+	Reason           string `json:"reason" gorm:"type:text"`
+	FundingDone      bool   `json:"funding_done" gorm:"index"`
+	TokenDone        bool   `json:"token_done" gorm:"index"`
+	LogDone          bool   `json:"log_done" gorm:"index"`
+	Attempts         int    `json:"attempts"`
+	LastError        string `json:"last_error" gorm:"type:text"`
+	CreatedTime      int64  `json:"created_time" gorm:"bigint"`
+	UpdatedTime      int64  `json:"updated_time" gorm:"bigint;index"`
+	CompletedTime    int64  `json:"completed_time" gorm:"bigint;index"`
+}
+
+func (r *TaskBillingOutbox) BeforeCreate(tx *gorm.DB) error {
+	now := common.GetTimestamp()
+	if r.Status == "" {
+		r.Status = TaskBillingOutboxStatusPending
+	}
+	r.CreatedTime = now
+	r.UpdatedTime = now
+	return nil
+}
+
+func (r *TaskBillingOutbox) BeforeUpdate(tx *gorm.DB) error {
+	r.UpdatedTime = common.GetTimestamp()
+	return nil
+}
+
+func EnqueueTaskBillingOutbox(task *Task, operation string, actualQuota int, preConsumedQuota int, reason string) (*TaskBillingOutbox, error) {
+	return enqueueTaskBillingOutbox(DB, task, operation, actualQuota, preConsumedQuota, reason)
+}
+
+func enqueueTaskBillingOutbox(tx *gorm.DB, task *Task, operation string, actualQuota int, preConsumedQuota int, reason string) (*TaskBillingOutbox, error) {
+	if task == nil {
+		return nil, errors.New("task is nil")
+	}
+	operation = strings.TrimSpace(operation)
+	if operation == "" {
+		return nil, errors.New("task billing outbox operation is empty")
+	}
+	record := &TaskBillingOutbox{
+		TaskRowID:        task.ID,
+		TaskID:           task.TaskID,
+		UserId:           task.UserId,
+		Operation:        operation,
+		Status:           TaskBillingOutboxStatusPending,
+		ActualQuota:      actualQuota,
+		PreConsumedQuota: preConsumedQuota,
+		Reason:           reason,
+	}
+	err := tx.Where("task_row_id = ? AND user_id = ? AND task_id = ? AND operation = ?", task.ID, task.UserId, task.TaskID, operation).
+		Attrs(record).
+		FirstOrCreate(record).Error
+	if err != nil {
+		return nil, err
+	}
+	return record, nil
+}
+
+func (t *Task) UpdateWithStatusAndBillingOutbox(fromStatus TaskStatus, operation string, actualQuota int, preConsumedQuota int, reason string) (bool, *TaskBillingOutbox, error) {
+	var outbox *TaskBillingOutbox
+	won := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		won = true
+		var err error
+		outbox, err = enqueueTaskBillingOutbox(tx, t, operation, actualQuota, preConsumedQuota, reason)
+		return err
+	})
+	return won, outbox, err
 }
 
 // TaskBulkUpdate performs an unconditional bulk UPDATE by upstream task_id strings.

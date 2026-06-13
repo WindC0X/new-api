@@ -170,7 +170,7 @@ func newCreativeAssetSessionRouter(t *testing.T, userId int) *gin.Engine {
 func installCreativeAssetRuntimeForControllerTest(t *testing.T) {
 	t.Helper()
 
-	require.NoError(t, model.DB.AutoMigrate(&model.CreativeAsset{}, &model.CreativeDocumentAssetRef{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.CreativeAsset{}, &model.CreativeAssetQuota{}, &model.CreativeDocumentAssetRef{}))
 	runtime, err := service.NewCreativeAssetRuntime(service.CreativeAssetConfig{
 		Enabled:                   true,
 		RolloutMode:               service.CreativeAssetRolloutLocal,

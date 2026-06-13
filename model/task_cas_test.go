@@ -46,6 +46,7 @@ func TestMain(m *testing.M) {
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&PerfMetric{},
+		&TaskBillingOutbox{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -67,6 +68,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")
 		DB.Exec("DELETE FROM perf_metrics")
+		DB.Exec("DELETE FROM task_billing_outboxes")
 	})
 }
 
@@ -233,4 +235,42 @@ func TestUpdateWithStatus_ConcurrentWinner(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, winCount, "exactly one goroutine should win the CAS")
+}
+
+func TestUpdateWithStatusAndBillingOutbox_CreatesOutboxOnlyForCASWinner(t *testing.T) {
+	truncateTables(t)
+
+	task := &Task{
+		TaskID: "task_cas_outbox",
+		Status: TaskStatusInProgress,
+		Quota:  1000,
+		Data:   json.RawMessage(`{}`),
+	}
+	insertTask(t, task)
+
+	var first Task
+	require.NoError(t, DB.First(&first, task.ID).Error)
+	var second Task
+	require.NoError(t, DB.First(&second, task.ID).Error)
+
+	first.Status = TaskStatusFailure
+	first.Progress = "100%"
+	first.FailReason = "first failed"
+	firstWon, outbox, err := first.UpdateWithStatusAndBillingOutbox(TaskStatusInProgress, TaskBillingOutboxOperationTerminalRefund, 0, first.Quota, first.FailReason)
+	require.NoError(t, err)
+	require.True(t, firstWon)
+	require.NotNil(t, outbox)
+	require.Equal(t, TaskBillingOutboxOperationTerminalRefund, outbox.Operation)
+
+	second.Status = TaskStatusFailure
+	second.Progress = "100%"
+	second.FailReason = "second failed"
+	secondWon, secondOutbox, err := second.UpdateWithStatusAndBillingOutbox(TaskStatusInProgress, TaskBillingOutboxOperationTerminalRefund, 0, second.Quota, second.FailReason)
+	require.NoError(t, err)
+	require.False(t, secondWon)
+	require.Nil(t, secondOutbox)
+
+	var count int64
+	require.NoError(t, DB.Model(&TaskBillingOutbox{}).Where("task_id = ?", task.TaskID).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
 }

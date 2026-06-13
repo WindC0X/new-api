@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func setupCreativeModelTestDB(t *testing.T) {
@@ -14,13 +15,15 @@ func setupCreativeModelTestDB(t *testing.T) {
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
 	common.RedisEnabled = false
-	require.NoError(t, DB.AutoMigrate(&CreativeModelPreference{}, &CreativeDocument{}, &CreativeAsset{}, &CreativeDocumentAssetRef{}))
+	require.NoError(t, DB.AutoMigrate(&CreativeModelPreference{}, &CreativeDocument{}, &CreativeAsset{}, &CreativeAssetQuota{}, &CreativeDocumentAssetRef{}))
 	require.NoError(t, DB.Exec("DELETE FROM creative_model_preferences").Error)
 	require.NoError(t, DB.Exec("DELETE FROM creative_documents").Error)
 	require.NoError(t, DB.Exec("DELETE FROM creative_assets").Error)
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&CreativeAssetQuota{}).Error)
 	require.NoError(t, DB.Exec("DELETE FROM creative_document_asset_refs").Error)
 	t.Cleanup(func() {
 		DB.Exec("DELETE FROM creative_document_asset_refs")
+		DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&CreativeAssetQuota{})
 		DB.Exec("DELETE FROM creative_assets")
 		DB.Exec("DELETE FROM creative_model_preferences")
 		DB.Exec("DELETE FROM creative_documents")
@@ -217,6 +220,63 @@ func TestCreativeDocumentUpdateRevisionConflictAndIdempotency(t *testing.T) {
 	require.True(t, conflict)
 	require.Equal(t, 2, stale.Revision)
 	require.Equal(t, "Second", stale.Title)
+}
+
+func TestCreativeDocumentUpdateWithAssetRefsRollsBackOnRefFailure(t *testing.T) {
+	setupCreativeModelTestDB(t)
+
+	_, err := CreateCreativeDocument(&CreativeDocument{
+		UserId:           12,
+		DocumentId:       "doc-atomic-update",
+		Title:            "First",
+		SnapshotJSON:     "{\"nodes\":[]}",
+		MetadataJSON:     "{}",
+		ClientMutationId: "create-atomic-update",
+	})
+	require.NoError(t, err)
+
+	updated, conflict, err := UpdateCreativeDocumentSnapshotWithAssetRefs(12, "doc-atomic-update", 1, CreativeDocumentPatch{
+		Title:            stringPtr("Second"),
+		SnapshotJSON:     stringPtr("{\"nodes\":[1]}"),
+		ClientMutationId: "update-atomic-fail",
+	}, []string{"not-a-valid-asset-id"})
+	require.Error(t, err)
+	require.Nil(t, updated)
+	require.False(t, conflict)
+
+	stored, exists, err := GetCreativeDocument(12, "doc-atomic-update")
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.Equal(t, 1, stored.Revision)
+	require.Equal(t, "First", stored.Title)
+	require.Equal(t, "{\"nodes\":[]}", stored.SnapshotJSON)
+}
+
+func TestCreativeDocumentDeleteWithAssetRefsRollsBackOnRefCleanupFailure(t *testing.T) {
+	setupCreativeModelTestDB(t)
+
+	_, err := CreateCreativeDocument(&CreativeDocument{
+		UserId:           13,
+		DocumentId:       "doc-atomic-delete",
+		Title:            "Delete me",
+		SnapshotJSON:     "{\"nodes\":[]}",
+		MetadataJSON:     "{}",
+		ClientMutationId: "create-atomic-delete",
+	})
+	require.NoError(t, err)
+	require.NoError(t, DB.Migrator().DropTable(&CreativeDocumentAssetRef{}))
+
+	baseRevision := 1
+	deleted, found, conflict, err := DeleteCreativeDocumentWithAssetRefs(13, "doc-atomic-delete", &baseRevision)
+	require.Error(t, err)
+	_ = deleted
+	_ = found
+	require.False(t, conflict)
+
+	stored, exists, err := GetCreativeDocument(13, "doc-atomic-delete")
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.Equal(t, 1, stored.Revision)
 }
 
 func stringPtr(value string) *string {

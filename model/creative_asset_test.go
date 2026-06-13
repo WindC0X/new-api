@@ -9,7 +9,7 @@ import (
 func TestCreativeAssetMigrationAndOwnerHashUniqueness(t *testing.T) {
 	setupCreativeModelTestDB(t)
 
-	require.NoError(t, DB.AutoMigrate(&CreativeAsset{}, &CreativeDocumentAssetRef{}))
+	require.NoError(t, DB.AutoMigrate(&CreativeAsset{}, &CreativeAssetQuota{}, &CreativeDocumentAssetRef{}))
 
 	first := &CreativeAsset{
 		UserId:         101,
@@ -60,7 +60,7 @@ func TestCreativeAssetMigrationAndOwnerHashUniqueness(t *testing.T) {
 
 func TestCreativeDocumentAssetRefsRefreshesSanitizedSnapshots(t *testing.T) {
 	setupCreativeModelTestDB(t)
-	require.NoError(t, DB.AutoMigrate(&CreativeAsset{}, &CreativeDocumentAssetRef{}))
+	require.NoError(t, DB.AutoMigrate(&CreativeAsset{}, &CreativeAssetQuota{}, &CreativeDocumentAssetRef{}))
 
 	require.NoError(t, DB.Create(&CreativeAsset{
 		UserId:         301,

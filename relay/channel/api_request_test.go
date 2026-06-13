@@ -138,6 +138,66 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	require.False(t, hasAcceptEncoding)
 }
 
+func TestProcessHeaderOverride_PassthroughSkipsSensitiveBrowserHeaders(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request.Header.Set("X-Trace-Id", "trace-123")
+	ctx.Request.Header.Set("Cookie", "session=leak")
+	ctx.Request.Header.Set("Authorization", "Bearer leak")
+	ctx.Request.Header.Set("X-Creative-CSRF", "csrf-leak")
+	ctx.Request.Header.Set("X-Creative-Nonce", "nonce-leak")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]any{
+				"*": "",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "trace-123", headers["x-trace-id"])
+	require.NotContains(t, headers, "cookie")
+	require.NotContains(t, headers, "authorization")
+	require.NotContains(t, headers, "x-creative-csrf")
+	require.NotContains(t, headers, "x-creative-nonce")
+}
+
+func TestProcessHeaderOverride_ClientHeaderPlaceholderSkipsSensitiveBrowserHeaders(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request.Header.Set("Authorization", "Bearer leak")
+	ctx.Request.Header.Set("X-Creative-CSRF", "csrf-leak")
+	ctx.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			HeadersOverride: map[string]any{
+				"X-Upstream-Auth":  "{client_header:Authorization}",
+				"X-Upstream-CSRF":  "{client_header:X-Creative-CSRF}",
+				"X-Upstream-Trace": "{client_header:X-Trace-Id}",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.NotContains(t, headers, "x-upstream-auth")
+	require.NotContains(t, headers, "x-upstream-csrf")
+	require.Equal(t, "trace-123", headers["x-upstream-trace"])
+}
+
 func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.T) {
 	t.Parallel()
 

@@ -1391,6 +1391,46 @@ func TestApplyParamOverridePassHeadersSkipsMissingHeaders(t *testing.T) {
 	}
 }
 
+func TestApplyParamOverridePassHeadersSkipsSensitiveBrowserHeaders(t *testing.T) {
+	input := []byte(`{"temperature":0.7}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{
+				"mode":  "pass_headers",
+				"value": []interface{}{"X-Trace-Id", "Cookie", "Authorization", "X-Creative-CSRF", "X-Creative-Nonce"},
+			},
+		},
+	}
+	ctx := map[string]interface{}{
+		"request_headers": map[string]interface{}{
+			"x-trace-id":       "trace-123",
+			"cookie":           "session=leak",
+			"authorization":    "Bearer leak",
+			"x-creative-csrf":  "csrf-leak",
+			"x-creative-nonce": "nonce-leak",
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, ctx)
+	if err != nil {
+		t.Fatalf("ApplyParamOverride returned error: %v", err)
+	}
+	assertJSONEqual(t, `{"temperature":0.7}`, string(out))
+
+	headers, ok := ctx["header_override"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected header_override context map")
+	}
+	if headers["x-trace-id"] != "trace-123" {
+		t.Fatalf("expected x-trace-id to be passed, got: %v", headers["x-trace-id"])
+	}
+	for _, forbidden := range []string{"cookie", "authorization", "x-creative-csrf", "x-creative-nonce"} {
+		if _, exists := headers[forbidden]; exists {
+			t.Fatalf("expected sensitive header %s to be skipped", forbidden)
+		}
+	}
+}
+
 func TestApplyParamOverrideCopyHeaderSkipsMissingSource(t *testing.T) {
 	input := []byte(`{"temperature":0.7}`)
 	override := map[string]interface{}{

@@ -13,7 +13,7 @@ import { createLogEntry } from './log-entry.js';
 export function togglePause() {
   state.isPaused = !state.isPaused;
   updatePauseButton();
-
+  
   if (!state.isPaused && state.pendingLogs.length > 0) {
     // Apply pending logs when resuming
     state.pendingLogs.forEach(log => {
@@ -30,7 +30,7 @@ export function togglePause() {
 export function updatePauseButton() {
   const btn = elements.togglePauseBtn;
   if (!btn) return;
-
+  
   if (state.isPaused) {
     btn.textContent = `⏸️ 暂停`;
     if (state.pendingLogs.length > 0) {
@@ -71,12 +71,12 @@ function updateSlowRequestsUI() {
  */
 export function updateFetchStats() {
   const logs = state.logs.filter(l => !isBlacklistedUrl(l.url));
-
+  
   // Total requests
   if (elements.statTotalRequests) {
     elements.statTotalRequests.textContent = logs.length;
   }
-
+  
   // Success rate
   if (elements.statSuccessRate) {
     const successCount = logs.filter(l => l.status >= 200 && l.status < 400).length;
@@ -84,7 +84,7 @@ export function updateFetchStats() {
     elements.statSuccessRate.textContent = `${rate}%`;
     elements.statSuccessRate.style.color = rate >= 95 ? 'var(--success-color)' : (rate >= 80 ? 'var(--warning-color)' : 'var(--error-color)');
   }
-
+  
   // Average duration
   if (elements.statAvgDuration) {
     const durations = logs.filter(l => l.duration > 0).map(l => l.duration);
@@ -92,21 +92,21 @@ export function updateFetchStats() {
     elements.statAvgDuration.textContent = avg > 0 ? `${Math.round(avg)}ms` : '-';
     elements.statAvgDuration.style.color = avg < 500 ? 'var(--success-color)' : (avg < 1000 ? 'var(--warning-color)' : 'var(--error-color)');
   }
-
+  
   // Cache hit rate
   if (elements.statCacheHit) {
     const cachedCount = logs.filter(l => l.cached).length;
     const rate = logs.length > 0 ? ((cachedCount / logs.length) * 100).toFixed(1) : 0;
     elements.statCacheHit.textContent = `${rate}%`;
   }
-
+  
   // Slow requests count
   if (elements.statSlowRequests) {
     const slowCount = logs.filter(l => l.duration >= 1000).length;
     elements.statSlowRequests.textContent = slowCount;
     elements.statSlowRequests.style.color = slowCount === 0 ? 'var(--success-color)' : 'var(--warning-color)';
   }
-
+  
   // Duration distribution chart
   updateDurationChart(logs);
 }
@@ -117,7 +117,7 @@ export function updateFetchStats() {
 function updateDurationChart(logs) {
   const logsWithDuration = logs.filter(l => l.duration > 0);
   const total = logsWithDuration.length;
-
+  
   if (total === 0) {
     if (elements.chartFast) elements.chartFast.style.width = '0%';
     if (elements.chartMedium) elements.chartMedium.style.width = '0%';
@@ -125,19 +125,19 @@ function updateDurationChart(logs) {
     if (elements.chartVerySlow) elements.chartVerySlow.style.width = '0%';
     return;
   }
-
+  
   // Categorize by duration
   const fast = logsWithDuration.filter(l => l.duration < 100).length;
   const medium = logsWithDuration.filter(l => l.duration >= 100 && l.duration < 500).length;
   const slow = logsWithDuration.filter(l => l.duration >= 500 && l.duration < 1000).length;
   const verySlow = logsWithDuration.filter(l => l.duration >= 1000).length;
-
+  
   // Calculate percentages
   const fastPct = (fast / total) * 100;
   const mediumPct = (medium / total) * 100;
   const slowPct = (slow / total) * 100;
   const verySlowPct = (verySlow / total) * 100;
-
+  
   // Update chart bars
   if (elements.chartFast) {
     elements.chartFast.style.width = `${fastPct}%`;
@@ -288,8 +288,8 @@ export function renderLogs() {
     const isBookmarked = state.bookmarkedLogIds.has(log.id);
     const isSelected = state.selectedLogIds.has(log.id);
     const entry = createLogEntry(
-      log,
-      isExpanded,
+      log, 
+      isExpanded, 
       (id, expanded) => {
         // Update expanded state
         if (expanded) {
@@ -304,13 +304,13 @@ export function renderLogs() {
       isSelected,
       toggleLogSelection
     );
-
+    
     // Add slow request class for highlighting
     const speedClass = getSpeedClass(log.duration);
     if (speedClass !== 'normal') {
       entry.classList.add('slow-request');
     }
-
+    
     elements.logsContainer.appendChild(entry);
   });
 }
@@ -331,12 +331,12 @@ function isProblemLog(log) {
  */
 function trimLogsWithPriority(maxLogs) {
   if (state.logs.length <= maxLogs) return;
-
+  
   // 分类日志
   const bookmarked = [];
   const problems = [];
   const normal = [];
-
+  
   state.logs.forEach(log => {
     if (state.bookmarkedLogIds.has(log.id)) {
       bookmarked.push(log);
@@ -346,10 +346,10 @@ function trimLogsWithPriority(maxLogs) {
       normal.push(log);
     }
   });
-
+  
   // 计算需要保留的数量
   const mustKeep = bookmarked.length + problems.length;
-
+  
   if (mustKeep >= maxLogs) {
     // 问题请求太多，只保留收藏 + 部分问题请求
     const problemsToKeep = Math.max(0, maxLogs - bookmarked.length);
@@ -359,14 +359,14 @@ function trimLogsWithPriority(maxLogs) {
     const normalToKeep = maxLogs - mustKeep;
     state.logs = [...bookmarked, ...problems, ...normal.slice(0, normalToKeep)];
   }
-
+  
   // 按时间排序（最新的在前）
   state.logs.sort((a, b) => b.timestamp - a.timestamp);
 }
 
 /**
  * Add or update a log entry
- * @param {object} entry
+ * @param {object} entry 
  * @param {boolean} skipRender - Skip rendering (for batch updates)
  */
 export function addOrUpdateLog(entry, skipRender = false) {
@@ -400,7 +400,7 @@ export function addOrUpdateLog(entry, skipRender = false) {
       trimLogsWithPriority(maxLogs);
     }
   }
-
+  
   if (!skipRender) {
     renderLogs();
 
@@ -528,7 +528,7 @@ export function toggleLogSelection(logId) {
 export function selectAllLogs() {
   const filteredLogs = getFilteredFetchLogs();
   const allSelected = filteredLogs.every(l => state.selectedLogIds.has(l.id));
-
+  
   if (allSelected) {
     // Deselect all
     filteredLogs.forEach(l => state.selectedLogIds.delete(l.id));
@@ -536,7 +536,7 @@ export function selectAllLogs() {
     // Select all
     filteredLogs.forEach(l => state.selectedLogIds.add(l.id));
   }
-
+  
   updateSelectedCount();
   renderLogs();
 }
@@ -549,11 +549,11 @@ export function batchBookmarkLogs() {
     alert('请先选择日志');
     return;
   }
-
+  
   state.selectedLogIds.forEach(id => {
     state.bookmarkedLogIds.add(id);
   });
-
+  
   saveBookmarks();
   state.selectedLogIds.clear();
   updateSelectedCount();
@@ -568,19 +568,19 @@ export function batchDeleteLogs() {
     alert('请先选择日志');
     return;
   }
-
+  
   if (!confirm(`确定要删除选中的 ${state.selectedLogIds.size} 条日志吗？`)) {
     return;
   }
-
+  
   state.logs = state.logs.filter(l => !state.selectedLogIds.has(l.id));
-
+  
   // Also remove from bookmarks
   state.selectedLogIds.forEach(id => {
     state.bookmarkedLogIds.delete(id);
   });
   saveBookmarks();
-
+  
   state.selectedLogIds.clear();
   updateSelectedCount();
   renderLogs();
@@ -597,11 +597,11 @@ export function exportFetchCSV() {
     alert('没有可导出的日志');
     return;
   }
-
+  
   // CSV header
   const headers = ['时间', '方法', '状态', 'URL', '耗时(ms)', '类型', '缓存'];
   const rows = [headers.join(',')];
-
+  
   // CSV rows
   filteredLogs.forEach(log => {
     const time = new Date(log.timestamp).toLocaleString('zh-CN', { hour12: false });
@@ -616,7 +616,7 @@ export function exportFetchCSV() {
     ];
     rows.push(row.join(','));
   });
-
+  
   const csvContent = '\uFEFF' + rows.join('\n'); // BOM for Excel
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -672,28 +672,28 @@ export async function handleCopyFetchLogs() {
  */
 export function findRelatedRequests(log) {
   if (!log.url) return [];
-
+  
   try {
     const urlObj = new URL(log.url);
     const basePath = urlObj.pathname.split('/').slice(0, 3).join('/'); // First 2 path segments
     const timestamp = log.timestamp;
     const timeWindow = 5000; // 5 second window
-
+    
     return state.logs.filter(l => {
       if (l.id === log.id) return false;
       if (!l.url) return false;
-
+      
       try {
         const otherUrl = new URL(l.url);
-
+        
         // Same host
         if (otherUrl.hostname !== urlObj.hostname) return false;
-
+        
         // Similar path OR within time window
         const otherBasePath = otherUrl.pathname.split('/').slice(0, 3).join('/');
         const pathMatch = otherBasePath === basePath;
         const timeMatch = Math.abs(l.timestamp - timestamp) <= timeWindow;
-
+        
         return pathMatch || timeMatch;
       } catch {
         return false;
@@ -712,7 +712,7 @@ export function findRelatedRequests(log) {
 export function renderRelatedRequests(log) {
   const related = findRelatedRequests(log);
   if (related.length === 0) return '';
-
+  
   const items = related.map(r => {
     const time = new Date(r.timestamp).toLocaleTimeString('zh-CN', { hour12: false });
     const status = r.status || '...';
@@ -720,7 +720,7 @@ export function renderRelatedRequests(log) {
     const duration = r.duration ? `${r.duration}ms` : '-';
     // Show full URL, let CSS handle wrapping
     const displayUrl = r.url || '-';
-
+    
     return `
       <div class="related-request" data-id="${r.id}" style="padding: 4px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 4px; background: var(--bg-tertiary); word-break: break-word;">
         <span style="color: var(--text-muted); font-size: 11px;">${time}</span>
@@ -730,7 +730,7 @@ export function renderRelatedRequests(log) {
       </div>
     `;
   }).join('');
-
+  
   return `
     <div class="detail-section" style="margin-top: 12px;">
       <h4>🔗 相关请求 (${related.length})</h4>

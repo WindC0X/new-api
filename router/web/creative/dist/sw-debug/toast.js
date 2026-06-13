@@ -18,7 +18,7 @@ export function showToast(message, type = 'success', duration = 3000) {
     warning: '⚠️',
     info: 'ℹ️'
   };
-
+  
   const notification = document.createElement('div');
   notification.className = `import-notification toast-notification toast-${type}`;
   notification.innerHTML = `
@@ -30,9 +30,9 @@ export function showToast(message, type = 'success', duration = 3000) {
       <button class="close" onclick="this.parentElement.parentElement.remove()">×</button>
     </div>
   `;
-
+  
   document.body.appendChild(notification);
-
+  
   // 自动消失
   setTimeout(() => {
     notification.classList.add('fade-out');

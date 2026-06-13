@@ -99,7 +99,7 @@
       }
 
       .version-group { margin-bottom: 40px; position: relative; }
-
+      
       .group-label {
         position: sticky;
         top: 20px;
@@ -132,7 +132,7 @@
         border: 3px solid var(--primary-color);
         z-index: 2;
       }
-
+      
       .version-item:hover .version-dot {
         background: var(--primary-color);
         transform: scale(1.2);
@@ -147,7 +147,7 @@
         overflow: hidden;
         box-shadow: var(--shadow-sm);
       }
-
+      
       .version-card:hover {
         border-color: var(--primary-color);
         box-shadow: var(--shadow-md);
@@ -164,7 +164,7 @@
       }
 
       .version-info { flex: 1; }
-
+      
       .version-title-row {
         display: flex;
         align-items: center;
@@ -220,7 +220,7 @@
         background: var(--details-bg);
         border-top: 1px solid transparent;
       }
-
+      
       .version-details.open {
         max-height: 5000px;
         border-top-color: var(--border-color);
@@ -230,7 +230,7 @@
 
       .change-category { margin-bottom: 24px; }
       .change-category:last-child { margin-bottom: 0; }
-
+      
       .category-header {
         font-size: 14px;
         font-weight: 700;
@@ -241,14 +241,14 @@
         text-transform: uppercase;
         letter-spacing: 0.5px;
       }
-
+      
       .category-icon { font-size: 18px; }
-
+      
       .change-list {
         list-style: none;
         padding: 0;
       }
-
+      
       .change-list li {
         padding-left: 20px;
         position: relative;
@@ -257,7 +257,7 @@
         color: var(--text-main);
         line-height: 1.6;
       }
-
+      
       .change-list li::before {
         content: '';
         position: absolute;
@@ -275,7 +275,7 @@
         position: relative;
         z-index: 2;
       }
-
+      
       .load-more {
         background: var(--card-bg);
         border: 1px solid var(--border-color);
@@ -288,7 +288,7 @@
         box-shadow: var(--shadow-sm);
         font-size: 15px;
       }
-
+      
       .load-more:hover {
         background: var(--primary-color);
         color: white;
@@ -335,14 +335,14 @@
         padding-top: 40px;
         border-top: 1px solid var(--border-color);
       }
-
+      
       .footer a {
         color: var(--text-secondary);
         text-decoration: none;
         margin: 0 8px;
         transition: color 0.2s;
       }
-
+      
       .footer a:hover {
         color: var(--primary-color);
       }
@@ -397,12 +397,12 @@
           { key: 'fixes', emoji: '🐛', label: '问题修复', color: '#ef4444' },
           { key: 'improvements', emoji: '⚡', label: '体验优化', color: '#f59e0b' },
         ];
-
+        
         let html = '';
         for (const cat of categories) {
           const items = changelog.changes[cat.key];
           if (!items || items.length === 0) continue;
-
+          
           html += `<div class="change-category">
             <div class="category-header" style="color: ${cat.color}">
               <span class="category-icon">${cat.emoji}</span>
@@ -420,7 +420,7 @@
         var details = document.getElementById('details-' + cardId);
         var icon = document.getElementById('icon-' + cardId);
         if (!details) return;
-
+        
         details.classList.toggle('open');
         if (icon) icon.classList.toggle('expanded');
       }
@@ -431,7 +431,7 @@
 
       function renderVersionList(versions) {
         var container = document.getElementById('versionList');
-
+        
         // If it's the first load (container has loading class), clear it
         if (container.querySelector('.loading')) {
             container.innerHTML = '';
@@ -447,31 +447,31 @@
 
         for (var groupKey in groups) {
           var groupVersions = groups[groupKey];
-
+          
           // Only add group label if this is a new group or we are rendering from scratch
           // But here we are appending, so we need to be careful.
-          // For simplicity, we re-render everything for now or just append.
+          // For simplicity, we re-render everything for now or just append. 
           // Let's re-render everything to be safe with the grouping logic.
         }
-
+        
         // Re-implementing logic: we will just regenerate the whole HTML for simplicity
         html = '';
-
+        
         for (var groupKey in groups) {
             var groupVersions = groups[groupKey];
             html += `<div class="version-group">
                 <div class="group-label">v${groupKey}.x</div>`;
-
+            
             for (var i = 0; i < groupVersions.length; i++) {
                 var entry = groupVersions[i];
                 var hasDetails = entry.changes && Object.values(entry.changes).some(function(a) { return a && a.length > 0; });
                 var cardId = entry.version.replace(/\./g, '-');
-
+                
                 var tagClass = 'patch';
                 var tagText = '更新';
                 if (entry.type === 'major') { tagClass = 'major'; tagText = '大版本'; }
                 else if (entry.type === 'minor') { tagClass = 'minor'; tagText = '新功能'; }
-
+                
                 var dateStr = entry.date || '';
                 var highlights = entry.highlights || '';
                 var detailsHtml = hasDetails ? renderChangeDetails(entry) : '';
@@ -511,7 +511,7 @@
                         </div>` : ''}
                     </div>
                 </div>`;
-
+                
                 isFirst = false;
             }
             html += '</div>';
@@ -535,7 +535,7 @@
                 renderVersionList(allVersions.slice(0, currentDisplayCount));
             }
         }, { rootMargin: '200px' });
-
+        
         observer.observe(sentinel);
       }
 

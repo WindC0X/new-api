@@ -611,18 +611,18 @@ function renderMediaFilePreview(data, decryptFailed) {
 
   const previewHtml = isVideo
     ? `
-    <video
-      class="media-file-preview"
-      src="${escapeHtml(previewUrl)}"
-      controls
+    <video 
+      class="media-file-preview" 
+      src="${escapeHtml(previewUrl)}" 
+      controls 
       muted
       onerror="this.outerHTML='<div class=\\'preview-error\\'>视频加载失败</div>'"
     ></video>
   `
     : `
-    <img
-      class="media-file-preview"
-      src="${escapeHtml(previewUrl)}"
+    <img 
+      class="media-file-preview" 
+      src="${escapeHtml(previewUrl)}" 
       onerror="this.outerHTML='<div class=\\'preview-error\\'>图片加载失败</div>'"
     />
   `;
@@ -1690,21 +1690,21 @@ function getMediaPreviewHtml(url, isVideo) {
 
   if (isVideo) {
     return `
-      <video
-        class="media-preview"
-        src="${escapeHtml(previewUrl)}"
-        muted
+      <video 
+        class="media-preview" 
+        src="${escapeHtml(previewUrl)}" 
+        muted 
         preload="metadata"
-        onmouseenter="this.play()"
+        onmouseenter="this.play()" 
         onmouseleave="this.pause();this.currentTime=0;"
         onerror="this.outerHTML='<div class=\\'media-preview-placeholder\\'>视频</div>'"
       ></video>
     `;
   } else {
     return `
-      <img
-        class="media-preview"
-        src="${escapeHtml(previewUrl)}"
+      <img 
+        class="media-preview" 
+        src="${escapeHtml(previewUrl)}" 
         loading="lazy"
         onerror="this.outerHTML='<div class=\\'media-preview-placeholder\\'>图片</div>'"
       />

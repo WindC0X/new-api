@@ -113,12 +113,12 @@ export async function readAllFromIDB(dbName, storeName) {
   try {
     const db = await openIDB(dbName, storeName);
     if (!db) return [];
-
+    
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(storeName, 'readonly');
       const store = transaction.objectStore(storeName);
       const request = store.getAll();
-
+      
       request.onerror = () => {
         db.close();
         reject(request.error);
@@ -162,12 +162,12 @@ export async function readItemFromIDB(dbName, storeName, key) {
 export async function readKVItem(key) {
   const db = await openIDB(IDB_STORES.KV.name, IDB_STORES.KV.store);
   if (!db) return null;
-
+  
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(IDB_STORES.KV.store, 'readonly');
     const store = transaction.objectStore(IDB_STORES.KV.store);
     const request = store.get(key);
-
+    
     request.onerror = () => {
       db.close();
       reject(request.error);

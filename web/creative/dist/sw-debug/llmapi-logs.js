@@ -54,7 +54,7 @@ export async function loadLLMApiLogs(page) {
     const pageSize = state.llmapiPagination.pageSize || 20;
     const filter = getCurrentFilter();
     const result = await loadLLMApiLogsRPC(targetPage, pageSize, filter);
-
+    
     if (result) {
       state.llmapiLogs = Array.isArray(result.logs) ? result.logs : [];
       // Ensure pagination values are numbers (postmessage-duplex may return objects)
@@ -83,7 +83,7 @@ export function goToLLMApiPage(page) {
  */
 export async function handleClearLLMApiLogs() {
   if (!confirm('确定要清空所有 LLM API 日志吗？')) return;
-
+  
   try {
     await clearLLMApiLogsInSW();
     state.llmapiLogs = [];
@@ -122,12 +122,12 @@ function updateLLMApiSelectModeUI() {
     toggleBtn.style.background = state.isLLMApiSelectMode ? 'var(--primary-color)' : '';
     toggleBtn.style.color = state.isLLMApiSelectMode ? '#fff' : '';
   }
-
+  
   const batchActions = elements.llmapiBatchActionsEl;
   if (batchActions) {
     batchActions.style.display = state.isLLMApiSelectMode ? 'flex' : 'none';
   }
-
+  
   updateLLMApiSelectedCount();
 }
 
@@ -151,7 +151,7 @@ export function toggleLLMApiLogSelection(logId) {
     state.selectedLLMApiIds.add(logId);
   }
   updateLLMApiSelectedCount();
-
+  
   // 更新 DOM 中的复选框状态
   const checkbox = document.querySelector(`.llmapi-select-checkbox[data-id="${logId}"]`);
   if (checkbox) {
@@ -165,13 +165,13 @@ export function toggleLLMApiLogSelection(logId) {
 export function selectAllLLMApiLogs() {
   const filteredLogs = getFilteredLLMApiLogs();
   const allSelected = filteredLogs.every(l => state.selectedLLMApiIds.has(l.id));
-
+  
   if (allSelected) {
     filteredLogs.forEach(l => state.selectedLLMApiIds.delete(l.id));
   } else {
     filteredLogs.forEach(l => state.selectedLLMApiIds.add(l.id));
   }
-
+  
   updateLLMApiSelectedCount();
   renderLLMApiLogs();
 }
@@ -184,15 +184,15 @@ export async function batchDeleteLLMApiLogs() {
     showToast('请先选择日志', 'warning');
     return;
   }
-
+  
   if (!confirm(`确定要删除选中的 ${state.selectedLLMApiIds.size} 条日志吗？`)) {
     return;
   }
-
+  
   try {
     const logIds = Array.from(state.selectedLLMApiIds);
     const result = await deleteLLMApiLogsInSW(logIds);
-
+    
     if (result.success) {
       // 从本地状态中删除
       state.llmapiLogs = state.llmapiLogs.filter(l => !state.selectedLLMApiIds.has(l.id));
@@ -204,7 +204,7 @@ export async function batchDeleteLLMApiLogs() {
         state.llmapiPagination.page--;
         await loadLLMApiLogs(state.llmapiPagination.page);
       }
-
+      
       state.selectedLLMApiIds.clear();
       updateLLMApiSelectedCount();
       renderLLMApiLogs();
@@ -263,14 +263,14 @@ export function renderLLMApiLogs() {
   }
 
   elements.llmapiLogsContainer.innerHTML = '';
-
+  
   // 渲染日志
   filteredLogs.forEach(log => {
     const isExpanded = state.expandedLLMApiIds.has(log.id);
     const isSelected = state.selectedLLMApiIds.has(log.id);
     const entry = createLLMApiEntry(
-      log,
-      isExpanded,
+      log, 
+      isExpanded, 
       (id, expanded) => {
         if (expanded) {
           state.expandedLLMApiIds.add(id);
@@ -283,7 +283,7 @@ export function renderLLMApiLogs() {
     );
     elements.llmapiLogsContainer.appendChild(entry);
   });
-
+  
   // 渲染分页控件
   renderLLMApiPagination();
 }
@@ -293,17 +293,17 @@ export function renderLLMApiLogs() {
  */
 function renderLLMApiPagination() {
   const { page, totalPages, total, pageSize } = state.llmapiPagination;
-
+  
   // 如果只有一页或没有数据，不显示分页
   if (totalPages <= 1) return;
-
+  
   const paginationEl = document.createElement('div');
   paginationEl.className = 'pagination';
   paginationEl.style.cssText = 'display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; border-top: 1px solid var(--border-color); background: var(--bg-secondary);';
-
+  
   const startItem = (page - 1) * pageSize + 1;
   const endItem = Math.min(page * pageSize, total);
-
+  
   paginationEl.innerHTML = `
     <button class="pagination-btn" data-page="1" ${page === 1 ? 'disabled' : ''} title="首页">«</button>
     <button class="pagination-btn" data-page="${page - 1}" ${page === 1 ? 'disabled' : ''} title="上一页">‹</button>
@@ -313,7 +313,7 @@ function renderLLMApiPagination() {
     <button class="pagination-btn" data-page="${page + 1}" ${page === totalPages ? 'disabled' : ''} title="下一页">›</button>
     <button class="pagination-btn" data-page="${totalPages}" ${page === totalPages ? 'disabled' : ''} title="末页">»</button>
   `;
-
+  
   // 添加样式
   const style = document.createElement('style');
   style.textContent = `
@@ -341,7 +341,7 @@ function renderLLMApiPagination() {
     style.setAttribute('data-pagination', 'true');
     document.head.appendChild(style);
   }
-
+  
   // 添加点击事件
   paginationEl.querySelectorAll('.pagination-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -351,7 +351,7 @@ function renderLLMApiPagination() {
       }
     });
   });
-
+  
   elements.llmapiLogsContainer.appendChild(paginationEl);
 }
 
@@ -363,9 +363,9 @@ function createLLMApiEntry(log, isExpanded, onToggle, isSelectMode = false, isSe
   const entry = document.createElement('div');
   entry.className = 'log-entry' + (isExpanded ? ' expanded' : '') + (isSelected ? ' selected' : '');
   entry.dataset.id = log.id;
-
+  
   const date = new Date(log.timestamp);
-  const time = date.toLocaleString('zh-CN', {
+  const time = date.toLocaleString('zh-CN', { 
     hour12: false,
     year: 'numeric',
     month: '2-digit',
@@ -413,7 +413,7 @@ function createLLMApiEntry(log, isExpanded, onToggle, isSelectMode = false, isSe
 
   // Show full prompt in header (will wrap if needed)
   const promptPreview = log.prompt || '-';
-
+  
   // Extract request parameters from requestBody
   const reqParams = extractRequestParams(log.requestBody);
 
@@ -440,8 +440,8 @@ function createLLMApiEntry(log, isExpanded, onToggle, isSelectMode = false, isSe
   }
 
   // 选择模式下的复选框
-  const selectCheckbox = isSelectMode
-    ? `<input type="checkbox" class="llmapi-select-checkbox" data-id="${log.id}" ${isSelected ? 'checked' : ''} style="margin-right: 6px; cursor: pointer;">`
+  const selectCheckbox = isSelectMode 
+    ? `<input type="checkbox" class="llmapi-select-checkbox" data-id="${log.id}" ${isSelected ? 'checked' : ''} style="margin-right: 6px; cursor: pointer;">` 
     : '';
 
   entry.innerHTML = `
@@ -576,7 +576,7 @@ function createLLMApiEntry(log, isExpanded, onToggle, isSelectMode = false, isSe
     if (onToggle) {
       onToggle(log.id, isNowExpanded);
     }
-
+    
     if (!isNowExpanded) {
       return;
     }
@@ -662,12 +662,12 @@ function createLLMApiEntry(log, isExpanded, onToggle, isSelectMode = false, isSe
 function updateResponseBodyDisplay(entry, fullLog) {
   const detailsEl = entry.querySelector('.log-details');
   if (!detailsEl) return;
-
+  
   // 1. 更新参考图（如果有）
   if (fullLog.referenceImages && fullLog.referenceImages.length > 0) {
     let refSection = detailsEl.querySelector('.reference-images-section');
     const imagesHtml = renderReferenceImages(fullLog.referenceImages);
-
+    
     if (!refSection) {
       refSection = document.createElement('div');
       refSection.className = 'detail-section reference-images-section';
@@ -689,7 +689,7 @@ function updateResponseBodyDisplay(entry, fullLog) {
       `;
     }
   }
-
+  
   // 2. 更新请求体（如果之前没有）
   if (fullLog.requestBody && !detailsEl.querySelector('.request-body-section')) {
     const requestSection = document.createElement('div');
@@ -700,7 +700,7 @@ function updateResponseBodyDisplay(entry, fullLog) {
     `;
     detailsEl.appendChild(requestSection);
   }
-
+  
   // 3. 更新响应体
   let responseSection = detailsEl.querySelector('.response-body-section');
   if (fullLog.responseBody) {
@@ -838,25 +838,25 @@ function upsertLinkedTaskSections(detailsEl, linkedTask) {
  */
 function renderReferenceImages(referenceImages) {
   if (!referenceImages || referenceImages.length === 0) return '';
-
+  
   const imagesList = referenceImages.map((img, index) => {
     const sizeText = img.size ? formatBytes(img.size) : '-';
     const dimensions = img.width && img.height ? `${img.width}×${img.height}` : '-';
     const imgUrl = img.url || '';
-
+    
     // 判断是否是有效的可预览图片 URL
     const isPreviewable = imgUrl && (
-      imgUrl.startsWith('data:image/') ||
-      imgUrl.startsWith('http://') ||
+      imgUrl.startsWith('data:image/') || 
+      imgUrl.startsWith('http://') || 
       imgUrl.startsWith('https://') ||
       imgUrl.startsWith('/__aitu_cache__/')
     );
-
+    
     return `
       <div class="reference-image-item" style="display: inline-flex; flex-direction: column; gap: 4px; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; background: var(--bg-secondary); min-width: 140px;">
         <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">参考图 ${index + 1}</div>
         <div style="width: 140px; height: 140px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #1a1a1a; border-radius: 4px;">
-          ${isPreviewable
+          ${isPreviewable 
             ? `<img src="${escapeHtml(imgUrl)}" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: pointer;" onclick="window.open('${escapeHtml(imgUrl)}')" title="点击查看原图" onerror="this.parentElement.innerHTML='<span style=\\'color:#666;font-size:12px;\\'>加载失败</span>'">`
             : `<span style="color: #666; font-size: 12px; text-align: center; padding: 8px;">无法预览<br><span style="font-size: 10px; word-break: break-all;">${imgUrl ? imgUrl.substring(0, 30) + '...' : '无 URL'}</span></span>`
           }
@@ -869,7 +869,7 @@ function renderReferenceImages(referenceImages) {
       </div>
     `;
   }).join('');
-
+  
   return `
     <div class="reference-images-preview" style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px;">
       ${imagesList}
@@ -925,14 +925,14 @@ export async function handleExportLLMApiLogs() {
     alert('暂无 LLM API 日志可导出');
     return;
   }
-
+  
   const exportBtn = elements.exportLLMApiLogsBtn;
   const originalText = exportBtn.textContent;
-
+  
   try {
     exportBtn.disabled = true;
     exportBtn.textContent = '⏳ 准备中...';
-
+    
     // Check if JSZip is available
     if (typeof JSZip === 'undefined') {
       // Fallback to JSON-only export
@@ -946,9 +946,9 @@ export async function handleExportLLMApiLogs() {
       }, filename);
       return;
     }
-
+    
     const zip = new JSZip();
-
+    
     // Add logs JSON
     const logsData = {
       exportTime: new Date().toISOString(),
@@ -967,7 +967,7 @@ export async function handleExportLLMApiLogs() {
       logs: state.llmapiLogs
     };
     zip.file('llm-api-logs.json', JSON.stringify(logsData, null, 2));
-
+    
     // Collect URLs to download
     const mediaUrls = [];
     for (const log of state.llmapiLogs) {
@@ -980,15 +980,15 @@ export async function handleExportLLMApiLogs() {
         });
       }
     }
-
+    
     exportBtn.textContent = `⏳ 下载媒体 0/${mediaUrls.length}...`;
-
+    
     // Download media files
     const mediaFolder = zip.folder('media');
     let downloadedCount = 0;
     let failedCount = 0;
     const mediaManifest = [];
-
+    
     for (const item of mediaUrls) {
       try {
         // Handle both absolute and relative URLs
@@ -996,12 +996,12 @@ export async function handleExportLLMApiLogs() {
         if (fetchUrl.startsWith('/')) {
           fetchUrl = location.origin + fetchUrl;
         }
-
+        
         const response = await fetch(fetchUrl);
         if (response.ok) {
           const blob = await response.blob();
           const contentType = response.headers.get('content-type') || blob.type;
-
+          
           // Determine file extension
           let ext = 'bin';
           if (contentType.includes('image/png')) ext = 'png';
@@ -1010,12 +1010,12 @@ export async function handleExportLLMApiLogs() {
           else if (contentType.includes('image/webp')) ext = 'webp';
           else if (contentType.includes('video/mp4')) ext = 'mp4';
           else if (contentType.includes('video/webm')) ext = 'webm';
-
+          
           // Create filename based on log id and timestamp
           const date = new Date(item.timestamp);
           const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
           const filename = `${dateStr}_${item.type}_${item.id.split('-').pop()}.${ext}`;
-
+          
           mediaFolder.file(filename, blob);
           mediaManifest.push({
             logId: item.id,
@@ -1041,10 +1041,10 @@ export async function handleExportLLMApiLogs() {
           error: err.message
         });
       }
-
+      
       exportBtn.textContent = `⏳ 下载媒体 ${downloadedCount + failedCount}/${mediaUrls.length}...`;
     }
-
+    
     // Add media manifest
     zip.file('media-manifest.json', JSON.stringify({
       totalUrls: mediaUrls.length,
@@ -1052,16 +1052,16 @@ export async function handleExportLLMApiLogs() {
       failed: failedCount,
       files: mediaManifest
     }, null, 2));
-
+    
     exportBtn.textContent = '⏳ 生成 ZIP...';
-
+    
     // Generate and download ZIP
-    const zipBlob = await zip.generateAsync({
+    const zipBlob = await zip.generateAsync({ 
       type: 'blob',
       compression: 'DEFLATE',
       compressionOptions: { level: 6 }
     });
-
+    
     const filename = `llm-api-export-${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}.zip`;
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement('a');
@@ -1071,11 +1071,11 @@ export async function handleExportLLMApiLogs() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
+    
     // Show summary
     const sizeInMB = (zipBlob.size / 1024 / 1024).toFixed(2);
     showToast(`导出完成！\n日志数: ${state.llmapiLogs.length}\n媒体文件: ${downloadedCount} 成功, ${failedCount} 失败\n文件大小: ${sizeInMB} MB`, 'success', 5000);
-
+    
   } catch (err) {
     console.error('Export failed:', err);
     showToast('导出失败: ' + err.message, 'error', 5000);

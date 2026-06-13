@@ -58,7 +58,7 @@ export function setAnalysisModeCallbacks(callbacks) {
 export function toggleAnalysisMode() {
   state.isAnalysisMode = !state.isAnalysisMode;
   updateAnalysisModeUI();
-
+  
   if (state.isAnalysisMode) {
     // Clear all existing data when entering analysis mode
     clearAllLogsForAnalysisMode();
@@ -73,27 +73,27 @@ export function toggleAnalysisMode() {
  */
 export function updateAnalysisModeUI() {
   const isAnalysis = state.isAnalysisMode;
-
+  
   // Update mode indicator
   if (elements.analysisModeIndicator) {
     elements.analysisModeIndicator.style.display = isAnalysis ? 'inline-flex' : 'none';
   }
-
+  
   // Update SW status indicator
   if (elements.swStatus) {
     elements.swStatus.style.display = isAnalysis ? 'none' : 'inline-flex';
   }
-
+  
   // Update title
   if (elements.panelTitle) {
     elements.panelTitle.textContent = isAnalysis ? '日志分析模式' : 'Service Worker 调试面板';
   }
-
+  
   // Show/hide import button
   if (elements.importLogsBtn) {
     elements.importLogsBtn.style.display = isAnalysis ? 'inline-flex' : 'none';
   }
-
+  
   // Update toggle button appearance
   if (elements.toggleAnalysisModeBtn) {
     if (isAnalysis) {
@@ -104,7 +104,7 @@ export function updateAnalysisModeUI() {
       elements.toggleAnalysisModeBtn.title = '切换到分析模式（导入用户日志）';
     }
   }
-
+  
   // Hide/show debug-mode-only buttons
   document.querySelectorAll('.debug-mode-only').forEach(el => {
     el.style.display = isAnalysis ? 'none' : '';
@@ -118,7 +118,7 @@ export function updateAnalysisModeUI() {
       if (fetchTab) fetchTab.click();
     }
   }
-
+  
   // In analysis mode, left panel shows user info instead of SW status
   // The panel is always visible, but content changes based on mode
   const leftPanel = document.querySelector('.left-panel');
@@ -126,20 +126,20 @@ export function updateAnalysisModeUI() {
     // Always show left panel, content will be different in analysis mode
     leftPanel.style.display = '';
   }
-
+  
   // Adjust panels grid - always use two-column layout
   const panels = document.querySelector('.panels');
   if (panels) {
     panels.style.gridTemplateColumns = '280px 1fr';
   }
-
+  
   // Update left panel content for analysis mode
   if (isAnalysis) {
     showAnalysisModeLeftPanel();
   } else {
     restoreDebugModeLeftPanel();
   }
-
+  
   // Add/remove body class for analysis mode styling
   document.body.classList.toggle('analysis-mode', isAnalysis);
 }
@@ -155,7 +155,7 @@ function clearAllLogsForAnalysisMode() {
   state.liveLogs.postmessageLogs = [...state.postmessageLogs];
   state.liveLogs.crashLogs = [...state.crashLogs];
   state.liveLogs.llmapiLogs = [...state.llmapiLogs];
-
+  
   // Clear display state for imported logs
   state.logs = [];
   state.consoleLogs = [];
@@ -163,14 +163,14 @@ function clearAllLogsForAnalysisMode() {
   state.crashLogs = [];
   state.llmapiLogs = [];
   state.importedLogData = null;
-
+  
   // Re-render all tabs
   if (renderLogs) renderLogs();
   if (renderConsoleLogs) renderConsoleLogs();
   if (renderPostmessageLogs) renderPostmessageLogs();
   if (renderCrashLogs) renderCrashLogs();
   if (renderLLMApiLogs) renderLLMApiLogs();
-
+  
   // Show import prompt
   showImportPrompt();
 }
@@ -181,7 +181,7 @@ function clearAllLogsForAnalysisMode() {
 function showAnalysisModeLeftPanel() {
   const leftPanel = document.querySelector('.left-panel');
   if (!leftPanel) return;
-
+  
   leftPanel.innerHTML = `
     <div class="panel">
       <div class="panel-header">
@@ -204,7 +204,7 @@ function showAnalysisModeLeftPanel() {
 function restoreDebugModeLeftPanel() {
   const leftPanel = document.querySelector('.left-panel');
   if (!leftPanel) return;
-
+  
   // Restore original HTML structure
   leftPanel.innerHTML = `
     <div class="panel">
@@ -246,7 +246,7 @@ function restoreDebugModeLeftPanel() {
             <span class="value" id="debugLogsCount">0</span>
           </div>
         </div>
-
+        
         <div id="failedDomainsSection" style="margin-top: 16px; display: none;">
           <div class="stat-item" style="flex-direction: column; align-items: flex-start;">
             <span class="label">失败域名</span>
@@ -303,7 +303,7 @@ function restoreDebugModeLeftPanel() {
       </div>
     </div>
   `;
-
+  
   // Re-cache elements and rebind refresh cache button
   const newElements = {
     swVersion: document.getElementById('swVersion'),
@@ -325,12 +325,12 @@ function restoreDebugModeLeftPanel() {
     cacheList: document.getElementById('cacheList'),
   };
   updateElements(newElements);
-
+  
   const refreshCacheBtn = document.getElementById('refreshCache');
   if (refreshCacheBtn) {
     refreshCacheBtn.addEventListener('click', loadCacheStats);
   }
-
+  
   // Refresh data
   refreshStatus();
   loadCacheStats();
@@ -344,7 +344,7 @@ function restoreDebugModeLeftPanel() {
 export function showUserInfoPanel(data) {
   const leftPanel = document.querySelector('.left-panel');
   if (!leftPanel) return;
-
+  
   // Extract user info from imported data
   const userAgent = data.userAgent || '未知';
   const url = data.url || '未知';
@@ -352,10 +352,10 @@ export function showUserInfoPanel(data) {
   const swStatus = data.swStatus || {};
   const memory = data.memory || {};
   const cacheStats = data.cacheStats || {};
-
+  
   // Parse UA for display
   const uaInfo = parseUserAgent(userAgent);
-
+  
   // Calculate total logs
   const summary = data.summary || {};
   const logCounts = {
@@ -366,7 +366,7 @@ export function showUserInfoPanel(data) {
     llmapi: summary.llmapiLogs || (data.llmapiLogs?.length || 0),
   };
   const totalLogs = Object.values(logCounts).reduce((a, b) => a + b, 0);
-
+  
   leftPanel.innerHTML = `
     <div class="panel">
       <div class="panel-header">
@@ -515,7 +515,7 @@ export function showImportPrompt() {
         </p>
       </div>
     `;
-
+    
     // Attach event listener to the prompt button
     const btn = document.getElementById('importPromptBtn');
     if (btn) {
@@ -529,14 +529,14 @@ export function showImportPrompt() {
  */
 export function exitAnalysisMode() {
   state.importedLogData = null;
-
+  
   // Restore live logs that were collected during analysis mode
   state.logs = state.liveLogs.logs;
   state.consoleLogs = state.liveLogs.consoleLogs;
   state.postmessageLogs = state.liveLogs.postmessageLogs;
   state.crashLogs = state.liveLogs.crashLogs;
   state.llmapiLogs = state.liveLogs.llmapiLogs;
-
+  
   // Re-render with restored logs
   if (renderLogs) renderLogs();
   if (renderConsoleLogs) renderConsoleLogs();
@@ -544,13 +544,13 @@ export function exitAnalysisMode() {
   if (renderPostmessageLogs) renderPostmessageLogs();
   if (renderCrashLogs) renderCrashLogs();
   if (renderLLMApiLogs) renderLLMApiLogs();
-
+  
   // Update tab counts
   if (updateConsoleCount) updateConsoleCount();
   if (updatePostmessageCount) updatePostmessageCount();
   if (updateCrashCount) updateCrashCount();
   if (updateErrorDots) updateErrorDots();
-
+  
   // Reconnect to SW and refresh status
   if (navigator.serviceWorker?.controller) {
     enableDebug();
@@ -579,30 +579,30 @@ export function triggerImportDialog() {
 export async function handleLogImport(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-
+  
   try {
     const text = await file.text();
     const data = JSON.parse(text);
-
+    
     // Validate the imported data structure
     if (!data || typeof data !== 'object') {
       throw new Error('无效的日志文件格式');
     }
-
+    
     // Store imported data
     state.importedLogData = data;
-
+    
     // Parse and load logs from the imported data
     loadImportedLogs(data);
-
+    
     // Show success notification
     showImportSuccessMessage(file.name, data);
-
+    
   } catch (error) {
     console.error('Failed to import log file:', error);
     showToast(`导入失败: ${error.message}`, 'error', 5000);
   }
-
+  
   // Reset file input so same file can be selected again
   event.target.value = '';
 }
@@ -622,7 +622,7 @@ function loadImportedLogs(data) {
     }));
     if (renderLogs) renderLogs();
   }
-
+  
   // Load console logs
   if (data.consoleLogs && Array.isArray(data.consoleLogs)) {
     state.consoleLogs = data.consoleLogs.map(log => ({
@@ -632,7 +632,7 @@ function loadImportedLogs(data) {
     }));
     if (renderConsoleLogs) renderConsoleLogs();
   }
-
+  
   // Load postmessage logs
   if (data.postmessageLogs && Array.isArray(data.postmessageLogs)) {
     state.postmessageLogs = data.postmessageLogs.map(log => ({
@@ -643,7 +643,7 @@ function loadImportedLogs(data) {
     if (updateMessageTypeOptions) updateMessageTypeOptions();
     if (renderPostmessageLogs) renderPostmessageLogs();
   }
-
+  
   // Load memory/crash logs
   if (data.memoryLogs && Array.isArray(data.memoryLogs)) {
     state.crashLogs = data.memoryLogs.map(log => ({
@@ -653,7 +653,7 @@ function loadImportedLogs(data) {
     }));
     if (renderCrashLogs) renderCrashLogs();
   }
-
+  
   // Load LLM API logs
   if (data.llmapiLogs && Array.isArray(data.llmapiLogs)) {
     state.llmapiLogs = data.llmapiLogs.map(log => ({
@@ -663,18 +663,18 @@ function loadImportedLogs(data) {
     }));
     if (renderLLMApiLogs) renderLLMApiLogs();
   }
-
+  
   // Store SW status from imported data for display
   if (data.swStatus) {
     state.swStatus = data.swStatus;
   }
-
+  
   // Update tab counts
   if (updateConsoleCount) updateConsoleCount();
   if (updatePostmessageCount) updatePostmessageCount();
   if (updateCrashCount) updateCrashCount();
   if (updateErrorDots) updateErrorDots();
-
+  
   // Show user info panel in left sidebar
   showUserInfoPanel(data);
 }
@@ -693,9 +693,9 @@ function showImportSuccessMessage(filename, data) {
     memory: summary.memoryLogs || (data.memoryLogs?.length || 0),
     llmapi: summary.llmapiLogs || (data.llmapiLogs?.length || 0),
   };
-
+  
   const totalLogs = counts.fetch + counts.console + counts.postmessage + counts.memory + counts.llmapi;
-
+  
   // Create a temporary notification
   const notification = document.createElement('div');
   notification.className = 'import-notification';
@@ -718,9 +718,9 @@ function showImportSuccessMessage(filename, data) {
       <button class="close" onclick="this.parentElement.parentElement.remove()">×</button>
     </div>
   `;
-
+  
   document.body.appendChild(notification);
-
+  
   // Auto remove after 5 seconds
   setTimeout(() => {
     notification.classList.add('fade-out');

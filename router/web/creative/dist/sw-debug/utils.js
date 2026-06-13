@@ -4,7 +4,7 @@
 
 /**
  * Format file size to human readable string
- * @param {number} bytes
+ * @param {number} bytes 
  * @returns {string}
  */
 export function formatSize(bytes) {
@@ -17,7 +17,7 @@ export function formatSize(bytes) {
 
 /**
  * Format timestamp to time string
- * @param {number} timestamp
+ * @param {number} timestamp 
  * @returns {string}
  */
 export function formatTime(timestamp) {
@@ -27,7 +27,7 @@ export function formatTime(timestamp) {
 
 /**
  * Format duration in milliseconds
- * @param {number} ms
+ * @param {number} ms 
  * @returns {string}
  */
 export function formatDuration(ms) {
@@ -38,7 +38,7 @@ export function formatDuration(ms) {
 
 /**
  * Get CSS class for HTTP status code
- * @param {number} status
+ * @param {number} status 
  * @returns {string}
  */
 export function getStatusClass(status) {
@@ -50,7 +50,7 @@ export function getStatusClass(status) {
 
 /**
  * Escape HTML special characters
- * @param {string} text
+ * @param {string} text 
  * @returns {string}
  */
 export function escapeHtml(text) {
@@ -61,7 +61,7 @@ export function escapeHtml(text) {
 
 /**
  * Format JSON or return text as-is
- * @param {string} text
+ * @param {string} text 
  * @returns {string}
  */
 export function formatJsonOrText(text) {
@@ -76,8 +76,8 @@ export function formatJsonOrText(text) {
 
 /**
  * Extract display URL from full URL
- * @param {string} url
- * @param {number} maxLength
+ * @param {string} url 
+ * @param {number} maxLength 
  * @returns {string}
  */
 export function extractDisplayUrl(url) {
@@ -93,8 +93,8 @@ export function extractDisplayUrl(url) {
 
 /**
  * Export data as JSON file download
- * @param {object} data
- * @param {string} filename
+ * @param {object} data 
+ * @param {string} filename 
  */
 export function downloadJson(data, filename) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

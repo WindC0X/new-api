@@ -38,9 +38,9 @@ const CACHE_NAMES = [
 
 /**
  * 打开 IndexedDB 数据库
- * @param {string} dbName
- * @param {number} version
- * @param {function} onUpgradeNeeded
+ * @param {string} dbName 
+ * @param {number} version 
+ * @param {function} onUpgradeNeeded 
  * @returns {Promise<IDBDatabase>}
  */
 function openDB(dbName, version, onUpgradeNeeded) {
@@ -49,10 +49,10 @@ function openDB(dbName, version, onUpgradeNeeded) {
       typeof version === 'number'
         ? indexedDB.open(dbName, version)
         : indexedDB.open(dbName);
-
+    
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
-
+    
     if (onUpgradeNeeded) {
       request.onupgradeneeded = onUpgradeNeeded;
     }
@@ -125,16 +125,16 @@ export async function getConsoleLogsDirect(limit = 500, filter = {}) {
         store.createIndex('logLevel', 'logLevel', { unique: false });
       }
     });
-
+    
     const transaction = db.transaction([CONSOLE_LOG_STORE], 'readonly');
     const store = transaction.objectStore(CONSOLE_LOG_STORE);
     const index = store.index('timestamp');
     const expirationTime = Date.now() - CONSOLE_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-
+    
     return new Promise((resolve, reject) => {
       const request = index.openCursor(null, 'prev'); // 按时间倒序
       const logs = [];
-
+      
       request.onsuccess = () => {
         const cursor = request.result;
         if (cursor) {
@@ -165,7 +165,7 @@ export async function getConsoleLogsDirect(limit = 500, filter = {}) {
           resolve({ logs: paginatedLogs, total, offset: 0, limit });
         }
       };
-
+      
       request.onerror = () => {
         db.close();
         reject(request.error);
@@ -200,15 +200,15 @@ export async function getLLMApiLogsDirect(page = 1, pageSize = 20, filter = {}) 
         store.createIndex('taskId', 'taskId', { unique: false });
       }
     });
-
+    
     const transaction = db.transaction([LLM_API_LOG_STORE], 'readonly');
     const store = transaction.objectStore(LLM_API_LOG_STORE);
     const index = store.index('timestamp');
-
+    
     return new Promise((resolve, reject) => {
       const request = index.openCursor(null, 'prev'); // 按时间倒序
       const allLogs = [];
-
+      
       request.onsuccess = () => {
         const cursor = request.result;
         if (cursor) {
@@ -255,7 +255,7 @@ export async function getLLMApiLogsDirect(page = 1, pageSize = 20, filter = {}) 
           resolve({ logs, total, page, pageSize, totalPages });
         }
       };
-
+      
       request.onerror = () => {
         db.close();
         reject(request.error);
@@ -277,15 +277,15 @@ export async function getLLMApiLogByIdDirect(logId) {
     const db = await openDB(LLM_API_LOG_DB_NAME, LLM_API_LOG_DB_VERSION);
     const transaction = db.transaction([LLM_API_LOG_STORE], 'readonly');
     const store = transaction.objectStore(LLM_API_LOG_STORE);
-
+    
     return new Promise((resolve, reject) => {
       const request = store.get(logId);
-
+      
       request.onsuccess = () => {
         db.close();
         resolve(request.result || null);
       };
-
+      
       request.onerror = () => {
         db.close();
         reject(request.error);
@@ -538,21 +538,21 @@ export async function getCrashSnapshotsDirect() {
         store.createIndex('type', 'type', { unique: false });
       }
     });
-
+    
     const transaction = db.transaction([CRASH_SNAPSHOT_STORE], 'readonly');
     const store = transaction.objectStore(CRASH_SNAPSHOT_STORE);
     const index = store.index('timestamp');
-
+    
     return new Promise((resolve, reject) => {
       const request = index.getAll();
-
+      
       request.onsuccess = () => {
         db.close();
         // 按时间倒序排列
         const snapshots = (request.result || []).sort((a, b) => b.timestamp - a.timestamp);
         resolve({ snapshots, total: snapshots.length });
       };
-
+      
       request.onerror = () => {
         db.close();
         reject(request.error);
@@ -579,12 +579,12 @@ export async function getCacheStatsDirect() {
       totalSize: 0,
       totalEntries: 0,
     };
-
+    
     for (const cacheName of CACHE_NAMES) {
       try {
         const cache = await caches.open(cacheName);
         const keys = await cache.keys();
-
+        
         let cacheSize = 0;
         for (const request of keys) {
           try {
@@ -597,13 +597,13 @@ export async function getCacheStatsDirect() {
             // 忽略单个条目的错误
           }
         }
-
+        
         stats.caches.push({
           name: cacheName,
           entries: keys.length,
           size: cacheSize,
         });
-
+        
         stats.totalEntries += keys.length;
         stats.totalSize += cacheSize;
       } catch {
@@ -616,7 +616,7 @@ export async function getCacheStatsDirect() {
         });
       }
     }
-
+    
     return { stats };
   } catch (error) {
     console.warn('[DebugStorageReader] Failed to get cache stats:', error);
@@ -641,7 +641,7 @@ export async function getCacheEntriesDirect(cacheName, limit = 100) {
   try {
     const cache = await caches.open(cacheName);
     const keys = await cache.keys();
-
+    
     const entries = [];
     for (let i = 0; i < Math.min(keys.length, limit); i++) {
       const request = keys[i];
@@ -663,7 +663,7 @@ export async function getCacheEntriesDirect(cacheName, limit = 100) {
         });
       }
     }
-
+    
     return { entries, total: keys.length };
   } catch (error) {
     console.warn('[DebugStorageReader] Failed to get cache entries:', error);
@@ -686,10 +686,10 @@ export async function exportLogsDirect() {
       getCrashSnapshotsDirect(),
       getCacheStatsDirect(),
     ]);
-
+    
     // LLM API 日志可能很大，只导出最近 500 条
     const llmLogs = await getLLMApiLogsDirect(1, 500);
-
+    
     return {
       exportTime: new Date().toISOString(),
       consoleLogs: consoleLogs.logs,

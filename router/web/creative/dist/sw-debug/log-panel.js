@@ -288,12 +288,12 @@ export function extractUniqueTypes(logs, typeField = 'messageType') {
 export function updateTypeSelectOptions(select, types, currentValue = '') {
   // 保存当前值
   const selectedValue = currentValue || select.value;
-
+  
   // 清空现有选项（保留第一个"全部"选项）
   while (select.options.length > 1) {
     select.remove(1);
   }
-
+  
   // 添加新选项
   types.forEach(type => {
     const option = document.createElement('option');
@@ -301,7 +301,7 @@ export function updateTypeSelectOptions(select, types, currentValue = '') {
     option.textContent = type;
     select.appendChild(option);
   });
-
+  
   // 恢复选中值
   if (selectedValue && types.includes(selectedValue)) {
     select.value = selectedValue;

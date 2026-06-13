@@ -1,6 +1,6 @@
 {
   "version": "0.9.6",
-  "timestamp": "2026-06-09T17:35:24.469Z",
+  "timestamp": "2026-06-13T02:27:16.071Z",
   "defaults": [
     "tool-windows",
     "runtime-static-assets"
@@ -12,24 +12,24 @@
         "revision": "97f5e9dc"
       },
       {
-        "url": "/assets/ai-chat-D0rwH243.js",
-        "revision": "c9206839"
+        "url": "/assets/ai-chat-DpNLVCe3.js",
+        "revision": "25102db8"
       },
       {
-        "url": "/assets/ai-generation-preferences-service-BK0R1YKe.js",
-        "revision": "54d11df1"
+        "url": "/assets/ai-generation-preferences-service-M8tN8ABD.js",
+        "revision": "2ba9ca87"
+      },
+      {
+        "url": "/assets/batch-image-generation-DFnFOd1O.js",
+        "revision": "e83b64f2"
       },
       {
         "url": "/assets/batch-image-generation-DgBXF-sY.css",
         "revision": "2a45636a"
       },
       {
-        "url": "/assets/batch-image-generation-LBQxmdeD.js",
-        "revision": "87d5dd77"
-      },
-      {
-        "url": "/assets/CanvasAudioPlayer-JCkuMDzn.js",
-        "revision": "0c4752c2"
+        "url": "/assets/CanvasAudioPlayer-FAzvYmlk.js",
+        "revision": "6123d42b"
       },
       {
         "url": "/assets/CanvasAudioPlayer-QLXKZ5KP.css",
@@ -44,92 +44,92 @@
         "revision": "2e4f833e"
       },
       {
-        "url": "/assets/DeferredAIInputBar-2o_7_L_r.js",
-        "revision": "daca6f91"
+        "url": "/assets/DeferredAIInputBar-BiIzpc7L.js",
+        "revision": "52153d86"
       },
       {
         "url": "/assets/DeferredAIInputBar-CVXfAbVO.css",
         "revision": "4c7ee753"
       },
       {
-        "url": "/assets/DrawnixDeferredFeatures-CPACfnR5.js",
-        "revision": "893fedca"
+        "url": "/assets/DrawnixDeferredFeatures-u56nYwZh.js",
+        "revision": "28294cb8"
       },
       {
-        "url": "/assets/index-B4hnC2wc.js",
-        "revision": "d0319760"
+        "url": "/assets/index-B1KG1Lb9.js",
+        "revision": "22ae145d"
       },
       {
-        "url": "/assets/index-BSKoFET8.js",
-        "revision": "5d5c6c8a"
+        "url": "/assets/index-CeYgN43e.js",
+        "revision": "d6f5e3aa"
       },
       {
-        "url": "/assets/index-C92Kc-I4.js",
-        "revision": "f4312132"
+        "url": "/assets/index-D4V2ytu7.js",
+        "revision": "863aa300"
       },
       {
-        "url": "/assets/index-DjQ9mYvx.js",
-        "revision": "3d4e8a96"
+        "url": "/assets/index-UUEg4h4g.js",
+        "revision": "283334b0"
       },
       {
-        "url": "/assets/markdown-to-drawnix-BVNgm0wp.js",
-        "revision": "92d4c5a2"
+        "url": "/assets/markdown-to-drawnix-BDsTbaRO.js",
+        "revision": "4deada60"
       },
       {
         "url": "/assets/MediaLibrarySidebar-CNCXXhfY.css",
         "revision": "45bb0ebe"
       },
       {
-        "url": "/assets/mermaid-to-drawnix-DKqw4XaF.js",
-        "revision": "0c59b6c7"
+        "url": "/assets/mermaid-to-drawnix-2nCDdteh.js",
+        "revision": "fcc53093"
       },
       {
         "url": "/assets/mj-params-M-7csAp7.js",
         "revision": "76a86778"
       },
       {
-        "url": "/assets/model-benchmark-launcher-BVszQPuA.js",
-        "revision": "e88036ca"
+        "url": "/assets/model-benchmark-launcher-X_7Rq7De.js",
+        "revision": "f10065d6"
       },
       {
         "url": "/assets/ParametersDropdown-BE58BbHs.css",
         "revision": "778a003b"
       },
       {
-        "url": "/assets/ParametersDropdown-T5k92vjE.js",
-        "revision": "661db394"
+        "url": "/assets/ParametersDropdown-DSiH0zo9.js",
+        "revision": "90c835c5"
       },
       {
-        "url": "/assets/photo-wall-splitter-Dko-njSO.js",
-        "revision": "bbadcec7"
+        "url": "/assets/photo-wall-splitter-CCI6G8AC.js",
+        "revision": "b2656abe"
       },
       {
-        "url": "/assets/prompt-utils-DIQPzhym.js",
-        "revision": "f6615e42"
+        "url": "/assets/prompt-utils-NhRgZHnB.js",
+        "revision": "3a597a46"
       },
       {
         "url": "/assets/ResizableDivider-ClzYJk-6.css",
         "revision": "99c24be4"
       },
       {
-        "url": "/assets/ResizableDivider-P_QlLMrm.js",
-        "revision": "b66485a1"
+        "url": "/assets/ResizableDivider-Cvp0-CRW.js",
+        "revision": "05e43878"
+      },
+      {
+        "url": "/assets/settings-dialog-CwPKuxG5.js",
+        "revision": "54b6a703"
       },
       {
         "url": "/assets/settings-dialog-Dcm1G4kx.css",
         "revision": "e29060f9"
       },
       {
-        "url": "/assets/settings-dialog-DGkjNk_p.js",
-        "revision": "95a84f92"
+        "url": "/assets/skill-dsl-parser-Czi2F_GD.js",
+        "revision": "61979ba8"
       },
       {
-        "url": "/assets/skill-dsl-parser-BOzv8JA0.js",
-        "revision": "02e3d237"
-      },
-      {
-        "url": "/assets/startup-app-DcAo2WK2.js",
-        "revision": "7fc84345"
+        "url": "/assets/startup-app-Ds-Vv2aP.js",
+        "revision": "989f15b2"
       },
       {
         "url": "/assets/startup-app-DxC2basr.css",
@@ -140,40 +140,40 @@
         "revision": "aa8ca7d9"
       },
       {
-        "url": "/assets/TaskQueuePanel-Bt9JHMp7.js",
-        "revision": "7807d957"
+        "url": "/assets/TaskQueuePanel-BLAoI_R9.js",
+        "revision": "0a34ea70"
       },
       {
-        "url": "/assets/ttd-dialog-CSkm8d-j.js",
-        "revision": "ac226251"
+        "url": "/assets/ttd-dialog-Cdjh4Arw.js",
+        "revision": "caa2eb35"
       },
       {
         "url": "/assets/ttd-dialog-DaiCKXiC.css",
         "revision": "77f9e727"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-BZg2ARAw.js",
-        "revision": "3e6600d3"
+        "url": "/assets/ttd-dialog-submit-shortcut-Ddc4HDYx.js",
+        "revision": "52467d38"
       },
       {
         "url": "/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
         "revision": "d2575a60"
       },
       {
-        "url": "/assets/useCharacters-Dd1xlAm_.js",
-        "revision": "df33dafb"
+        "url": "/assets/useCharacters-DBfjEPis.js",
+        "revision": "5faa71cf"
       },
       {
         "url": "/assets/useCharacters-DRBoWvvj.css",
         "revision": "5dc00e5f"
       },
       {
-        "url": "/assets/useMediaViewer-COCLy0ps.js",
-        "revision": "2dc13ade"
+        "url": "/assets/useMediaViewer-DajLB9CY.js",
+        "revision": "e4029ff9"
       },
       {
-        "url": "/assets/useWorkflowSubmission-D4abffey.js",
-        "revision": "d6637dec"
+        "url": "/assets/useWorkflowSubmission-BLiv44-9.js",
+        "revision": "ce90c393"
       },
       {
         "url": "/assets/web-vitals-DcvjKPr-.js",
@@ -184,26 +184,26 @@
         "revision": "040c7789"
       },
       {
-        "url": "/assets/workflow-submission-service-BzRPCpuc.js",
-        "revision": "8d4f9636"
+        "url": "/assets/workflow-submission-service-Il_BYAeM.js",
+        "revision": "24a2caad"
       }
     ],
     "tool-windows": [
       {
-        "url": "/assets/ai-generation-preferences-service-BK0R1YKe.js",
-        "revision": "54d11df1"
+        "url": "/assets/ai-generation-preferences-service-M8tN8ABD.js",
+        "revision": "2ba9ca87"
+      },
+      {
+        "url": "/assets/batch-image-generation-DFnFOd1O.js",
+        "revision": "e83b64f2"
       },
       {
         "url": "/assets/batch-image-generation-DgBXF-sY.css",
         "revision": "2a45636a"
       },
       {
-        "url": "/assets/batch-image-generation-LBQxmdeD.js",
-        "revision": "87d5dd77"
-      },
-      {
-        "url": "/assets/CanvasAudioPlayer-JCkuMDzn.js",
-        "revision": "0c4752c2"
+        "url": "/assets/CanvasAudioPlayer-FAzvYmlk.js",
+        "revision": "6123d42b"
       },
       {
         "url": "/assets/CanvasAudioPlayer-QLXKZ5KP.css",
@@ -218,152 +218,152 @@
         "revision": "2e4f833e"
       },
       {
-        "url": "/assets/ComicCreator-BFKgR6ng.js",
-        "revision": "33df3dd1"
+        "url": "/assets/ComicCreator-DHS_4W_8.js",
+        "revision": "f98d5136"
       },
       {
         "url": "/assets/ComicCreator-DjAR34b-.css",
         "revision": "b43ffa0b"
       },
       {
-        "url": "/assets/DeferredAIInputBar-2o_7_L_r.js",
-        "revision": "daca6f91"
+        "url": "/assets/DeferredAIInputBar-BiIzpc7L.js",
+        "revision": "52153d86"
       },
       {
         "url": "/assets/DeferredAIInputBar-CVXfAbVO.css",
         "revision": "4c7ee753"
       },
       {
-        "url": "/assets/DrawnixDeferredFeatures-CPACfnR5.js",
-        "revision": "893fedca"
+        "url": "/assets/DrawnixDeferredFeatures-u56nYwZh.js",
+        "revision": "28294cb8"
       },
       {
         "url": "/assets/html2canvas.esm-QH1iLAAe.js",
         "revision": "4f0dcfc6"
       },
       {
-        "url": "/assets/index-B4hnC2wc.js",
-        "revision": "d0319760"
+        "url": "/assets/index-B1KG1Lb9.js",
+        "revision": "22ae145d"
       },
       {
-        "url": "/assets/index-BSKoFET8.js",
-        "revision": "5d5c6c8a"
+        "url": "/assets/index-CeYgN43e.js",
+        "revision": "d6f5e3aa"
       },
       {
-        "url": "/assets/index-C92Kc-I4.js",
-        "revision": "f4312132"
+        "url": "/assets/index-D4V2ytu7.js",
+        "revision": "863aa300"
       },
       {
-        "url": "/assets/index-DjQ9mYvx.js",
-        "revision": "3d4e8a96"
+        "url": "/assets/index-UUEg4h4g.js",
+        "revision": "283334b0"
       },
       {
-        "url": "/assets/index.es-LeFyGFkT.js",
-        "revision": "52ca12bf"
+        "url": "/assets/index.es-CrKm56kW.js",
+        "revision": "55b9a52a"
       },
       {
-        "url": "/assets/jspdf.es.min-CjQsUuLv.js",
-        "revision": "bb19e4b1"
+        "url": "/assets/jspdf.es.min-DK35Elyb.js",
+        "revision": "57836b91"
       },
       {
         "url": "/assets/KnowledgeBaseContent-CsR955E7.css",
         "revision": "66bd1b53"
       },
       {
-        "url": "/assets/KnowledgeBaseContent-DWCwwJa1.js",
-        "revision": "11b93b52"
+        "url": "/assets/KnowledgeBaseContent-CuZ-Nh9K.js",
+        "revision": "9c68773b"
       },
       {
-        "url": "/assets/markdown-to-drawnix-BVNgm0wp.js",
-        "revision": "92d4c5a2"
+        "url": "/assets/markdown-to-drawnix-BDsTbaRO.js",
+        "revision": "4deada60"
       },
       {
         "url": "/assets/MediaLibrarySidebar-CNCXXhfY.css",
         "revision": "45bb0ebe"
       },
       {
-        "url": "/assets/mermaid-to-drawnix-DKqw4XaF.js",
-        "revision": "0c59b6c7"
+        "url": "/assets/mermaid-to-drawnix-2nCDdteh.js",
+        "revision": "fcc53093"
       },
       {
         "url": "/assets/mj-params-M-7csAp7.js",
         "revision": "76a86778"
       },
       {
-        "url": "/assets/model-benchmark-launcher-BVszQPuA.js",
-        "revision": "e88036ca"
+        "url": "/assets/model-benchmark-launcher-X_7Rq7De.js",
+        "revision": "f10065d6"
       },
       {
         "url": "/assets/ModelBenchmarkWorkbench-CC2lNbTT.css",
         "revision": "f4a762d2"
       },
       {
-        "url": "/assets/ModelBenchmarkWorkbench-DQtXbOVf.js",
-        "revision": "d2d130f5"
+        "url": "/assets/ModelBenchmarkWorkbench-CuW1ckvd.js",
+        "revision": "cf243f2e"
       },
       {
         "url": "/assets/MusicAnalyzer-DHa6anV5.css",
         "revision": "ef2eecd3"
       },
       {
-        "url": "/assets/MusicAnalyzer-u-RMZVlp.js",
-        "revision": "7b2d314b"
-      },
-      {
-        "url": "/assets/MVCreator-BbpJYmTA.js",
-        "revision": "8a158a20"
+        "url": "/assets/MusicAnalyzer-DqbAhZ7A.js",
+        "revision": "21b436ef"
       },
       {
         "url": "/assets/MVCreator-CDzLxh5R.css",
         "revision": "de987f07"
       },
       {
+        "url": "/assets/MVCreator-DSWMdvQc.js",
+        "revision": "a9bff56d"
+      },
+      {
         "url": "/assets/ParametersDropdown-BE58BbHs.css",
         "revision": "778a003b"
       },
       {
-        "url": "/assets/ParametersDropdown-T5k92vjE.js",
-        "revision": "661db394"
+        "url": "/assets/ParametersDropdown-DSiH0zo9.js",
+        "revision": "90c835c5"
       },
       {
-        "url": "/assets/photo-wall-splitter-Dko-njSO.js",
-        "revision": "bbadcec7"
+        "url": "/assets/photo-wall-splitter-CCI6G8AC.js",
+        "revision": "b2656abe"
       },
       {
-        "url": "/assets/prompt-utils-DIQPzhym.js",
-        "revision": "f6615e42"
-      },
-      {
-        "url": "/assets/PromptHistoryTool-BC6Qyfdq.js",
-        "revision": "40a887e6"
+        "url": "/assets/prompt-utils-NhRgZHnB.js",
+        "revision": "3a597a46"
       },
       {
         "url": "/assets/PromptHistoryTool-BH7hq916.css",
         "revision": "5043c6c0"
       },
       {
+        "url": "/assets/PromptHistoryTool-Xaym9lO8.js",
+        "revision": "feb50700"
+      },
+      {
         "url": "/assets/ResizableDivider-ClzYJk-6.css",
         "revision": "99c24be4"
       },
       {
-        "url": "/assets/ResizableDivider-P_QlLMrm.js",
-        "revision": "b66485a1"
+        "url": "/assets/ResizableDivider-Cvp0-CRW.js",
+        "revision": "05e43878"
+      },
+      {
+        "url": "/assets/settings-dialog-CwPKuxG5.js",
+        "revision": "54b6a703"
       },
       {
         "url": "/assets/settings-dialog-Dcm1G4kx.css",
         "revision": "e29060f9"
       },
       {
-        "url": "/assets/settings-dialog-DGkjNk_p.js",
-        "revision": "95a84f92"
+        "url": "/assets/skill-dsl-parser-Czi2F_GD.js",
+        "revision": "61979ba8"
       },
       {
-        "url": "/assets/skill-dsl-parser-BOzv8JA0.js",
-        "revision": "02e3d237"
-      },
-      {
-        "url": "/assets/startup-app-DcAo2WK2.js",
-        "revision": "7fc84345"
+        "url": "/assets/startup-app-Ds-Vv2aP.js",
+        "revision": "989f15b2"
       },
       {
         "url": "/assets/startup-app-DxC2basr.css",
@@ -374,98 +374,98 @@
         "revision": "aa8ca7d9"
       },
       {
-        "url": "/assets/task-sync-Dg_6DVbY.js",
-        "revision": "a8a29558"
+        "url": "/assets/task-sync-DKqHOOT3.js",
+        "revision": "74dbf381"
       },
       {
-        "url": "/assets/TaskQueuePanel-Bt9JHMp7.js",
-        "revision": "7807d957"
-      },
-      {
-        "url": "/assets/tool-windows-BqWD4kYB.js",
-        "revision": "8f9b749c"
+        "url": "/assets/TaskQueuePanel-BLAoI_R9.js",
+        "revision": "0a34ea70"
       },
       {
         "url": "/assets/tool-windows-CegtMid1.css",
         "revision": "bada06d8"
       },
       {
-        "url": "/assets/ttd-dialog-CSkm8d-j.js",
-        "revision": "ac226251"
+        "url": "/assets/tool-windows-iA_5tfIc.js",
+        "revision": "9ff2e510"
+      },
+      {
+        "url": "/assets/ttd-dialog-Cdjh4Arw.js",
+        "revision": "caa2eb35"
       },
       {
         "url": "/assets/ttd-dialog-DaiCKXiC.css",
         "revision": "77f9e727"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-BZg2ARAw.js",
-        "revision": "3e6600d3"
+        "url": "/assets/ttd-dialog-submit-shortcut-Ddc4HDYx.js",
+        "revision": "52467d38"
       },
       {
         "url": "/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
         "revision": "d2575a60"
       },
       {
-        "url": "/assets/useCharacters-Dd1xlAm_.js",
-        "revision": "df33dafb"
+        "url": "/assets/useCharacters-DBfjEPis.js",
+        "revision": "5faa71cf"
       },
       {
         "url": "/assets/useCharacters-DRBoWvvj.css",
         "revision": "5dc00e5f"
       },
       {
-        "url": "/assets/useMediaViewer-COCLy0ps.js",
-        "revision": "2dc13ade"
+        "url": "/assets/useMediaViewer-DajLB9CY.js",
+        "revision": "e4029ff9"
       },
       {
-        "url": "/assets/useWorkflowSubmission-D4abffey.js",
-        "revision": "d6637dec"
+        "url": "/assets/useWorkflowSubmission-BLiv44-9.js",
+        "revision": "ce90c393"
       },
       {
-        "url": "/assets/video-recovery-service-C4mlE__G.js",
-        "revision": "8c258be3"
+        "url": "/assets/video-recovery-service-tKsQk37X.js",
+        "revision": "fe279597"
       },
       {
-        "url": "/assets/VideoAnalyzer-BOkgV0gq.js",
-        "revision": "8e7af1d9"
-      },
-      {
-        "url": "/assets/VideoAnalyzer-Cm2ikjZk.js",
-        "revision": "020d74f9"
+        "url": "/assets/VideoAnalyzer-C8XXFlXU.js",
+        "revision": "11d8925c"
       },
       {
         "url": "/assets/VideoAnalyzer-DvF56ngj.css",
         "revision": "cb9f5b00"
       },
       {
+        "url": "/assets/VideoAnalyzer-DyACAKDC.js",
+        "revision": "b1003b0d"
+      },
+      {
         "url": "/assets/web-vitals-DcvjKPr-.js",
         "revision": "ee79e5ca"
       },
       {
-        "url": "/assets/workflow-generation-utils-DRLKGQAz.js",
-        "revision": "6bb5ccba"
+        "url": "/assets/workflow-generation-utils-QdrSh_dH.js",
+        "revision": "1da88a99"
       },
       {
-        "url": "/assets/workflow-submission-service-BzRPCpuc.js",
-        "revision": "8d4f9636"
+        "url": "/assets/workflow-submission-service-Il_BYAeM.js",
+        "revision": "24a2caad"
       }
     ],
     "diagram-engines": [
       {
-        "url": "/assets/ai-generation-preferences-service-BK0R1YKe.js",
-        "revision": "54d11df1"
+        "url": "/assets/ai-generation-preferences-service-M8tN8ABD.js",
+        "revision": "2ba9ca87"
+      },
+      {
+        "url": "/assets/batch-image-generation-DFnFOd1O.js",
+        "revision": "e83b64f2"
       },
       {
         "url": "/assets/batch-image-generation-DgBXF-sY.css",
         "revision": "2a45636a"
       },
       {
-        "url": "/assets/batch-image-generation-LBQxmdeD.js",
-        "revision": "87d5dd77"
-      },
-      {
-        "url": "/assets/CanvasAudioPlayer-JCkuMDzn.js",
-        "revision": "0c4752c2"
+        "url": "/assets/CanvasAudioPlayer-FAzvYmlk.js",
+        "revision": "6123d42b"
       },
       {
         "url": "/assets/CanvasAudioPlayer-QLXKZ5KP.css",
@@ -480,96 +480,96 @@
         "revision": "2e4f833e"
       },
       {
-        "url": "/assets/DeferredAIInputBar-2o_7_L_r.js",
-        "revision": "daca6f91"
+        "url": "/assets/DeferredAIInputBar-BiIzpc7L.js",
+        "revision": "52153d86"
       },
       {
         "url": "/assets/DeferredAIInputBar-CVXfAbVO.css",
         "revision": "4c7ee753"
       },
       {
-        "url": "/assets/diagram-engines-ddYxZ7rN.js",
-        "revision": "f097bccf"
+        "url": "/assets/diagram-engines-DnOt2n0D.js",
+        "revision": "456569bc"
       },
       {
-        "url": "/assets/DrawnixDeferredFeatures-CPACfnR5.js",
-        "revision": "893fedca"
+        "url": "/assets/DrawnixDeferredFeatures-u56nYwZh.js",
+        "revision": "28294cb8"
       },
       {
-        "url": "/assets/index-B4hnC2wc.js",
-        "revision": "d0319760"
+        "url": "/assets/index-B1KG1Lb9.js",
+        "revision": "22ae145d"
       },
       {
-        "url": "/assets/index-BSKoFET8.js",
-        "revision": "5d5c6c8a"
+        "url": "/assets/index-CeYgN43e.js",
+        "revision": "d6f5e3aa"
       },
       {
-        "url": "/assets/index-C92Kc-I4.js",
-        "revision": "f4312132"
+        "url": "/assets/index-D4V2ytu7.js",
+        "revision": "863aa300"
       },
       {
-        "url": "/assets/index-DjQ9mYvx.js",
-        "revision": "3d4e8a96"
+        "url": "/assets/index-UUEg4h4g.js",
+        "revision": "283334b0"
       },
       {
-        "url": "/assets/markdown-to-drawnix-BVNgm0wp.js",
-        "revision": "92d4c5a2"
+        "url": "/assets/markdown-to-drawnix-BDsTbaRO.js",
+        "revision": "4deada60"
       },
       {
         "url": "/assets/MediaLibrarySidebar-CNCXXhfY.css",
         "revision": "45bb0ebe"
       },
       {
-        "url": "/assets/mermaid-to-drawnix-DKqw4XaF.js",
-        "revision": "0c59b6c7"
+        "url": "/assets/mermaid-to-drawnix-2nCDdteh.js",
+        "revision": "fcc53093"
       },
       {
         "url": "/assets/mj-params-M-7csAp7.js",
         "revision": "76a86778"
       },
       {
-        "url": "/assets/model-benchmark-launcher-BVszQPuA.js",
-        "revision": "e88036ca"
+        "url": "/assets/model-benchmark-launcher-X_7Rq7De.js",
+        "revision": "f10065d6"
       },
       {
         "url": "/assets/ParametersDropdown-BE58BbHs.css",
         "revision": "778a003b"
       },
       {
-        "url": "/assets/ParametersDropdown-T5k92vjE.js",
-        "revision": "661db394"
+        "url": "/assets/ParametersDropdown-DSiH0zo9.js",
+        "revision": "90c835c5"
       },
       {
-        "url": "/assets/photo-wall-splitter-Dko-njSO.js",
-        "revision": "bbadcec7"
+        "url": "/assets/photo-wall-splitter-CCI6G8AC.js",
+        "revision": "b2656abe"
       },
       {
-        "url": "/assets/prompt-utils-DIQPzhym.js",
-        "revision": "f6615e42"
+        "url": "/assets/prompt-utils-NhRgZHnB.js",
+        "revision": "3a597a46"
       },
       {
         "url": "/assets/ResizableDivider-ClzYJk-6.css",
         "revision": "99c24be4"
       },
       {
-        "url": "/assets/ResizableDivider-P_QlLMrm.js",
-        "revision": "b66485a1"
+        "url": "/assets/ResizableDivider-Cvp0-CRW.js",
+        "revision": "05e43878"
+      },
+      {
+        "url": "/assets/settings-dialog-CwPKuxG5.js",
+        "revision": "54b6a703"
       },
       {
         "url": "/assets/settings-dialog-Dcm1G4kx.css",
         "revision": "e29060f9"
       },
       {
-        "url": "/assets/settings-dialog-DGkjNk_p.js",
-        "revision": "95a84f92"
+        "url": "/assets/skill-dsl-parser-Czi2F_GD.js",
+        "revision": "61979ba8"
       },
       {
-        "url": "/assets/skill-dsl-parser-BOzv8JA0.js",
-        "revision": "02e3d237"
-      },
-      {
-        "url": "/assets/startup-app-DcAo2WK2.js",
-        "revision": "7fc84345"
+        "url": "/assets/startup-app-Ds-Vv2aP.js",
+        "revision": "989f15b2"
       },
       {
         "url": "/assets/startup-app-DxC2basr.css",
@@ -580,48 +580,48 @@
         "revision": "aa8ca7d9"
       },
       {
-        "url": "/assets/TaskQueuePanel-Bt9JHMp7.js",
-        "revision": "7807d957"
+        "url": "/assets/TaskQueuePanel-BLAoI_R9.js",
+        "revision": "0a34ea70"
       },
       {
-        "url": "/assets/ttd-dialog-CSkm8d-j.js",
-        "revision": "ac226251"
+        "url": "/assets/ttd-dialog-Cdjh4Arw.js",
+        "revision": "caa2eb35"
       },
       {
         "url": "/assets/ttd-dialog-DaiCKXiC.css",
         "revision": "77f9e727"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-BZg2ARAw.js",
-        "revision": "3e6600d3"
+        "url": "/assets/ttd-dialog-submit-shortcut-Ddc4HDYx.js",
+        "revision": "52467d38"
       },
       {
         "url": "/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
         "revision": "d2575a60"
       },
       {
-        "url": "/assets/useCharacters-Dd1xlAm_.js",
-        "revision": "df33dafb"
+        "url": "/assets/useCharacters-DBfjEPis.js",
+        "revision": "5faa71cf"
       },
       {
         "url": "/assets/useCharacters-DRBoWvvj.css",
         "revision": "5dc00e5f"
       },
       {
-        "url": "/assets/useMediaViewer-COCLy0ps.js",
-        "revision": "2dc13ade"
+        "url": "/assets/useMediaViewer-DajLB9CY.js",
+        "revision": "e4029ff9"
       },
       {
-        "url": "/assets/useWorkflowSubmission-D4abffey.js",
-        "revision": "d6637dec"
+        "url": "/assets/useWorkflowSubmission-BLiv44-9.js",
+        "revision": "ce90c393"
       },
       {
         "url": "/assets/web-vitals-DcvjKPr-.js",
         "revision": "ee79e5ca"
       },
       {
-        "url": "/assets/workflow-submission-service-BzRPCpuc.js",
-        "revision": "8d4f9636"
+        "url": "/assets/workflow-submission-service-Il_BYAeM.js",
+        "revision": "24a2caad"
       }
     ],
     "office-data": [
@@ -640,20 +640,20 @@
     ],
     "editor-engines": [
       {
-        "url": "/assets/ai-generation-preferences-service-BK0R1YKe.js",
-        "revision": "54d11df1"
+        "url": "/assets/ai-generation-preferences-service-M8tN8ABD.js",
+        "revision": "2ba9ca87"
+      },
+      {
+        "url": "/assets/batch-image-generation-DFnFOd1O.js",
+        "revision": "e83b64f2"
       },
       {
         "url": "/assets/batch-image-generation-DgBXF-sY.css",
         "revision": "2a45636a"
       },
       {
-        "url": "/assets/batch-image-generation-LBQxmdeD.js",
-        "revision": "87d5dd77"
-      },
-      {
-        "url": "/assets/CanvasAudioPlayer-JCkuMDzn.js",
-        "revision": "0c4752c2"
+        "url": "/assets/CanvasAudioPlayer-FAzvYmlk.js",
+        "revision": "6123d42b"
       },
       {
         "url": "/assets/CanvasAudioPlayer-QLXKZ5KP.css",
@@ -668,100 +668,100 @@
         "revision": "2e4f833e"
       },
       {
-        "url": "/assets/DeferredAIInputBar-2o_7_L_r.js",
-        "revision": "daca6f91"
+        "url": "/assets/DeferredAIInputBar-BiIzpc7L.js",
+        "revision": "52153d86"
       },
       {
         "url": "/assets/DeferredAIInputBar-CVXfAbVO.css",
         "revision": "4c7ee753"
       },
       {
-        "url": "/assets/DrawnixDeferredFeatures-CPACfnR5.js",
-        "revision": "893fedca"
-      },
-      {
-        "url": "/assets/editor-engines-C3IG_bEy.js",
-        "revision": "7b42e506"
+        "url": "/assets/DrawnixDeferredFeatures-u56nYwZh.js",
+        "revision": "28294cb8"
       },
       {
         "url": "/assets/editor-engines-C8LHZ47f.css",
         "revision": "a8c4f109"
       },
       {
-        "url": "/assets/index-B4hnC2wc.js",
-        "revision": "d0319760"
+        "url": "/assets/editor-engines-DbU3ry-0.js",
+        "revision": "b6a87768"
       },
       {
-        "url": "/assets/index-BSKoFET8.js",
-        "revision": "5d5c6c8a"
+        "url": "/assets/index-B1KG1Lb9.js",
+        "revision": "22ae145d"
       },
       {
-        "url": "/assets/index-C92Kc-I4.js",
-        "revision": "f4312132"
+        "url": "/assets/index-CeYgN43e.js",
+        "revision": "d6f5e3aa"
       },
       {
-        "url": "/assets/index-DjQ9mYvx.js",
-        "revision": "3d4e8a96"
+        "url": "/assets/index-D4V2ytu7.js",
+        "revision": "863aa300"
       },
       {
-        "url": "/assets/markdown-to-drawnix-BVNgm0wp.js",
-        "revision": "92d4c5a2"
+        "url": "/assets/index-UUEg4h4g.js",
+        "revision": "283334b0"
+      },
+      {
+        "url": "/assets/markdown-to-drawnix-BDsTbaRO.js",
+        "revision": "4deada60"
       },
       {
         "url": "/assets/MediaLibrarySidebar-CNCXXhfY.css",
         "revision": "45bb0ebe"
       },
       {
-        "url": "/assets/mermaid-to-drawnix-DKqw4XaF.js",
-        "revision": "0c59b6c7"
+        "url": "/assets/mermaid-to-drawnix-2nCDdteh.js",
+        "revision": "fcc53093"
       },
       {
         "url": "/assets/mj-params-M-7csAp7.js",
         "revision": "76a86778"
       },
       {
-        "url": "/assets/model-benchmark-launcher-BVszQPuA.js",
-        "revision": "e88036ca"
+        "url": "/assets/model-benchmark-launcher-X_7Rq7De.js",
+        "revision": "f10065d6"
       },
       {
         "url": "/assets/ParametersDropdown-BE58BbHs.css",
         "revision": "778a003b"
       },
       {
-        "url": "/assets/ParametersDropdown-T5k92vjE.js",
-        "revision": "661db394"
+        "url": "/assets/ParametersDropdown-DSiH0zo9.js",
+        "revision": "90c835c5"
       },
       {
-        "url": "/assets/photo-wall-splitter-Dko-njSO.js",
-        "revision": "bbadcec7"
+        "url": "/assets/photo-wall-splitter-CCI6G8AC.js",
+        "revision": "b2656abe"
       },
       {
-        "url": "/assets/prompt-utils-DIQPzhym.js",
-        "revision": "f6615e42"
+        "url": "/assets/prompt-utils-NhRgZHnB.js",
+        "revision": "3a597a46"
       },
       {
         "url": "/assets/ResizableDivider-ClzYJk-6.css",
         "revision": "99c24be4"
       },
       {
-        "url": "/assets/ResizableDivider-P_QlLMrm.js",
-        "revision": "b66485a1"
+        "url": "/assets/ResizableDivider-Cvp0-CRW.js",
+        "revision": "05e43878"
+      },
+      {
+        "url": "/assets/settings-dialog-CwPKuxG5.js",
+        "revision": "54b6a703"
       },
       {
         "url": "/assets/settings-dialog-Dcm1G4kx.css",
         "revision": "e29060f9"
       },
       {
-        "url": "/assets/settings-dialog-DGkjNk_p.js",
-        "revision": "95a84f92"
+        "url": "/assets/skill-dsl-parser-Czi2F_GD.js",
+        "revision": "61979ba8"
       },
       {
-        "url": "/assets/skill-dsl-parser-BOzv8JA0.js",
-        "revision": "02e3d237"
-      },
-      {
-        "url": "/assets/startup-app-DcAo2WK2.js",
-        "revision": "7fc84345"
+        "url": "/assets/startup-app-Ds-Vv2aP.js",
+        "revision": "989f15b2"
       },
       {
         "url": "/assets/startup-app-DxC2basr.css",
@@ -772,48 +772,48 @@
         "revision": "aa8ca7d9"
       },
       {
-        "url": "/assets/TaskQueuePanel-Bt9JHMp7.js",
-        "revision": "7807d957"
+        "url": "/assets/TaskQueuePanel-BLAoI_R9.js",
+        "revision": "0a34ea70"
       },
       {
-        "url": "/assets/ttd-dialog-CSkm8d-j.js",
-        "revision": "ac226251"
+        "url": "/assets/ttd-dialog-Cdjh4Arw.js",
+        "revision": "caa2eb35"
       },
       {
         "url": "/assets/ttd-dialog-DaiCKXiC.css",
         "revision": "77f9e727"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-BZg2ARAw.js",
-        "revision": "3e6600d3"
+        "url": "/assets/ttd-dialog-submit-shortcut-Ddc4HDYx.js",
+        "revision": "52467d38"
       },
       {
         "url": "/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
         "revision": "d2575a60"
       },
       {
-        "url": "/assets/useCharacters-Dd1xlAm_.js",
-        "revision": "df33dafb"
+        "url": "/assets/useCharacters-DBfjEPis.js",
+        "revision": "5faa71cf"
       },
       {
         "url": "/assets/useCharacters-DRBoWvvj.css",
         "revision": "5dc00e5f"
       },
       {
-        "url": "/assets/useMediaViewer-COCLy0ps.js",
-        "revision": "2dc13ade"
+        "url": "/assets/useMediaViewer-DajLB9CY.js",
+        "revision": "e4029ff9"
       },
       {
-        "url": "/assets/useWorkflowSubmission-D4abffey.js",
-        "revision": "d6637dec"
+        "url": "/assets/useWorkflowSubmission-BLiv44-9.js",
+        "revision": "ce90c393"
       },
       {
         "url": "/assets/web-vitals-DcvjKPr-.js",
         "revision": "ee79e5ca"
       },
       {
-        "url": "/assets/workflow-submission-service-BzRPCpuc.js",
-        "revision": "8d4f9636"
+        "url": "/assets/workflow-submission-service-Il_BYAeM.js",
+        "revision": "24a2caad"
       }
     ],
     "media-viewer": [

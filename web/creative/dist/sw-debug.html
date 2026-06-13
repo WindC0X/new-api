@@ -77,7 +77,7 @@
         </svg>
         导出日志
       </button>
-
+      
       <!-- 设置弹窗 -->
       <div class="export-modal-overlay" id="settingsModalOverlay" style="display: none;">
         <div class="export-modal" style="max-width: 450px;">
@@ -149,7 +149,7 @@
               <input type="checkbox" id="selectAllExport">
               <span>全选</span>
             </label>
-
+            
             <!-- 基本信息 -->
             <div class="export-section">
               <label class="export-checkbox export-section-header">
@@ -171,7 +171,7 @@
                 </label>
               </div>
             </div>
-
+            
             <!-- Fetch 请求日志 -->
             <div class="export-section">
               <label class="export-checkbox export-section-header">
@@ -213,7 +213,7 @@
                 </label>
               </div>
             </div>
-
+            
             <!-- 控制台日志 -->
             <div class="export-section">
               <label class="export-checkbox export-section-header">
@@ -243,7 +243,7 @@
                 </label>
               </div>
             </div>
-
+            
             <!-- PostMessage 日志 -->
             <div class="export-section">
               <label class="export-checkbox export-section-header">
@@ -261,7 +261,7 @@
                 </label>
               </div>
             </div>
-
+            
             <!-- LLM API 日志 -->
             <div class="export-section">
               <label class="export-checkbox export-section-header">
@@ -295,7 +295,7 @@
                 </label>
               </div>
             </div>
-
+            
             <!-- 内存日志 -->
             <div class="export-section">
               <label class="export-checkbox export-section-header">
@@ -398,7 +398,7 @@
                 <span class="value" id="debugLogsCount">0</span>
               </div>
             </div>
-
+            
             <div id="failedDomainsSection" style="margin-top: 16px; display: none;">
               <div class="stat-item" style="flex-direction: column; align-items: flex-start;">
                 <span class="label">失败域名</span>
@@ -466,7 +466,7 @@
           <div class="tab debug-mode-only" data-tab="gist">Gist 管理</div>
           <div class="tab" data-tab="crash">内存日志 <span id="crashCount" style="opacity:0.6">(0)</span><span id="crashErrorDot" class="error-dot" style="display:none"></span></div>
         </div>
-
+        
         <!-- Fetch Logs Tab -->
         <div class="tab-content active" id="fetchTab">
           <div class="stats-bar" id="fetchStatsBar">
@@ -573,7 +573,7 @@
             </div>
           </div>
         </div>
-
+        
         <!-- Console Logs Tab -->
         <div class="tab-content" id="consoleTab">
           <div class="logs-toolbar">
@@ -712,7 +712,7 @@
             </button>
             <span id="gistStatus" style="font-size: 12px; margin-left: 10px; color: var(--text-secondary);">点击刷新加载数据</span>
           </div>
-
+          
           <div class="gist-panel-content">
             <!-- Section 1: Config Info -->
             <div class="gist-section">
@@ -931,7 +931,7 @@
                     </button>
                   </div>
                 </div>
-
+                
                 <!-- Log Stats (clickable to filter) -->
                 <div class="sync-log-stats" id="syncLogStats">
                   <div class="sync-log-stat clickable" data-filter="" title="显示所有日志">
@@ -955,12 +955,12 @@
                     <span class="stat-label">会话数</span>
                   </div>
                 </div>
-
+                
                 <!-- Log List -->
                 <div class="sync-log-list" id="syncLogList">
                   <div class="empty-state" style="padding: 40px;">点击刷新加载同步日志</div>
                 </div>
-
+                
                 <!-- Pagination -->
                 <div class="sync-log-pagination" id="syncLogPagination">
                   <button class="debug-btn-small" id="syncLogPrevPage" disabled>上一页</button>
@@ -995,7 +995,7 @@
                     加载远程数据
                   </button>
                 </div>
-
+                
                 <!-- Tasks Comparison -->
                 <div class="gist-subtab-content active" id="tasksSubtab">
                   <div class="gist-comparison-summary" id="taskComparisonSummary">
@@ -1024,7 +1024,7 @@
                     <div class="empty-state" style="padding: 20px;">点击刷新加载任务对比数据</div>
                   </div>
                 </div>
-
+                
                 <!-- Boards Comparison -->
                 <div class="gist-subtab-content" id="boardsSubtab">
                   <div class="gist-comparison-summary" id="boardComparisonSummary">
@@ -1049,7 +1049,7 @@
                     <div class="empty-state" style="padding: 20px;">点击刷新加载画板对比数据</div>
                   </div>
                 </div>
-
+                
                 <!-- Media Comparison -->
                 <div class="gist-subtab-content" id="mediaSubtab">
                   <div class="gist-comparison-summary" id="mediaComparisonSummary">
@@ -1074,7 +1074,7 @@
                     <div class="empty-state" style="padding: 20px;">点击刷新加载素材对比数据</div>
                   </div>
                 </div>
-
+                
                 <!-- Remote Files Browser -->
                 <div class="gist-subtab-content" id="filesSubtab">
                   <div class="gist-files-container">

@@ -101,9 +101,9 @@ function createCrashEntry(log, isExpanded, onToggle) {
   // 使用与 Fetch 日志相同的样式
   entry.className = 'log-entry memory-entry' + (isExpanded ? ' expanded' : '');
   entry.dataset.id = log.id;
-
+  
   const time = formatTime(log.timestamp);
-
+  
   const typeLabels = {
     startup: '启动',
     periodic: '定期',
@@ -113,20 +113,20 @@ function createCrashEntry(log, isExpanded, onToggle) {
     whitescreen: '白屏',
     longtask: '长任务'
   };
-
+  
   const typeLabel = typeLabels[log.type] || log.type;
   const isError = log.type === 'error';
   const isWarning = log.type === 'freeze' || log.type === 'whitescreen' || log.type === 'longtask';
-
+  
   // 类型徽章样式类
   const typeClass = isError ? 'error' : (isWarning ? 'warning' : 'normal');
-
+  
   // Memory info - 简化显示
   let memoryPercent = 0;
   if (log.memory) {
     memoryPercent = ((log.memory.usedJSHeapSize / log.memory.jsHeapSizeLimit) * 100);
   }
-
+  
   // Page stats - 简化为一行
   let statsText = '';
   if (log.pageStats) {
@@ -136,7 +136,7 @@ function createCrashEntry(log, isExpanded, onToggle) {
       statsText += ` · Plait ${stats.plaitElementCount}`;
     }
   }
-
+  
   // Performance info - 完整显示
   let perfText = '';
   if (log.performance) {
@@ -154,13 +154,13 @@ function createCrashEntry(log, isExpanded, onToggle) {
       perfText = parts.join(' | ');
     }
   }
-
+  
   // Error preview - show full message (will wrap if needed)
   let errorPreview = '';
   if (log.error) {
     errorPreview = `<span class="log-url" style="color: var(--error-color);">${escapeHtml(log.error.message || '')}</span>`;
   }
-
+  
   // 完整内存显示
   let memoryText = '';
   if (log.memory) {
@@ -168,7 +168,7 @@ function createCrashEntry(log, isExpanded, onToggle) {
     const limitMB = (log.memory.jsHeapSizeLimit / (1024 * 1024)).toFixed(1);
     memoryText = `${usedMB} MB / ${limitMB} MB (${memoryPercent.toFixed(1)}%)`;
   }
-
+  
   entry.innerHTML = `
     <div class="log-header">
       <span class="log-toggle"><span class="arrow">▶</span></span>
@@ -237,7 +237,7 @@ iframe: ${log.pageStats.iframeCount || 0}${log.pageStats.plaitElementCount !== u
       ` : ''}
     </div>
   `;
-
+  
   // Toggle expand on header click
   const toggleBtn = entry.querySelector('.log-toggle');
   toggleBtn.addEventListener('click', (e) => {
@@ -245,7 +245,7 @@ iframe: ${log.pageStats.iframeCount || 0}${log.pageStats.plaitElementCount !== u
     const nowExpanded = entry.classList.toggle('expanded');
     onToggle(log.id, nowExpanded);
   });
-
+  
   return entry;
 }
 
@@ -254,7 +254,7 @@ iframe: ${log.pageStats.iframeCount || 0}${log.pageStats.plaitElementCount !== u
  */
 export function updateCrashCount() {
   const errorCount = state.crashLogs.filter(l => l.type === 'error').length;
-
+  
   if (errorCount > 0) {
     elements.crashCountEl.innerHTML = `(<span style="color:var(--error-color)">${errorCount} errors</span>)`;
   } else {
@@ -288,12 +288,12 @@ export async function handleCopyCrashLogs() {
     const time = new Date(log.timestamp).toLocaleString('zh-CN', { hour12: false });
     const type = log.type || 'unknown';
     const typeLabel = typeLabels[type] || type;
-
+    
     const lines = [];
     lines.push(`═══════════════════════════════════════════════════`);
     lines.push(`${time} [${typeLabel}]`);
     lines.push(`───────────────────────────────────────────────────`);
-
+    
     // 基本信息
     lines.push(`【基本信息】`);
     lines.push(`  ID: ${log.id}`);
@@ -301,7 +301,7 @@ export async function handleCopyCrashLogs() {
     if (log.url) {
       lines.push(`  URL: ${log.url}`);
     }
-
+    
     // 内存信息
     if (log.memory) {
       const usedMB = (log.memory.usedJSHeapSize / (1024 * 1024)).toFixed(1);
@@ -315,7 +315,7 @@ export async function handleCopyCrashLogs() {
       lines.push(`  限制: ${limitMB} MB`);
       lines.push(`  使用率: ${percent}%`);
     }
-
+    
     // 页面统计
     if (log.pageStats) {
       const stats = log.pageStats;
@@ -330,7 +330,7 @@ export async function handleCopyCrashLogs() {
         lines.push(`  Plait元素: ${stats.plaitElementCount}`);
       }
     }
-
+    
     // 性能信息
     if (log.performance) {
       const perf = log.performance;
@@ -350,7 +350,7 @@ export async function handleCopyCrashLogs() {
         perfParts.forEach(p => lines.push(`  ${p}`));
       }
     }
-
+    
     // 错误信息
     if (log.error) {
       lines.push(``);
@@ -364,14 +364,14 @@ export async function handleCopyCrashLogs() {
         });
       }
     }
-
+    
     // 自定义数据
     if (log.customData) {
       lines.push(``);
       lines.push(`【自定义数据】`);
       lines.push(`  ${JSON.stringify(log.customData, null, 2).split('\n').join('\n  ')}`);
     }
-
+    
     return lines.join('\n');
   }).join('\n\n');
 
@@ -397,14 +397,14 @@ export function handleExportCrashLogs() {
     alert('没有可导出的内存日志');
     return;
   }
-
+  
   const exportData = {
     exportTime: new Date().toISOString(),
     userAgent: navigator.userAgent,
     url: location.href,
     memorySnapshots: state.crashLogs,
   };
-
+  
   const filename = `memory-logs-${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}.json`;
   downloadJson(exportData, filename);
 }
@@ -422,12 +422,12 @@ export function updateMemoryDisplay() {
     const totalMB = (mem.totalJSHeapSize / (1024 * 1024)).toFixed(1);
     const limitMB = (mem.jsHeapSizeLimit / (1024 * 1024)).toFixed(0);
     const percent = ((mem.usedJSHeapSize / mem.jsHeapSizeLimit) * 100).toFixed(1);
-
+    
     if (elements.memoryUsed) elements.memoryUsed.textContent = `${usedMB} MB`;
     if (elements.memoryTotal) elements.memoryTotal.textContent = `${totalMB} MB`;
     if (elements.memoryLimit) elements.memoryLimit.textContent = `${limitMB} MB`;
     if (elements.memoryPercent) elements.memoryPercent.textContent = `${percent}%`;
-
+    
     // Warning if usage is high
     if (parseFloat(percent) > 70) {
       if (elements.memoryWarning) elements.memoryWarning.style.display = 'block';
@@ -436,7 +436,7 @@ export function updateMemoryDisplay() {
       if (elements.memoryWarning) elements.memoryWarning.style.display = 'none';
       if (elements.memoryPercent) elements.memoryPercent.style.color = '';
     }
-
+    
     if (elements.memoryNotSupported) elements.memoryNotSupported.style.display = 'none';
   } else {
     if (elements.memoryUsed) elements.memoryUsed.textContent = '-';
@@ -445,7 +445,7 @@ export function updateMemoryDisplay() {
     if (elements.memoryPercent) elements.memoryPercent.textContent = '-';
     if (elements.memoryNotSupported) elements.memoryNotSupported.style.display = 'block';
   }
-
+  
   // Update timestamp
   const now = new Date();
   if (elements.memoryUpdateTime) {
@@ -459,7 +459,7 @@ export function updateMemoryDisplay() {
 export function startMemoryMonitoring() {
   // Initial update
   updateMemoryDisplay();
-
+  
   // Update every 2 seconds
   if (memoryMonitorInterval) {
     clearInterval(memoryMonitorInterval);

@@ -1,6 +1,6 @@
 /**
  * SW Debug Panel - Console Entry Component
- *
+ * 
  * 支持两种日志格式：
  * 1. 控制台日志格式：logLevel, logMessage, logStack, logSource
  * 2. 同步日志格式：level, message, data, error, sessionId, duration, category
@@ -23,7 +23,7 @@ const LEVEL_LABELS = {
 
 /**
  * 标准化日志级别
- * @param {string} level
+ * @param {string} level 
  * @returns {string}
  */
 function normalizeLevel(level) {
@@ -34,12 +34,12 @@ function normalizeLevel(level) {
 
 /**
  * Format stack trace for better readability
- * @param {string} stack
+ * @param {string} stack 
  * @returns {string}
  */
 function formatStack(stack) {
   if (!stack) return '';
-
+  
   // Split by newlines and format each line
   return stack.split('\n').map(line => {
     // Highlight file paths and line numbers
@@ -54,11 +54,11 @@ function formatStack(stack) {
  */
 function parseLogMessage(msg) {
   if (msg == null) return { parsed: false, message: '' };
-
+  
   const msgStr = typeof msg === 'string' ? msg : (
     typeof msg === 'object' ? JSON.stringify(msg) : String(msg)
   );
-
+  
   // 尝试解析 JSON 格式的消息
   if (msgStr.startsWith('{') && msgStr.endsWith('}')) {
     try {
@@ -86,7 +86,7 @@ function parseLogMessage(msg) {
       // 解析失败，使用原始字符串
     }
   }
-
+  
   return { parsed: false, message: msgStr };
 }
 
@@ -98,7 +98,7 @@ function parseLogMessage(msg) {
  */
 function formatJsonHtml(obj, indent = 0) {
   const indentStr = '  '.repeat(indent);
-
+  
   if (obj === null) {
     return '<span class="json-null">null</span>';
   }
@@ -121,7 +121,7 @@ function formatJsonHtml(obj, indent = 0) {
   if (typeof obj === 'object') {
     const keys = Object.keys(obj);
     if (keys.length === 0) return '{}';
-    const items = keys.map(key =>
+    const items = keys.map(key => 
       `${indentStr}  <span class="json-key">"${escapeHtml(key)}"</span>: ${formatJsonHtml(obj[key], indent + 1)}`
     );
     return `{\n${items.join(',\n')}\n${indentStr}}`;
@@ -138,23 +138,23 @@ function normalizeLog(log) {
   // 同步日志格式使用 level/message，控制台日志使用 logLevel/logMessage
   const level = normalizeLevel(log.level || log.logLevel);
   const message = log.message || log.logMessage || '';
-
+  
   // 堆栈信息
   let stack = log.logStack || '';
   if (log.error && log.error.stack) {
     stack = log.error.stack;
   }
-
+  
   // 来源信息
   const source = log.logSource || '';
-
+  
   // 同步日志特有字段
   const sessionId = log.sessionId || null;
   const duration = log.duration || null;
   const category = log.category || null;
   const data = log.data || null;
   const error = log.error || null;
-
+  
   return {
     id: log.id,
     timestamp: log.timestamp,
@@ -174,7 +174,7 @@ function normalizeLog(log) {
 
 /**
  * 格式化会话 ID 显示
- * @param {string} sessionId
+ * @param {string} sessionId 
  * @returns {string}
  */
 function formatSessionId(sessionId) {
@@ -194,12 +194,12 @@ function formatSessionId(sessionId) {
 /**
  * Create a console log entry DOM element
  * Uses the same styles as Fetch logs for consistency
- *
+ * 
  * 支持两种日志格式：
  * - 控制台日志：{ logLevel, logMessage, logStack, logSource, url }
  * - 同步日志：{ level, message, data, error, sessionId, duration, category }
- *
- * @param {object} log
+ * 
+ * @param {object} log 
  * @param {boolean} isExpanded - Initial expanded state for stack
  * @param {Function} onToggle - Callback when expand state changes (id, expanded)
  * @param {object} options - 额外配置选项
@@ -209,32 +209,32 @@ function formatSessionId(sessionId) {
  */
 export function createConsoleEntry(log, isExpanded = false, onToggle = null, options = {}) {
   const { showDate = false, showLevelLabel = false } = options;
-
+  
   // 标准化日志格式
   const normalized = normalizeLog(log);
   const level = normalized.level;
-
+  
   const entry = document.createElement('div');
   entry.className = `log-entry console-entry ${level}` + (isExpanded ? ' expanded' : '');
   entry.dataset.id = normalized.id;
-
+  
   // 解析日志消息
   const parsedMsg = parseLogMessage(normalized.message);
   const displayMessage = parsedMsg.message;
-
+  
   // 合并来自 log 对象和解析出的信息
   const stack = normalized.stack?.trim() || parsedMsg.stack?.trim() || '';
   const source = normalized.source || parsedMsg.source || '';
   const hasStack = !!stack;
   const hasSource = !!source;
   const hasExtra = parsedMsg.extra && Object.keys(parsedMsg.extra).length > 0;
-
+  
   // 同步日志扩展字段
   const hasData = normalized.data && Object.keys(normalized.data).length > 0;
   const hasError = normalized.error && (normalized.error.name || normalized.error.message);
   const hasSession = !!normalized.sessionId;
   const hasDuration = normalized.duration != null;
-
+  
   // 总是显示展开按钮（消息长度超过 80 字符或有详细信息）
   const hasDetails = hasStack || hasSource || normalized.url || hasExtra || hasData || hasError || displayMessage.length > 80;
 
@@ -250,17 +250,17 @@ export function createConsoleEntry(log, isExpanded = false, onToggle = null, opt
   }[level] || 'pending';
 
   // 头部显示截断的消息
-  const headerMessage = displayMessage.length > 120
-    ? displayMessage.substring(0, 120) + '...'
+  const headerMessage = displayMessage.length > 120 
+    ? displayMessage.substring(0, 120) + '...' 
     : displayMessage;
 
   // 格式化时间（可选显示日期）
-  const timeStr = showDate
+  const timeStr = showDate 
     ? formatTimeWithDate(normalized.timestamp)
     : formatTime(normalized.timestamp);
-
+  
   // 级别显示文本
-  const levelText = showLevelLabel
+  const levelText = showLevelLabel 
     ? (LEVEL_LABELS[level] || level.toUpperCase())
     : level.toUpperCase();
 
@@ -362,7 +362,7 @@ export function createConsoleEntry(log, isExpanded = false, onToggle = null, opt
 
 /**
  * 格式化带日期的时间
- * @param {number} timestamp
+ * @param {number} timestamp 
  * @returns {string}
  */
 function formatTimeWithDate(timestamp) {

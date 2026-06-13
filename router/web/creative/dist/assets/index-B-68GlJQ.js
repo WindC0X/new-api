@@ -1,2 +1,0 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/startup-app-DxC2basr.css"])))=>i.map(i=>d[i]);
-import{_ as o}from"./startup-runtime-Di8qk2Fd.js";(async function(){try{await(window.__OPENTU_START_MAIN_ENTRY__||Promise.resolve()),await o(()=>import("./startup-app-DcAo2WK2.js").then(_=>_.ob),__vite__mapDeps([0]))}catch(_){if(window.__OPENTU_BOOT_DYNAMIC_IMPORT_RECOVERY__&&window.__OPENTU_BOOT_DYNAMIC_IMPORT_RECOVERY__(_))return;throw _}})();

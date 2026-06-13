@@ -33,7 +33,7 @@ export function openExportModal() {
   loadLLMApiLogs();
   // Also refresh crash logs to ensure completeness
   loadCrashLogs();
-
+  
   elements.exportModalOverlay?.classList.add('show');
 }
 
@@ -112,27 +112,27 @@ export function getExportOptions() {
   const basicTypes = Array.from(
     document.querySelectorAll('input[name="basic"]:checked')
   ).map(el => el.value);
-
+  
   const fetchTypes = Array.from(
     document.querySelectorAll('input[name="fetch"]:checked')
   ).map(el => el.value);
-
+  
   const consoleLevels = Array.from(
     document.querySelectorAll('input[name="console"]:checked')
   ).map(el => el.value);
-
+  
   const postmessageDirections = Array.from(
     document.querySelectorAll('input[name="postmessage"]:checked')
   ).map(el => el.value);
-
+  
   const memoryTypes = Array.from(
     document.querySelectorAll('input[name="memory"]:checked')
   ).map(el => el.value);
-
+  
   const llmapiTypes = Array.from(
     document.querySelectorAll('input[name="llmapi"]:checked')
   ).map(el => el.value);
-
+  
   return { basicTypes, fetchTypes, consoleLevels, postmessageDirections, memoryTypes, llmapiTypes };
 }
 
@@ -142,7 +142,7 @@ export function getExportOptions() {
 function getCurrentMemoryInfo() {
   const memory = performance.memory;
   if (!memory) return null;
-
+  
   return {
     usedJSHeapSize: memory.usedJSHeapSize,
     totalJSHeapSize: memory.totalJSHeapSize,
@@ -159,7 +159,7 @@ function getCurrentMemoryInfo() {
  */
 export function exportLogs() {
   const options = getExportOptions();
-
+  
   // Build basic info
   let basicInfo = {};
   if (options.basicTypes.includes('swStatus') && state.swStatus) {
@@ -182,15 +182,15 @@ export function exportLogs() {
   if (options.basicTypes.includes('cache') && state.swStatus?.cacheStats) {
     basicInfo.cacheStats = state.swStatus.cacheStats;
   }
-
+  
   // Filter fetch logs
   let filteredFetchLogs = [];
   if (options.fetchTypes.length > 0) {
-    filteredFetchLogs = state.logs.filter(l =>
+    filteredFetchLogs = state.logs.filter(l => 
       options.fetchTypes.includes(l.requestType)
     );
   }
-
+  
   // Filter console logs
   let filteredConsoleLogs = [];
   if (options.consoleLevels.length > 0) {
@@ -198,7 +198,7 @@ export function exportLogs() {
       options.consoleLevels.includes(l.logLevel)
     );
   }
-
+  
   // Filter postmessage logs
   let filteredPostmessageLogs = [];
   if (options.postmessageDirections.length > 0) {
@@ -206,7 +206,7 @@ export function exportLogs() {
       options.postmessageDirections.includes(l.direction)
     );
   }
-
+  
   // Filter memory logs
   let filteredMemoryLogs = [];
   if (options.memoryTypes.length > 0) {
@@ -214,7 +214,7 @@ export function exportLogs() {
       options.memoryTypes.includes(l.type)
     );
   }
-
+  
   // Filter LLM API logs
   let filteredLLMApiLogs = [];
   if (options.llmapiTypes.length > 0) {
@@ -222,20 +222,20 @@ export function exportLogs() {
       options.llmapiTypes.includes(getLLMApiCategory(l))
     );
   }
-
+  
   // Check if anything selected
   const hasBasicInfo = Object.keys(basicInfo).length > 0;
-  const hasLogs = filteredFetchLogs.length > 0 ||
-                  filteredConsoleLogs.length > 0 ||
+  const hasLogs = filteredFetchLogs.length > 0 || 
+                  filteredConsoleLogs.length > 0 || 
                   filteredPostmessageLogs.length > 0 ||
                   filteredMemoryLogs.length > 0 ||
                   filteredLLMApiLogs.length > 0;
-
+  
   if (!hasBasicInfo && !hasLogs) {
     alert('没有选中任何导出项，或选中的类型没有数据');
     return;
   }
-
+  
   const exportData = {
     exportTime: new Date().toISOString(),
     userAgent: navigator.userAgent,

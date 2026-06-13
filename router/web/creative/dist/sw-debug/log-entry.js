@@ -6,15 +6,15 @@ import { formatTime, formatDuration, formatSize, getStatusClass, extractDisplayU
 
 /**
  * Render FormData fields as HTML
- * @param {Array} formData
+ * @param {Array} formData 
  * @returns {string}
  */
 function renderFormData(formData) {
   if (!formData || formData.length === 0) return '';
-
+  
   const rows = formData.map(field => {
     let valueHtml;
-
+    
     if (field.isFile) {
       if (field.dataUrl) {
         // Render image preview
@@ -30,7 +30,7 @@ function renderFormData(formData) {
     } else {
       valueHtml = `<span class="form-data-value">${field.value}</span>`;
     }
-
+    
     return `
       <tr>
         <td class="form-data-name">${field.name}</td>
@@ -38,7 +38,7 @@ function renderFormData(formData) {
       </tr>
     `;
   }).join('');
-
+  
   return `
     <div class="detail-section">
       <h4>请求参数 (FormData)</h4>
@@ -51,12 +51,12 @@ function renderFormData(formData) {
 
 /**
  * Extract base64 images from JSON object
- * @param {object} obj
+ * @param {object} obj 
  * @returns {Array<{key: string, dataUrl: string}>}
  */
 function extractBase64Images(obj) {
   const images = [];
-
+  
   function traverse(value, path = '') {
     if (typeof value === 'string') {
       // Check if it's a base64 data URL for an image
@@ -73,14 +73,14 @@ function extractBase64Images(obj) {
       });
     }
   }
-
+  
   traverse(obj);
   return images;
 }
 
 /**
  * Extract base64 images from a string (even if JSON is truncated)
- * @param {string} str
+ * @param {string} str 
  * @returns {Array<{key: string, dataUrl: string}>}
  */
 function extractBase64ImagesFromString(str) {
@@ -89,7 +89,7 @@ function extractBase64ImagesFromString(str) {
   const regex = /data:image\/([^;]+);base64,([A-Za-z0-9+/=]+)/g;
   let match;
   let index = 0;
-
+  
   while ((match = regex.exec(str)) !== null) {
     const mimeType = match[1];
     const base64Data = match[2];
@@ -104,19 +104,19 @@ function extractBase64ImagesFromString(str) {
       index++;
     }
   }
-
+  
   return images;
 }
 
 /**
  * Format JSON body with base64 truncation for display
- * @param {string} jsonStr
+ * @param {string} jsonStr 
  * @returns {{ formatted: string, images: Array }}
  */
 function formatJsonWithBase64(jsonStr) {
   // First, try to extract images from raw string (works even if truncated)
   const rawImages = extractBase64ImagesFromString(jsonStr);
-
+  
   // Truncate base64 in display string
   let formatted = jsonStr.replace(
     /data:image\/([^;]+);base64,([A-Za-z0-9+/=]{50,})/g,
@@ -126,7 +126,7 @@ function formatJsonWithBase64(jsonStr) {
       return `[image/${mimeType} ~${sizeKB}KB] ${truncated}`;
     }
   );
-
+  
   // Try to pretty-print if it's valid JSON
   try {
     // First clean up the truncated base64 for parsing
@@ -135,7 +135,7 @@ function formatJsonWithBase64(jsonStr) {
       '[BASE64_IMAGE]'
     );
     const obj = JSON.parse(cleanedForParse);
-
+    
     // Re-process original to create pretty display
     const displayStr = jsonStr.replace(
       /data:image\/([^;]+);base64,([A-Za-z0-9+/=]+)/g,
@@ -144,7 +144,7 @@ function formatJsonWithBase64(jsonStr) {
         return `[📷 image/${mimeType} ~${sizeKB}KB]`;
       }
     );
-
+    
     try {
       const displayObj = JSON.parse(displayStr);
       formatted = JSON.stringify(displayObj, null, 2);
@@ -154,7 +154,7 @@ function formatJsonWithBase64(jsonStr) {
   } catch {
     // JSON parse failed (possibly truncated), use replaced string
   }
-
+  
   return {
     formatted,
     images: rawImages
@@ -163,12 +163,12 @@ function formatJsonWithBase64(jsonStr) {
 
 /**
  * Render base64 image previews
- * @param {Array<{key: string, dataUrl: string, mimeType?: string, size?: number}>} images
+ * @param {Array<{key: string, dataUrl: string, mimeType?: string, size?: number}>} images 
  * @returns {string}
  */
 function renderBase64Previews(images) {
   if (!images || images.length === 0) return '';
-
+  
   // Generate unique IDs for each image to update dimensions after load
   const previews = images.map((img, idx) => {
     const imgId = `base64-img-${Date.now()}-${idx}`;
@@ -179,16 +179,16 @@ function renderBase64Previews(images) {
           ${img.size ? `<span class="base64-size">~${img.size}KB</span>` : ''}
           <span class="base64-dimensions" id="${imgId}-dims"></span>
         </div>
-        <img
-          src="${img.dataUrl}"
-          alt="${img.key}"
+        <img 
+          src="${img.dataUrl}" 
+          alt="${img.key}" 
           class="base64-preview-img"
           onload="this.parentElement.querySelector('.base64-dimensions').textContent = this.naturalWidth + '×' + this.naturalHeight"
         >
       </div>
     `;
   }).join('');
-
+  
   return `
     <div class="base64-previews">
       <h5>📷 请求中的图片 (${images.length}张)</h5>
@@ -199,29 +199,29 @@ function renderBase64Previews(images) {
 
 /**
  * Parse request/response body from log details
- * @param {object} log
+ * @param {object} log 
  * @returns {{ requestBodySection: string, responseBodySection: string, formDataSection: string }}
  */
 function parseBodySections(log) {
   let requestBodySection = '';
   let responseBodySection = '';
   let formDataSection = '';
-
+  
   // Handle FormData for sw-internal requests
   if (log.formData && log.formData.length > 0) {
     formDataSection = renderFormData(log.formData);
   }
-
+  
   // Handle JSON request body
   if (log.requestBody && !log.formData) {
     // Prefer pre-extracted base64Images from debugFetch (complete images)
     // Fall back to extracting from requestBody (may be truncated)
     const images = log.base64Images || formatJsonWithBase64(log.requestBody).images;
     const previewHtml = renderBase64Previews(images);
-
+    
     // Format the request body for display (already has base64 replaced with placeholders if from debugFetch)
     const displayBody = formatJsonOrText(log.requestBody);
-
+    
     requestBodySection = `
       <div class="detail-section">
         <h4>请求体 (Request Body)</h4>
@@ -230,7 +230,7 @@ function parseBodySections(log) {
       </div>
     `;
   }
-
+  
   // Handle response body
   if (log.responseBody) {
     responseBodySection = `
@@ -278,7 +278,7 @@ function parseBodySections(log) {
 
 /**
  * Create a log entry DOM element
- * @param {object} log
+ * @param {object} log 
  * @param {boolean} isExpanded - Initial expanded state
  * @param {Function} onToggle - Callback when expand state changes (id, expanded)
  * @returns {HTMLElement}
@@ -290,26 +290,26 @@ export function createLogEntry(log, isExpanded = false, onToggle = null, isBookm
 
   const statusClass = getStatusClass(log.status);
   const cachedBadge = log.cached ? '<span class="log-cached">缓存</span>' : '';
-  const typeClass = log.requestType === 'xhr' ? 'xhr' :
-    (log.requestType === 'passthrough' ? 'passthrough' :
+  const typeClass = log.requestType === 'xhr' ? 'xhr' : 
+    (log.requestType === 'passthrough' ? 'passthrough' : 
     (log.requestType === 'sw-internal' ? 'sw-internal' : ''));
   const displayUrl = extractDisplayUrl(log.url);
   const { requestBodySection, responseBodySection, formDataSection } = parseBodySections(log);
-
+  
   // Determine if this is a network error (status 0 or has error with no status)
   const isNetworkError = log.error && (log.status === 0 || log.status === undefined);
-  const errorBadgeText = isNetworkError
+  const errorBadgeText = isNetworkError 
     ? (log.statusText || '网络错误')
     : '';
-
+  
   // Extract purpose label for sw-internal requests
-  const purposeLabel = log.requestType === 'sw-internal' && log.details
-    ? `<span class="log-purpose">${log.details}</span>`
+  const purposeLabel = log.requestType === 'sw-internal' && log.details 
+    ? `<span class="log-purpose">${log.details}</span>` 
     : '';
-
+  
   // Streaming badge
-  const streamingBadge = log.isStreaming
-    ? '<span class="log-streaming" title="流式响应 (SSE/Stream)">Stream</span>'
+  const streamingBadge = log.isStreaming 
+    ? '<span class="log-streaming" title="流式响应 (SSE/Stream)">Stream</span>' 
     : '';
 
   // Build status display
@@ -324,10 +324,10 @@ export function createLogEntry(log, isExpanded = false, onToggle = null, isBookm
   }
 
   const bookmarkIcon = isBookmarked ? '⭐' : '☆';
-  const selectCheckbox = isSelectMode
-    ? `<input type="checkbox" class="log-select-checkbox" data-id="${log.id}" ${isSelected ? 'checked' : ''} style="margin-right: 6px; cursor: pointer;">`
+  const selectCheckbox = isSelectMode 
+    ? `<input type="checkbox" class="log-select-checkbox" data-id="${log.id}" ${isSelected ? 'checked' : ''} style="margin-right: 6px; cursor: pointer;">` 
     : '';
-
+  
   entry.innerHTML = `
     <div class="log-header">
       ${selectCheckbox}
@@ -401,14 +401,14 @@ export function createLogEntry(log, isExpanded = false, onToggle = null, isBookm
     if (onToggle) {
       onToggle(log.id, isNowExpanded);
     }
-
+    
     // Lazy load related requests when expanding
     if (isNowExpanded && window.renderRelatedRequests) {
       const placeholder = entry.querySelector('.related-requests-placeholder');
       if (placeholder && !placeholder.dataset.loaded) {
         placeholder.innerHTML = window.renderRelatedRequests(log);
         placeholder.dataset.loaded = 'true';
-
+        
         // Add click handler for related requests
         placeholder.querySelectorAll('.related-request').forEach(el => {
           el.addEventListener('click', () => {

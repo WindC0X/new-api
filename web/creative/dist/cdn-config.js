@@ -1,12 +1,12 @@
 /**
  * CDN 智能选择器 - 在主应用加载前运行
- *
+ * 
  * 功能：
  * 1. 检测可用的 CDN 源
  * 2. 选择最快的 CDN
  * 3. 将选择结果存储到 localStorage
  * 4. 供 Service Worker 使用
- *
+ * 
  * 使用方式：
  * 在 index.html 的 <head> 中添加:
  * <script src="cdn-config.js"></script>
@@ -42,13 +42,13 @@
     window[CDN_API_GLOBAL_KEY] = api;
     window[LEGACY_CDN_API_GLOBAL_KEY] = api;
   }
-
+  
 
   // 开发模式检测 - 本地开发时跳过 CDN 逻辑
-  var isDevelopment = window.location.hostname === 'localhost' ||
+  var isDevelopment = window.location.hostname === 'localhost' || 
                       window.location.hostname === '127.0.0.1' ||
                       window.location.hostname.endsWith('.localhost');
-
+  
   if (isDevelopment) {
     setCDNPreference({ cdn: 'local', latency: 0, timestamp: Date.now(), isDevelopment: true });
     setCDNApi({
@@ -87,10 +87,10 @@
     return new Promise(function(resolve) {
       var startTime = Date.now();
       var testUrl = source.baseUrl + source.testPath + '?t=' + startTime;
-
+      
       var xhr = new XMLHttpRequest();
       xhr.timeout = CONFIG.testTimeout;
-
+      
       xhr.onload = function() {
         if (xhr.status === 200) {
           var latency = Date.now() - startTime;
@@ -99,15 +99,15 @@
           resolve({ name: source.name, latency: Infinity, success: false });
         }
       };
-
+      
       xhr.onerror = function() {
         resolve({ name: source.name, latency: Infinity, success: false });
       };
-
+      
       xhr.ontimeout = function() {
         resolve({ name: source.name, latency: Infinity, success: false });
       };
-
+      
       xhr.open('GET', testUrl, true);
       xhr.send();
     });
@@ -142,7 +142,7 @@
 
     // 并行测试所有 CDN
     var tests = CDN_SOURCES.map(testCDN);
-
+    
     return Promise.all(tests).then(function(results) {
       // 过滤成功的结果并按延迟排序
       var successfulResults = results
@@ -170,7 +170,7 @@
 
       // 暴露到全局变量供 SW 使用
       setCDNPreference(preference);
-
+      
       return preference;
     });
   }

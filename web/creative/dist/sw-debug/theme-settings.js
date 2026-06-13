@@ -105,22 +105,22 @@ export function saveSettings() {
     autoCleanMinutes: parseInt(elements.settingAutoClean?.value || '0'),
     keepBookmarks: elements.settingKeepBookmarks?.checked ?? true,
   };
-
+  
   state.settings = newSettings;
-
+  
   // Save to localStorage
   try {
     localStorage.setItem('sw-debug-settings', JSON.stringify(newSettings));
   } catch (e) {
     console.error('Failed to save settings:', e);
   }
-
+  
   // Apply new max logs limit
   applyMaxLogsLimit();
-
+  
   // Setup auto clean timer
   setupAutoCleanTimer();
-
+  
   closeSettingsModal();
 }
 
@@ -136,7 +136,7 @@ export function loadSettings() {
   } catch (e) {
     console.error('Failed to load settings:', e);
   }
-
+  
   // Setup auto clean timer based on saved settings
   setupAutoCleanTimer();
 }
@@ -146,7 +146,7 @@ export function loadSettings() {
  */
 function applyMaxLogsLimit() {
   const maxLogs = state.settings.maxLogs;
-
+  
   if (state.logs.length > maxLogs) {
     // Keep bookmarked logs if setting is enabled
     if (state.settings.keepBookmarks) {
@@ -169,15 +169,15 @@ export function setupAutoCleanTimer() {
     clearInterval(state.autoCleanTimerId);
     state.autoCleanTimerId = null;
   }
-
+  
   const minutes = state.settings.autoCleanMinutes;
   if (minutes <= 0) return;
-
+  
   // Run cleanup every minute
   state.autoCleanTimerId = setInterval(() => {
     autoCleanLogs();
   }, 60000);
-
+  
   // Also run immediately
   autoCleanLogs();
 }
@@ -188,18 +188,18 @@ export function setupAutoCleanTimer() {
 function autoCleanLogs() {
   const minutes = state.settings.autoCleanMinutes;
   if (minutes <= 0) return;
-
+  
   const cutoffTime = Date.now() - (minutes * 60 * 1000);
   const beforeCount = state.logs.length;
-
+  
   if (state.settings.keepBookmarks) {
-    state.logs = state.logs.filter(l =>
+    state.logs = state.logs.filter(l => 
       l.timestamp >= cutoffTime || state.bookmarkedLogIds.has(l.id)
     );
   } else {
     state.logs = state.logs.filter(l => l.timestamp >= cutoffTime);
   }
-
+  
   if (state.logs.length !== beforeCount) {
     if (renderLogs) renderLogs();
   }

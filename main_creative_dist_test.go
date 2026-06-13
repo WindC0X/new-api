@@ -38,6 +38,7 @@ func TestCreativeProductionRootDistMatchesRouterDistAndContract(t *testing.T) {
 	mainRequireCreativeIndexProductMarkup(t, string(rootIndex))
 	rootAssets := mainCreativeAssetPathsReferencedByIndex(t, string(rootIndex))
 
+	mainRequireCreativeRootRouterDistTreesEqual(t)
 	mainRequireCreativeRootRouterFileEqual(t, "index.html")
 	mainRequireCreativeRootRouterFileEqual(t, "sw.js")
 	mainRequireCreativeRootRouterFileEqual(t, "version.json")
@@ -58,6 +59,33 @@ func TestCreativeProductionRootDistMatchesRouterDistAndContract(t *testing.T) {
 		mainRequireNoCreativeFixtureMarkersInText(t, string(content), path)
 		return nil
 	}))
+}
+
+func mainRequireCreativeRootRouterDistTreesEqual(t *testing.T) {
+	t.Helper()
+
+	root := mainCreativeDistTree(t, creativeBuildFS, "web/creative/dist")
+	router := mainCreativeDistTree(t, routerCreativeBuildFS, "router/web/creative/dist")
+	require.Equal(t, root, router, "creative dist file list and hashes must match between web/creative/dist and router/web/creative/dist")
+}
+
+func mainCreativeDistTree(t *testing.T, filesystem fs.FS, root string) map[string]string {
+	t.Helper()
+
+	files := map[string]string{}
+	require.NoError(t, fs.WalkDir(filesystem, root, func(path string, d fs.DirEntry, err error) error {
+		require.NoError(t, err)
+		if d.IsDir() {
+			return nil
+		}
+		content, readErr := fs.ReadFile(filesystem, path)
+		require.NoError(t, readErr)
+		relativePath := strings.TrimPrefix(path, strings.TrimSuffix(root, "/")+"/")
+		files[relativePath] = fmt.Sprintf("%x", sha256.Sum256(content))
+		return nil
+	}))
+	require.NotEmpty(t, files, "creative dist tree %s must not be empty", root)
+	return files
 }
 
 func mainRequireCreativeRootRouterFileEqual(t *testing.T, relativePath string) {

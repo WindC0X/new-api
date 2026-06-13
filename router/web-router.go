@@ -170,14 +170,21 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.GlobalWebRateLimit())
 	router.Use(middleware.Cache())
-	router.Use(static.Serve("/", themeFS))
+	themeStatic := static.Serve("/", themeFS)
+	router.Use(func(c *gin.Context) {
+		p := c.Request.URL.Path
+		if p == "/creative" || strings.HasPrefix(p, "/creative/") {
+			c.Next()
+			return
+		}
+		themeStatic(c)
+	})
 
 	// /creative — explicit route registration avoids trailing-slash redirect
 	// interference from gin's middleware chain and provides a clean SPA fallback
 	// for client-side navigation (e.g. /creative/board, /creative/settings).
-	// NOTE: admin static.Serve("/", themeFS) runs before these routes because it
-	// is a middleware.  If the admin dist ever gains a /creative/ directory, the
-	// behaviour here is undefined by design — choose to mount on a unique prefix.
+	// The root admin static middleware explicitly skips /creative so future admin
+	// files cannot shadow Creative API, relay, or embedded app routes.
 	creativeServer := http.StripPrefix("/creative", http.FileServer(creativeFS))
 
 	SetCreativeRouter(router)
@@ -218,6 +225,12 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 				c.Header("Cache-Control", creativeImmutableCacheControl)
 			}
 			creativeServer.ServeHTTP(c.Writer, c.Request)
+			return
+		}
+		// Missing hashed asset files are static misses, not client-side routes.
+		if strings.HasPrefix(p, "/creative/assets/") {
+			c.Header("Cache-Control", creativeNoCacheControl)
+			c.String(http.StatusNotFound, "creative asset not found")
 			return
 		}
 		// File not found — SPA fallback for client-side routes.

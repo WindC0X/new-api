@@ -275,14 +275,13 @@ func TestCreativeEmbeddedAssetCacheAndCSPHeaders(t *testing.T) {
 		})
 	}
 
-	deepLink := httptest.NewRecorder()
-	engine.ServeHTTP(deepLink, httptest.NewRequest(http.MethodGet, "/creative/assets/not-a-real-asset/deep-link", nil))
-	require.Equal(t, http.StatusOK, deepLink.Code)
-	require.Equal(t, "no-cache", deepLink.Header().Get("Cache-Control"))
-	require.Contains(t, deepLink.Header().Get("Content-Type"), "text/html")
-	requireCreativeIndexProductMarkup(t, deepLink.Body.String())
-	requireNoCreativeFixtureMarkersInText(t, deepLink.Body.String(), "/creative/assets/not-a-real-asset/deep-link")
-	requireCreativeEmbeddedSecurityHeaders(t, deepLink)
+	missingAsset := httptest.NewRecorder()
+	engine.ServeHTTP(missingAsset, httptest.NewRequest(http.MethodGet, "/creative/assets/not-a-real-asset/deep-link", nil))
+	require.Equal(t, http.StatusNotFound, missingAsset.Code)
+	require.Equal(t, "no-cache", missingAsset.Header().Get("Cache-Control"))
+	require.NotContains(t, missingAsset.Header().Get("Content-Type"), "text/html")
+	requireNoCreativeFixtureMarkersInText(t, missingAsset.Body.String(), "/creative/assets/not-a-real-asset/deep-link")
+	requireCreativeEmbeddedSecurityHeaders(t, missingAsset)
 }
 
 func TestCreativeEmbeddedProvenanceHeaders(t *testing.T) {

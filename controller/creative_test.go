@@ -450,6 +450,7 @@ func TestCreativeVideoRelayEnvDefaultIsFailClosed(t *testing.T) {
 func TestCreativeBootstrapReportsVideoRelayCapability(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 36)
+	seedCreativeControllerModelPool(t)
 	router := newCreativeSessionTestRouter(36)
 
 	restoreDisabled := SetCreativeVideoRelayEnabledForTest(false)
@@ -472,6 +473,7 @@ func TestCreativeBootstrapReportsVideoRelayCapability(t *testing.T) {
 func TestCreativeNonceMiddlewareRequiresSameOriginSignalForUnsafeMethods(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 42)
+	seedCreativeControllerModelPool(t)
 	router := newCreativeSessionTestRouter(42)
 	unsafeMethods := []string{http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete}
 	for _, method := range unsafeMethods {
@@ -555,6 +557,7 @@ func TestCreativeGetBootstrapModelsAndDocumentsDoNotRequireOriginSignal(t *testi
 func TestCreativeNonceMiddlewareProtectsUnsafePreferenceMutation(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 41)
+	seedCreativeControllerModelPool(t)
 	router := newCreativeSessionTestRouter(41)
 	router.PATCH("/creative/api/preferences/model", middleware.CreativeRequireNonce(), CreativePatchModelPreference)
 	auth := bootstrapCreativeSessionAuth(t, router)
@@ -613,6 +616,7 @@ func TestCreativeNonceMiddlewareProtectsUnsafePreferenceMutation(t *testing.T) {
 func TestCreativeNonceMiddlewareProtectsRelayPost(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 43)
+	seedCreativeControllerModelPool(t)
 	router := newCreativeSessionTestRouter(43)
 	router.POST("/creative/relay/v1/chat/completions", middleware.CreativeRequireNonce(), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": true})
@@ -704,6 +708,31 @@ func TestCreativeRelaySessionBrokerRejectsUnavailableModelBeforeRelay(t *testing
 	require.Equal(t, "access_denied", errorObject["type"])
 	require.Equal(t, "model", errorObject["param"])
 	require.Contains(t, errorObject["message"], "model is not available")
+}
+
+func TestCreativeRelaySessionBrokerRejectsWrongModalityBeforeRelay(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 5201)
+	seedCreativeControllerSunoModelPool(t)
+
+	relayReached := false
+	router := newCreativeRelayBrokerTestRouter(t, 5201, func(c *gin.Context) {
+		relayReached = true
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	recorder := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/generations", map[string]any{
+		"model":  "suno_lyrics",
+		"prompt": "draw this with an audio-only model",
+	}, auth.cookies, creativeSameOriginNonceHeaders(auth))
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.False(t, relayReached)
+	errorObject := creativeResponseObject(t, decodeCreativeResponse(t, recorder), "error")
+	require.Equal(t, "access_denied", errorObject["type"])
+	require.Equal(t, "model", errorObject["param"])
+	require.Contains(t, errorObject["message"], "creative endpoint")
 }
 
 func TestCreativeRelaySessionBrokerAcceptsBrowserSessionWithoutAPIKey(t *testing.T) {
@@ -1772,6 +1801,7 @@ func TestCreativeSunoSubmitRejectsBrowserSuppliedModelBeforeRelay(t *testing.T) 
 func TestCreativeSunoSubmitIdempotencyIsScopedByActionAndReplaysPublicTask(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 72)
+	seedCreativeControllerSunoModelPool(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
 	emptyBodyHash := creativeTestPayloadHash([]byte("{}"))
 
@@ -2041,6 +2071,8 @@ func TestCreativeRelayRejectsForbiddenAliasesInHeaderQueryFormAndFileNames(t *te
 func TestCreativeMJSubmitIdempotencyIsScopedAndReplaysPublicTask(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 76)
+	seedCreativeControllerModelPool(t)
+	seedCreativeControllerMJModelPool(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
 	emptyBodyHash := creativeTestPayloadHash([]byte("{}"))
 

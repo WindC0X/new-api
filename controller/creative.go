@@ -174,6 +174,11 @@ func CreativeBootstrap(c *gin.Context) {
 		creativeAPIError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	modelPolicy, modelPolicyVersion, err := creativeEffectiveModelPolicyForRequest(c, models)
+	if err != nil {
+		creativeAPIError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	preference, _, err := model.GetCreativeModelPreference(c.GetInt("id"))
 	if err != nil {
 		creativeAPIError(c, http.StatusInternalServerError, err.Error())
@@ -200,8 +205,10 @@ func CreativeBootstrap(c *gin.Context) {
 			"capabilities": gin.H{
 				"videoRelayEnabled": creativeVideoRelayEnabled.Load(),
 			},
-			"catalogVersion": catalogVersion,
-			"models":         models,
+			"catalogVersion":     catalogVersion,
+			"modelPolicy":        modelPolicy,
+			"modelPolicyVersion": modelPolicyVersion,
+			"models":             models,
 			"assetSync": gin.H{
 				"enabled":        assetSyncEnabled,
 				"disabledReason": assetSyncDisabledReason,

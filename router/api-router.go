@@ -198,6 +198,13 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 		}
 
+		creativeAdminRoute := apiRouter.Group("/creative")
+		creativeAdminRoute.Use(middleware.RootAuth())
+		{
+			creativeAdminRoute.GET("/model-policy", controller.GetCreativeModelPolicy)
+			creativeAdminRoute.PUT("/model-policy", controller.UpdateCreativeModelPolicy)
+		}
+
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
 		customOAuthRoute.Use(middleware.RootAuth())

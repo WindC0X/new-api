@@ -43,6 +43,16 @@ func SelectCreativeModelGroup(userGroup string, modelName string) (string, bool)
 	return "", false
 }
 
+func SelectCreativeModelGroupForModality(userGroup string, modelName string, modality string) (string, bool) {
+	if modality == "" {
+		return SelectCreativeModelGroup(userGroup, modelName)
+	}
+	if !CreativeModelSupportsPolicyModality(modelName, model.GetModelSupportEndpointTypes(modelName), modality) {
+		return "", false
+	}
+	return SelectCreativeModelGroup(userGroup, modelName)
+}
+
 func orderedCreativeUsableGroups(userGroup string) []string {
 	usable := GetUserUsableGroups(userGroup)
 	groups := make([]string, 0, len(usable))

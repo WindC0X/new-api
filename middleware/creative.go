@@ -172,9 +172,14 @@ func CreativeRelaySessionBroker() gin.HandlerFunc {
 			return
 		}
 		if modelName != "" {
-			selectedGroup, ok := service.SelectCreativeModelGroup(userCache.Group, modelName)
+			requiredModality := creativeRelayRequiredPolicyModality(c)
+			selectedGroup, ok := service.SelectCreativeModelGroupForModality(userCache.Group, modelName, requiredModality)
 			if !ok {
-				c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"message": "model is not available for this user", "type": "access_denied", "param": "model"}})
+				message := "model is not available for this user"
+				if requiredModality != "" {
+					message = "model is not available for this creative endpoint"
+				}
+				c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"message": message, "type": "access_denied", "param": "model"}})
 				c.Abort()
 				return
 			}
@@ -184,6 +189,24 @@ func CreativeRelaySessionBroker() gin.HandlerFunc {
 			common.SetContextKey(c, constant.ContextKeyUsingGroup, userCache.Group)
 		}
 		c.Next()
+	}
+}
+
+func creativeRelayRequiredPolicyModality(c *gin.Context) string {
+	path := strings.ToLower(c.Request.URL.Path)
+	switch {
+	case strings.Contains(path, "/images/"):
+		return "image"
+	case strings.Contains(path, "/videos"):
+		return "video"
+	case strings.Contains(path, "/suno/"):
+		return "audio"
+	case strings.Contains(path, "/mj/"):
+		return "image"
+	case strings.Contains(path, "/chat/"), strings.Contains(path, "/responses"):
+		return "text"
+	default:
+		return ""
 	}
 }
 

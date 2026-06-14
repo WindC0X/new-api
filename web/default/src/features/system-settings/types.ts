@@ -39,6 +39,57 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type CreativeModelPolicyRule = {
+  defaults?: Record<string, string>
+  recommended?: Record<string, string[]>
+}
+
+export type CreativeModelPolicy = {
+  version: number
+  global?: CreativeModelPolicyRule
+  groups?: Record<string, CreativeModelPolicyRule>
+}
+
+export type CreativeEffectiveModelPolicy = {
+  version: number
+  defaults?: Record<string, string>
+  recommended?: Record<string, string[]>
+  stale?: CreativeModelPolicyRule
+}
+
+export type CreativeModelPolicyGroupPool = {
+  group: string
+  description?: string
+  models: string[]
+  modelCount: number
+  effectivePolicy: CreativeEffectiveModelPolicy
+}
+
+export type CreativeModelPolicyDiagnostics = {
+  staleByGroup?: Record<string, CreativeModelPolicyRule>
+}
+
+export type CreativeModelPolicyState = {
+  key: string
+  allowedModalities: string[]
+  policy: CreativeModelPolicy
+  policyJSON: string
+  cleanedPolicy: CreativeModelPolicy
+  cleanedPolicyJSON: string
+  modelPools: CreativeModelPolicyGroupPool[]
+  diagnostics: CreativeModelPolicyDiagnostics
+}
+
+export type CreativeModelPolicyResponse = {
+  success: boolean
+  message: string
+  data: CreativeModelPolicyState
+}
+
+export type UpdateCreativeModelPolicyRequest = {
+  policy: CreativeModelPolicy | string | Record<string, unknown>
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string

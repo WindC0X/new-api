@@ -19,9 +19,13 @@ const (
 	creativeImageTaskActionGenerate   = "image.generate"
 )
 
-var creativeImageTaskInsert = func(task *model.Task) error {
-	return task.Insert()
-}
+var (
+	creativeImageTaskInsert = func(task *model.Task) error {
+		return task.Insert()
+	}
+	creativeImageTaskCompleteIdempotency = model.CompleteCreativeVideoIdempotencyScoped
+	creativeImageTaskFinalizeAccepted    = func(c *gin.Context, task *model.Task) error { return nil }
+)
 
 type creativeImageTaskRequest struct {
 	Model      string         `json:"model"`
@@ -167,10 +171,14 @@ func CreativeRelayImageTaskSubmit(c *gin.Context) {
 		return
 	}
 	if requestID := c.GetString(creativeTaskIdempotencyKeyContextKey); requestID != "" {
-		if err := model.CompleteCreativeVideoIdempotencyScoped(c.GetInt("id"), creativeImageTaskIdempotencyScope, requestID, publicTaskID); err != nil {
+		if err := creativeImageTaskCompleteIdempotency(c.GetInt("id"), creativeImageTaskIdempotencyScope, requestID, publicTaskID); err != nil {
 			creativeOpenAIError(c, http.StatusInternalServerError, "failed to complete creative image idempotency")
 			return
 		}
+	}
+	if err := creativeImageTaskFinalizeAccepted(c, task); err != nil {
+		creativeOpenAIError(c, http.StatusInternalServerError, "failed to finalize creative image task")
+		return
 	}
 	c.JSON(http.StatusAccepted, creativeImageTaskDTOFromTask(task))
 }

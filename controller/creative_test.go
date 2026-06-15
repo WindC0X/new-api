@@ -1995,7 +1995,9 @@ func TestCreativeImageTaskAcceptedInsertFailureKeepsIdempotencyGuard(t *testing.
 	seedCreativeControllerUser(t, 805)
 	withCreativeImageTaskMockBinding(t, true, []string{"default"})
 	previousInsert := creativeImageTaskInsert
+	insertCount := 0
 	creativeImageTaskInsert = func(task *model.Task) error {
+		insertCount++
 		return fmt.Errorf("forced insert failure")
 	}
 	t.Cleanup(func() { creativeImageTaskInsert = previousInsert })
@@ -2013,6 +2015,88 @@ func TestCreativeImageTaskAcceptedInsertFailureKeepsIdempotencyGuard(t *testing.
 	var record model.CreativeVideoIdempotency
 	require.NoError(t, model.DB.Where("user_id = ? AND scope = ? AND request_id = ?", 805, creativeImageTaskIdempotencyScope, "image-insert-fail").First(&record).Error)
 	require.NotEmpty(t, record.TaskID)
+
+	replay := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe mock image",
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusConflict, replay.Code)
+	require.Equal(t, 1, insertCount)
+}
+
+func TestCreativeImageTaskAcceptedFinalizeFailuresReplayExistingTask(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 809)
+	withCreativeImageTaskMockBinding(t, true, []string{"default"})
+
+	for _, tt := range []struct {
+		name        string
+		requestID   string
+		installFail func()
+		resetHook   func()
+		wantMessage string
+	}{
+		{
+			name:      "idempotency complete failure",
+			requestID: "image-complete-fail",
+			installFail: func() {
+				creativeImageTaskCompleteIdempotency = func(userID int, scope string, requestID string, taskID string) error {
+					return fmt.Errorf("forced idempotency complete failure")
+				}
+			},
+			resetHook: func() {
+				creativeImageTaskCompleteIdempotency = model.CompleteCreativeVideoIdempotencyScoped
+			},
+			wantMessage: "idempotency",
+		},
+		{
+			name:      "accepted finalize failure",
+			requestID: "image-finalize-fail",
+			installFail: func() {
+				creativeImageTaskFinalizeAccepted = func(c *gin.Context, task *model.Task) error {
+					return fmt.Errorf("forced finalize failure")
+				}
+			},
+			resetHook: func() {
+				creativeImageTaskFinalizeAccepted = func(c *gin.Context, task *model.Task) error { return nil }
+			},
+			wantMessage: "finalize",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.installFail()
+			t.Cleanup(tt.resetHook)
+			router := newCreativeRelayBrokerTestRouter(t, 809, func(c *gin.Context) {
+				t.Fatal("image task route must not use distributed provider relay")
+			})
+			auth := bootstrapCreativeSessionAuth(t, router)
+			headers := creativeSameOriginNonceHeaders(auth)
+			headers["Idempotency-Key"] = tt.requestID
+			body := map[string]any{
+				"model":  "mock:gpt-image-2:preview",
+				"prompt": "safe mock image " + tt.requestID,
+			}
+
+			failed := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, headers)
+			require.Equal(t, http.StatusInternalServerError, failed.Code)
+			require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, failed), "error")["message"], tt.wantMessage)
+
+			var record model.CreativeVideoIdempotency
+			require.NoError(t, model.DB.Where("user_id = ? AND scope = ? AND request_id = ?", 809, creativeImageTaskIdempotencyScope, tt.requestID).First(&record).Error)
+			require.NotEmpty(t, record.TaskID)
+			var taskCount int64
+			require.NoError(t, model.DB.Model(&model.Task{}).Where("user_id = ? AND task_id = ?", 809, record.TaskID).Count(&taskCount).Error)
+			require.Equal(t, int64(1), taskCount)
+
+			tt.resetHook()
+			replay := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, headers)
+			require.Equal(t, http.StatusOK, replay.Code)
+			require.Equal(t, record.TaskID, decodeCreativeResponse(t, replay)["task_id"])
+			require.NoError(t, model.DB.Model(&model.Task{}).Where("user_id = ? AND task_id = ?", 809, record.TaskID).Count(&taskCount).Error)
+			require.Equal(t, int64(1), taskCount)
+		})
+	}
 }
 
 func TestCreativeImageTaskSourceHasNoProviderTransportReferences(t *testing.T) {

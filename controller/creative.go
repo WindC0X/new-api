@@ -1384,7 +1384,7 @@ func creativeSunoForbiddenSubmitKey(key string) bool {
 	return false
 }
 
-func creativeModelsForUser(c *gin.Context) ([]dto.OpenAIModels, string, error) {
+func creativeModelsForUser(c *gin.Context) ([]dto.CreativeModelCatalogItem, string, error) {
 	userCache, err := model.GetUserCache(c.GetInt("id"))
 	if err != nil {
 		return nil, "", err
@@ -1394,15 +1394,222 @@ func creativeModelsForUser(c *gin.Context) ([]dto.OpenAIModels, string, error) {
 	if len(ownerGroups) > 0 {
 		ownerByModel = getPreferredModelOwners(modelNames, ownerGroups)
 	}
-	models := make([]dto.OpenAIModels, 0, len(modelNames))
+	metadataByModel := creativeModelCatalogMetadataByModel()
+	vendorNameByID := creativeModelCatalogVendorNamesByID()
+	models := make([]dto.CreativeModelCatalogItem, 0, len(modelNames))
 	for _, modelName := range modelNames {
-		models = append(models, buildOpenAIModel(modelName, ownerByModel))
+		models = append(models, buildCreativeModelCatalogItem(modelName, ownerByModel, metadataByModel, vendorNameByID))
 	}
 	encoded, err := common.Marshal(models)
 	if err != nil {
 		return nil, "", err
 	}
 	return models, common.Sha1(encoded), nil
+}
+
+func buildCreativeModelCatalogItem(modelName string, ownerByModel map[string]string, metadataByModel map[string]model.Pricing, vendorNameByID map[int]string) dto.CreativeModelCatalogItem {
+	base := buildOpenAIModel(modelName, ownerByModel)
+	item := dto.CreativeModelCatalogItem{
+		Id:                     base.Id,
+		Object:                 base.Object,
+		Created:                base.Created,
+		OwnedBy:                base.OwnedBy,
+		SupportedEndpointTypes: append([]constant.EndpointType(nil), base.SupportedEndpointTypes...),
+		Label:                  base.Id,
+		ShortLabel:             creativeModelCatalogShortLabel(base.Id),
+		ShortCode:              creativeModelCatalogShortCode(base.Id, ""),
+		Type:                   creativeModelCatalogType(base.Id, base.SupportedEndpointTypes, nil),
+	}
+	item.Modality = item.Type
+	item.Vendor = creativeSafeCatalogString(base.OwnedBy, 64)
+
+	if metadata, ok := metadataByModel[modelName]; ok {
+		if label := creativeSafeCatalogString(metadata.ModelName, 128); label != "" {
+			item.Label = label
+		}
+		if description := creativeSafeCatalogDescription(metadata.Description); description != "" {
+			item.Description = description
+		}
+		tags := creativeModelCatalogTags(metadata.Tags)
+		if len(tags) > 0 {
+			item.Tags = tags
+			item.Type = creativeModelCatalogType(base.Id, base.SupportedEndpointTypes, tags)
+			item.Modality = item.Type
+		}
+		if vendor := creativeSafeCatalogString(vendorNameByID[metadata.VendorID], 64); vendor != "" {
+			item.Vendor = vendor
+		}
+		if item.Type == "" {
+			item.Type = creativeModelCatalogType(base.Id, base.SupportedEndpointTypes, tags)
+			item.Modality = item.Type
+		}
+	}
+	if item.ShortLabel == "" {
+		item.ShortLabel = creativeModelCatalogShortLabel(item.Label)
+	}
+	item.ShortCode = creativeModelCatalogShortCode(modelName, item.Type)
+	return item
+}
+
+func creativeModelCatalogMetadataByModel() map[string]model.Pricing {
+	metadataByModel := make(map[string]model.Pricing)
+	for _, pricing := range model.GetPricing() {
+		metadataByModel[pricing.ModelName] = pricing
+	}
+	return metadataByModel
+}
+
+func creativeModelCatalogVendorNamesByID() map[int]string {
+	vendorNameByID := make(map[int]string)
+	for _, vendor := range model.GetVendors() {
+		vendorNameByID[vendor.ID] = vendor.Name
+	}
+	return vendorNameByID
+}
+
+func creativeSafeCatalogString(value string, maxLen int) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if maxLen > 0 && len(value) > maxLen {
+		value = value[:maxLen]
+	}
+	if creativeCatalogStringLooksSensitive(value) {
+		return ""
+	}
+	return value
+}
+
+func creativeSafeCatalogDescription(value string) string {
+	return creativeSafeCatalogString(value, 320)
+}
+
+func creativeCatalogStringLooksSensitive(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return false
+	}
+	compact := strings.NewReplacer("_", "", "-", "", " ", "", ".", "").Replace(lower)
+	for _, fragment := range []string{
+		"apikey",
+		"baseurl",
+		"channelid",
+		"selectedkey",
+		"ownerid",
+		"userid",
+		"mjapisecret",
+		"notifyhook",
+	} {
+		if strings.Contains(compact, fragment) {
+			return true
+		}
+	}
+	for _, fragment := range []string{
+		"authorization",
+		"bearer ",
+		"secret",
+		"token",
+		"password",
+		"callback",
+		"webhook",
+		"notify_hook",
+		"notify-hook",
+		"notify hook",
+	} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	if compact == "owner" || compact == "user" {
+		return true
+	}
+	return strings.Contains(lower, "sk-") ||
+		strings.Contains(lower, "http://") ||
+		strings.Contains(lower, "https://")
+}
+
+func creativeModelCatalogTags(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '|' || r == '\n' || r == '\t'
+	})
+	tags := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		tag := strings.ToLower(creativeSafeCatalogString(part, 48))
+		if tag == "" {
+			continue
+		}
+		tag = strings.ReplaceAll(tag, " ", "-")
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	return tags
+}
+
+func creativeModelCatalogType(modelName string, endpoints []constant.EndpointType, tags []string) string {
+	hints := strings.ToLower(modelName + " " + strings.Join(tags, " "))
+	for _, endpoint := range endpoints {
+		hints += " " + strings.ToLower(string(endpoint))
+	}
+	switch {
+	case strings.Contains(hints, "audio") || strings.Contains(hints, "music") || strings.Contains(hints, "suno") || strings.Contains(hints, "lyrics") || strings.Contains(hints, "speech"):
+		return "audio"
+	case strings.Contains(hints, "video") || strings.Contains(hints, "sora") || strings.Contains(hints, "veo") || strings.Contains(hints, "kling") || strings.Contains(hints, "seedance") || strings.Contains(hints, "runway") || strings.Contains(hints, "pika"):
+		return "video"
+	case strings.Contains(hints, "image") || strings.Contains(hints, "images") || strings.Contains(hints, "midjourney") || strings.Contains(hints, "mj_") || strings.Contains(hints, "seedream") || strings.Contains(hints, "flux") || strings.Contains(hints, "banana") || strings.Contains(hints, "dall-e") || strings.Contains(hints, "cogview"):
+		return "image"
+	default:
+		return "text"
+	}
+}
+
+func creativeModelCatalogShortLabel(modelName string) string {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return ""
+	}
+	if len(modelName) <= 32 {
+		return modelName
+	}
+	return modelName[:29] + "..."
+}
+
+func creativeModelCatalogShortCode(modelName string, modelType string) string {
+	parts := strings.FieldsFunc(modelName, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') &&
+			!(r >= 'A' && r <= 'Z') &&
+			!(r >= '0' && r <= '9')
+	})
+	code := strings.Builder{}
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		for _, r := range strings.ToLower(part) {
+			code.WriteRune(r)
+			break
+		}
+		if code.Len() >= 6 {
+			break
+		}
+	}
+	if code.Len() > 0 {
+		return code.String()
+	}
+	switch modelType {
+	case "audio":
+		return "aud"
+	case "video":
+		return "vid"
+	case "text":
+		return "txt"
+	default:
+		return "img"
+	}
 }
 
 func creativeRequireSession(c *gin.Context) bool {

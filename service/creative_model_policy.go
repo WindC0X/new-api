@@ -53,11 +53,12 @@ type CreativeModelPolicyDiagnostics struct {
 }
 
 type CreativeModelPolicyGroupPool struct {
-	Group           string                       `json:"group"`
-	Description     string                       `json:"description,omitempty"`
-	Models          []string                     `json:"models"`
-	ModelCount      int                          `json:"modelCount"`
-	EffectivePolicy CreativeEffectiveModelPolicy `json:"effectivePolicy"`
+	Group            string                       `json:"group"`
+	Description      string                       `json:"description,omitempty"`
+	Models           []string                     `json:"models"`
+	ModelsByModality map[string][]string          `json:"modelsByModality,omitempty"`
+	ModelCount       int                          `json:"modelCount"`
+	EffectivePolicy  CreativeEffectiveModelPolicy `json:"effectivePolicy"`
 }
 
 type CreativeModelPolicyAdminState struct {
@@ -582,14 +583,31 @@ func buildCreativeModelPolicyGroupPools(policy CreativeModelPolicy) ([]CreativeM
 			diagnostics.StaleByGroup[group] = *effective.Stale
 		}
 		modelPools = append(modelPools, CreativeModelPolicyGroupPool{
-			Group:           group,
-			Description:     usableGroupDescriptions[group],
-			Models:          models,
-			ModelCount:      len(models),
-			EffectivePolicy: effective,
+			Group:            group,
+			Description:      usableGroupDescriptions[group],
+			Models:           models,
+			ModelsByModality: creativeModelPolicyModelsByModality(models),
+			ModelCount:       len(models),
+			EffectivePolicy:  effective,
 		})
 	}
 	return modelPools, poolsByGroup, diagnostics
+}
+
+func creativeModelPolicyModelsByModality(modelIDs []string) map[string][]string {
+	availableModels := creativeModelPolicyAvailableModelsFromIDs(modelIDs)
+	modelsByModality := make(map[string][]string, len(creativeModelPolicyModalities))
+	for _, modality := range creativeModelPolicyModalities {
+		modelsByModality[modality] = make([]string, 0)
+	}
+	for _, item := range availableModels {
+		for _, modality := range creativeModelPolicyModalities {
+			if CreativeModelSupportsPolicyModality(item.ID, item.SupportedEndpointTypes, modality) {
+				modelsByModality[modality] = append(modelsByModality[modality], item.ID)
+			}
+		}
+	}
+	return modelsByModality
 }
 
 func creativeModelPolicyAdminGroups(policy CreativeModelPolicy) []string {
@@ -806,7 +824,7 @@ func creativeModelPolicyForbiddenKey(key string) bool {
 	if normalized == "" {
 		return false
 	}
-	if strings.HasPrefix(normalized, "upstream") || strings.Contains(normalized, "channel") || strings.Contains(normalized, "provider") || strings.Contains(normalized, "callback") || strings.Contains(normalized, "webhook") || strings.Contains(normalized, "notifyhook") || strings.Contains(normalized, "baseurl") || strings.HasPrefix(normalized, "owner") || strings.HasPrefix(normalized, "user") || strings.Contains(normalized, "routing") || strings.Contains(normalized, "routegroup") || strings.Contains(normalized, "groupoverride") {
+	if strings.HasPrefix(normalized, "upstream") || strings.Contains(normalized, "channel") || strings.Contains(normalized, "provider") || strings.Contains(normalized, "callback") || strings.Contains(normalized, "webhook") || strings.Contains(normalized, "notify") || strings.Contains(normalized, "notificat") || strings.Contains(normalized, "baseurl") || strings.Contains(normalized, "owner") || strings.Contains(normalized, "user") || strings.Contains(normalized, "routing") || strings.Contains(normalized, "routegroup") || strings.Contains(normalized, "groupoverride") {
 		return true
 	}
 	switch normalized {

@@ -1,6 +1,6 @@
 {
   "version": "0.9.6",
-  "timestamp": "2026-06-14T01:30:02.433Z",
+  "timestamp": "2026-06-15T03:15:46.413Z",
   "defaults": [
     "tool-windows",
     "runtime-static-assets"
@@ -8,1120 +8,1108 @@
   "groups": {
     "ai-chat": [
       {
-        "url": "/assets/ai-chat-BB-1jJe1.css",
+        "url": "/creative/assets/ai-chat-BAalrqTN.js",
+        "revision": "4bf8a85c"
+      },
+      {
+        "url": "/creative/assets/ai-chat-BB-1jJe1.css",
         "revision": "97f5e9dc"
       },
       {
-        "url": "/assets/ai-chat-DhMiveZW.js",
-        "revision": "43daa736"
+        "url": "/creative/assets/ai-generation-preferences-service-8bY0Rnpa.js",
+        "revision": "9086825b"
       },
       {
-        "url": "/assets/ai-generation-preferences-service-I4RNNpKo.js",
-        "revision": "cefcbcc1"
+        "url": "/creative/assets/batch-image-generation-Cl7GRiGy.js",
+        "revision": "0b5d34cc"
       },
       {
-        "url": "/assets/batch-image-generation-CtaUrbIl.js",
-        "revision": "7152208c"
-      },
-      {
-        "url": "/assets/batch-image-generation-DgBXF-sY.css",
+        "url": "/creative/assets/batch-image-generation-DgBXF-sY.css",
         "revision": "2a45636a"
       },
       {
-        "url": "/assets/CanvasAudioPlayer-Cy0ehpYi.js",
-        "revision": "5356126f"
+        "url": "/creative/assets/CanvasAudioPlayer-BE55_I-I.js",
+        "revision": "d58d1c22"
       },
       {
-        "url": "/assets/CanvasAudioPlayer-QLXKZ5KP.css",
+        "url": "/creative/assets/CanvasAudioPlayer-QLXKZ5KP.css",
         "revision": "8f08351c"
       },
       {
-        "url": "/assets/character-Bo9jcTNu.css",
+        "url": "/creative/assets/character-Bo9jcTNu.css",
         "revision": "ae5a11b8"
       },
       {
-        "url": "/assets/clipper-D1ZIDHd9.js",
+        "url": "/creative/assets/clipper-D1ZIDHd9.js",
         "revision": "2e4f833e"
       },
       {
-        "url": "/assets/DeferredAIInputBar-BWaS5I7y.js",
-        "revision": "cee163a4"
+        "url": "/creative/assets/DeferredAIInputBar-Cat8Iik-.js",
+        "revision": "6f75bd4b"
       },
       {
-        "url": "/assets/DeferredAIInputBar-CVXfAbVO.css",
+        "url": "/creative/assets/DeferredAIInputBar-CVXfAbVO.css",
         "revision": "4c7ee753"
       },
       {
-        "url": "/assets/DrawnixDeferredFeatures-DfbU8rT5.js",
-        "revision": "480eccd9"
+        "url": "/creative/assets/DrawnixDeferredFeatures-CfZ1YzDA.js",
+        "revision": "398e3400"
       },
       {
-        "url": "/assets/index-BYyWCcUV.js",
-        "revision": "1e074fca"
+        "url": "/creative/assets/index-BAamkGkI.js",
+        "revision": "b44d10ea"
       },
       {
-        "url": "/assets/index-CKs7wIZf.js",
-        "revision": "d2a56959"
+        "url": "/creative/assets/index-BfaFsiCo.js",
+        "revision": "4dd4a686"
       },
       {
-        "url": "/assets/index-CNf6xI65.js",
-        "revision": "869667b1"
+        "url": "/creative/assets/index-D1T9PsdW.js",
+        "revision": "6f7eedab"
       },
       {
-        "url": "/assets/index-mZ0iCPPk.js",
-        "revision": "e1809c6e"
+        "url": "/creative/assets/index-DDPYYZP3.js",
+        "revision": "276bceb8"
       },
       {
-        "url": "/assets/markdown-to-drawnix-CC9aXq_-.js",
-        "revision": "506323e1"
+        "url": "/creative/assets/markdown-to-drawnix-Dx27IDNE.js",
+        "revision": "257a3146"
       },
       {
-        "url": "/assets/MediaLibrarySidebar-CNCXXhfY.css",
+        "url": "/creative/assets/MediaLibrarySidebar-CNCXXhfY.css",
         "revision": "45bb0ebe"
       },
       {
-        "url": "/assets/mermaid-to-drawnix-DJv9SBnU.js",
-        "revision": "1d398a14"
+        "url": "/creative/assets/mermaid-to-drawnix-B0WgkQYX.js",
+        "revision": "aa5d0058"
       },
       {
-        "url": "/assets/mj-params-M-7csAp7.js",
+        "url": "/creative/assets/mj-params-M-7csAp7.js",
         "revision": "76a86778"
       },
       {
-        "url": "/assets/model-benchmark-launcher-C-1wi4on.js",
-        "revision": "f1ab73be"
+        "url": "/creative/assets/model-benchmark-launcher-Coovj9xn.js",
+        "revision": "9d260ebc"
       },
       {
-        "url": "/assets/ParametersDropdown-BE58BbHs.css",
+        "url": "/creative/assets/ParametersDropdown-BE58BbHs.css",
         "revision": "778a003b"
       },
       {
-        "url": "/assets/ParametersDropdown-BUA9kttT.js",
-        "revision": "5c01b42a"
+        "url": "/creative/assets/ParametersDropdown-BwLQwyX3.js",
+        "revision": "f86122c6"
       },
       {
-        "url": "/assets/photo-wall-splitter-C8hvM3PM.js",
-        "revision": "173aa9be"
+        "url": "/creative/assets/photo-wall-splitter-Q-AzAyrb.js",
+        "revision": "b09fd54d"
       },
       {
-        "url": "/assets/prompt-utils-XlGO0qIC.js",
-        "revision": "1f90015c"
+        "url": "/creative/assets/prompt-utils-3_dk8gkl.js",
+        "revision": "b9e838fa"
       },
       {
-        "url": "/assets/ResizableDivider-ClzYJk-6.css",
+        "url": "/creative/assets/ResizableDivider-ClzYJk-6.css",
         "revision": "99c24be4"
       },
       {
-        "url": "/assets/ResizableDivider-FzdJQsCw.js",
-        "revision": "63ce8863"
+        "url": "/creative/assets/ResizableDivider-poMotvWD.js",
+        "revision": "63425c66"
       },
       {
-        "url": "/assets/settings-dialog-CqexarGK.js",
-        "revision": "7f3637fa"
+        "url": "/creative/assets/settings-dialog-_L_6P09e.js",
+        "revision": "2fa88007"
       },
       {
-        "url": "/assets/settings-dialog-Dcm1G4kx.css",
+        "url": "/creative/assets/settings-dialog-Dcm1G4kx.css",
         "revision": "e29060f9"
       },
       {
-        "url": "/assets/skill-dsl-parser-Cx9_KbTw.js",
-        "revision": "3421b297"
+        "url": "/creative/assets/skill-dsl-parser-mWOGOCQJ.js",
+        "revision": "4f99370c"
       },
       {
-        "url": "/assets/startup-app-CARGtTpt.js",
-        "revision": "e348490b"
+        "url": "/creative/assets/startup-app-DIRBIlUs.js",
+        "revision": "8a8b9f7a"
       },
       {
-        "url": "/assets/startup-app-DxC2basr.css",
+        "url": "/creative/assets/startup-app-DxC2basr.css",
         "revision": "a69b85e4"
       },
       {
-        "url": "/assets/startup-runtime-Di8qk2Fd.js",
+        "url": "/creative/assets/startup-runtime-Di8qk2Fd.js",
         "revision": "aa8ca7d9"
       },
       {
-        "url": "/assets/TaskQueuePanel-BdCdn8gn.js",
-        "revision": "f0e36808"
+        "url": "/creative/assets/TaskQueuePanel-Bqg47IwA.js",
+        "revision": "ed6c99e6"
       },
       {
-        "url": "/assets/ttd-dialog-DaiCKXiC.css",
+        "url": "/creative/assets/ttd-dialog-DaiCKXiC.css",
         "revision": "77f9e727"
       },
       {
-        "url": "/assets/ttd-dialog-G4SVZcMU.js",
-        "revision": "f380e71a"
+        "url": "/creative/assets/ttd-dialog-DgrFPIo4.js",
+        "revision": "51aea74e"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-DYBqLOL7.js",
-        "revision": "9ec8c479"
+        "url": "/creative/assets/ttd-dialog-submit-shortcut-BBbesVaP.js",
+        "revision": "b8f4510d"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
+        "url": "/creative/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
         "revision": "d2575a60"
       },
       {
-        "url": "/assets/useCharacters-DRBoWvvj.css",
+        "url": "/creative/assets/useCharacters-DRBoWvvj.css",
         "revision": "5dc00e5f"
       },
       {
-        "url": "/assets/useCharacters-wZMsg65t.js",
-        "revision": "2885a146"
+        "url": "/creative/assets/useCharacters-GnNZ2o0z.js",
+        "revision": "58c83586"
       },
       {
-        "url": "/assets/useMediaViewer-CFU6nd8d.js",
-        "revision": "e812c74b"
+        "url": "/creative/assets/useMediaViewer-DcU0Nday.js",
+        "revision": "aa54437c"
       },
       {
-        "url": "/assets/useWorkflowSubmission-BvCmA9BC.js",
-        "revision": "73f80fa0"
+        "url": "/creative/assets/useWorkflowSubmission-B3f1blSM.js",
+        "revision": "12a82a70"
       },
       {
-        "url": "/assets/web-vitals-DcvjKPr-.js",
+        "url": "/creative/assets/web-vitals-DcvjKPr-.js",
         "revision": "ee79e5ca"
       },
       {
-        "url": "/assets/winbox.bundle.min-CoRPjCs5.js",
+        "url": "/creative/assets/winbox.bundle.min-CoRPjCs5.js",
         "revision": "040c7789"
       },
       {
-        "url": "/assets/workflow-submission-service-BGSA5j3P.js",
-        "revision": "a7e8697d"
+        "url": "/creative/assets/workflow-submission-service-B2mtZFQX.js",
+        "revision": "669655e5"
       }
     ],
     "tool-windows": [
       {
-        "url": "/assets/ai-generation-preferences-service-I4RNNpKo.js",
-        "revision": "cefcbcc1"
+        "url": "/creative/assets/ai-generation-preferences-service-8bY0Rnpa.js",
+        "revision": "9086825b"
       },
       {
-        "url": "/assets/batch-image-generation-CtaUrbIl.js",
-        "revision": "7152208c"
+        "url": "/creative/assets/batch-image-generation-Cl7GRiGy.js",
+        "revision": "0b5d34cc"
       },
       {
-        "url": "/assets/batch-image-generation-DgBXF-sY.css",
+        "url": "/creative/assets/batch-image-generation-DgBXF-sY.css",
         "revision": "2a45636a"
       },
       {
-        "url": "/assets/CanvasAudioPlayer-Cy0ehpYi.js",
-        "revision": "5356126f"
+        "url": "/creative/assets/CanvasAudioPlayer-BE55_I-I.js",
+        "revision": "d58d1c22"
       },
       {
-        "url": "/assets/CanvasAudioPlayer-QLXKZ5KP.css",
+        "url": "/creative/assets/CanvasAudioPlayer-QLXKZ5KP.css",
         "revision": "8f08351c"
       },
       {
-        "url": "/assets/character-Bo9jcTNu.css",
+        "url": "/creative/assets/character-Bo9jcTNu.css",
         "revision": "ae5a11b8"
       },
       {
-        "url": "/assets/clipper-D1ZIDHd9.js",
+        "url": "/creative/assets/clipper-D1ZIDHd9.js",
         "revision": "2e4f833e"
       },
       {
-        "url": "/assets/ComicCreator-DjAR34b-.css",
+        "url": "/creative/assets/ComicCreator-A1OKlVee.js",
+        "revision": "f5185c0e"
+      },
+      {
+        "url": "/creative/assets/ComicCreator-DjAR34b-.css",
         "revision": "b43ffa0b"
       },
       {
-        "url": "/assets/ComicCreator-pKzUaaCw.js",
-        "revision": "a387ff9a"
+        "url": "/creative/assets/DeferredAIInputBar-Cat8Iik-.js",
+        "revision": "6f75bd4b"
       },
       {
-        "url": "/assets/DeferredAIInputBar-BWaS5I7y.js",
-        "revision": "cee163a4"
-      },
-      {
-        "url": "/assets/DeferredAIInputBar-CVXfAbVO.css",
+        "url": "/creative/assets/DeferredAIInputBar-CVXfAbVO.css",
         "revision": "4c7ee753"
       },
       {
-        "url": "/assets/DrawnixDeferredFeatures-DfbU8rT5.js",
-        "revision": "480eccd9"
+        "url": "/creative/assets/DrawnixDeferredFeatures-CfZ1YzDA.js",
+        "revision": "398e3400"
       },
       {
-        "url": "/assets/html2canvas.esm-QH1iLAAe.js",
+        "url": "/creative/assets/html2canvas.esm-QH1iLAAe.js",
         "revision": "4f0dcfc6"
       },
       {
-        "url": "/assets/index-BYyWCcUV.js",
-        "revision": "1e074fca"
+        "url": "/creative/assets/index-BAamkGkI.js",
+        "revision": "b44d10ea"
       },
       {
-        "url": "/assets/index-CKs7wIZf.js",
-        "revision": "d2a56959"
+        "url": "/creative/assets/index-BfaFsiCo.js",
+        "revision": "4dd4a686"
       },
       {
-        "url": "/assets/index-CNf6xI65.js",
-        "revision": "869667b1"
+        "url": "/creative/assets/index-D1T9PsdW.js",
+        "revision": "6f7eedab"
       },
       {
-        "url": "/assets/index-mZ0iCPPk.js",
-        "revision": "e1809c6e"
+        "url": "/creative/assets/index-DDPYYZP3.js",
+        "revision": "276bceb8"
       },
       {
-        "url": "/assets/index.es-BK0e21Wu.js",
-        "revision": "1e1c2ef2"
+        "url": "/creative/assets/index.es-CMr7j24l.js",
+        "revision": "584ab163"
       },
       {
-        "url": "/assets/jspdf.es.min-Bquh6xTq.js",
-        "revision": "f599c017"
+        "url": "/creative/assets/jspdf.es.min-BfbJYNqA.js",
+        "revision": "7e10559a"
       },
       {
-        "url": "/assets/KnowledgeBaseContent-BY8zZdam.js",
-        "revision": "09d34948"
+        "url": "/creative/assets/KnowledgeBaseContent-CCc4jehz.js",
+        "revision": "ffb77b4b"
       },
       {
-        "url": "/assets/KnowledgeBaseContent-CsR955E7.css",
+        "url": "/creative/assets/KnowledgeBaseContent-CsR955E7.css",
         "revision": "66bd1b53"
       },
       {
-        "url": "/assets/markdown-to-drawnix-CC9aXq_-.js",
-        "revision": "506323e1"
+        "url": "/creative/assets/markdown-to-drawnix-Dx27IDNE.js",
+        "revision": "257a3146"
       },
       {
-        "url": "/assets/MediaLibrarySidebar-CNCXXhfY.css",
+        "url": "/creative/assets/MediaLibrarySidebar-CNCXXhfY.css",
         "revision": "45bb0ebe"
       },
       {
-        "url": "/assets/mermaid-to-drawnix-DJv9SBnU.js",
-        "revision": "1d398a14"
+        "url": "/creative/assets/mermaid-to-drawnix-B0WgkQYX.js",
+        "revision": "aa5d0058"
       },
       {
-        "url": "/assets/mj-params-M-7csAp7.js",
+        "url": "/creative/assets/mj-params-M-7csAp7.js",
         "revision": "76a86778"
       },
       {
-        "url": "/assets/model-benchmark-launcher-C-1wi4on.js",
-        "revision": "f1ab73be"
+        "url": "/creative/assets/model-benchmark-launcher-Coovj9xn.js",
+        "revision": "9d260ebc"
       },
       {
-        "url": "/assets/ModelBenchmarkWorkbench-CC2lNbTT.css",
+        "url": "/creative/assets/ModelBenchmarkWorkbench-CC2lNbTT.css",
         "revision": "f4a762d2"
       },
       {
-        "url": "/assets/ModelBenchmarkWorkbench-D2vNzUlA.js",
-        "revision": "1a205b30"
+        "url": "/creative/assets/ModelBenchmarkWorkbench-DRt6x2fE.js",
+        "revision": "12b5d587"
       },
       {
-        "url": "/assets/MusicAnalyzer-DHa6anV5.css",
+        "url": "/creative/assets/MusicAnalyzer-Ck2EvQ_O.js",
+        "revision": "95105d43"
+      },
+      {
+        "url": "/creative/assets/MusicAnalyzer-DHa6anV5.css",
         "revision": "ef2eecd3"
       },
       {
-        "url": "/assets/MusicAnalyzer-TwSrPkvz.js",
-        "revision": "880ea064"
-      },
-      {
-        "url": "/assets/MVCreator-CDzLxh5R.css",
+        "url": "/creative/assets/MVCreator-CDzLxh5R.css",
         "revision": "de987f07"
       },
       {
-        "url": "/assets/MVCreator-CQn6H_2r.js",
-        "revision": "6613fe30"
+        "url": "/creative/assets/MVCreator-HPzLQjCi.js",
+        "revision": "eb9afc67"
       },
       {
-        "url": "/assets/ParametersDropdown-BE58BbHs.css",
+        "url": "/creative/assets/ParametersDropdown-BE58BbHs.css",
         "revision": "778a003b"
       },
       {
-        "url": "/assets/ParametersDropdown-BUA9kttT.js",
-        "revision": "5c01b42a"
+        "url": "/creative/assets/ParametersDropdown-BwLQwyX3.js",
+        "revision": "f86122c6"
       },
       {
-        "url": "/assets/photo-wall-splitter-C8hvM3PM.js",
-        "revision": "173aa9be"
+        "url": "/creative/assets/photo-wall-splitter-Q-AzAyrb.js",
+        "revision": "b09fd54d"
       },
       {
-        "url": "/assets/prompt-utils-XlGO0qIC.js",
-        "revision": "1f90015c"
+        "url": "/creative/assets/prompt-utils-3_dk8gkl.js",
+        "revision": "b9e838fa"
       },
       {
-        "url": "/assets/PromptHistoryTool-BH7hq916.css",
+        "url": "/creative/assets/PromptHistoryTool-BH7hq916.css",
         "revision": "5043c6c0"
       },
       {
-        "url": "/assets/PromptHistoryTool-DoZEGHSh.js",
-        "revision": "5ab6f032"
+        "url": "/creative/assets/PromptHistoryTool-DXJQrtJJ.js",
+        "revision": "3f9a7247"
       },
       {
-        "url": "/assets/ResizableDivider-ClzYJk-6.css",
+        "url": "/creative/assets/ResizableDivider-ClzYJk-6.css",
         "revision": "99c24be4"
       },
       {
-        "url": "/assets/ResizableDivider-FzdJQsCw.js",
-        "revision": "63ce8863"
+        "url": "/creative/assets/ResizableDivider-poMotvWD.js",
+        "revision": "63425c66"
       },
       {
-        "url": "/assets/settings-dialog-CqexarGK.js",
-        "revision": "7f3637fa"
+        "url": "/creative/assets/settings-dialog-_L_6P09e.js",
+        "revision": "2fa88007"
       },
       {
-        "url": "/assets/settings-dialog-Dcm1G4kx.css",
+        "url": "/creative/assets/settings-dialog-Dcm1G4kx.css",
         "revision": "e29060f9"
       },
       {
-        "url": "/assets/skill-dsl-parser-Cx9_KbTw.js",
-        "revision": "3421b297"
+        "url": "/creative/assets/skill-dsl-parser-mWOGOCQJ.js",
+        "revision": "4f99370c"
       },
       {
-        "url": "/assets/startup-app-CARGtTpt.js",
-        "revision": "e348490b"
+        "url": "/creative/assets/startup-app-DIRBIlUs.js",
+        "revision": "8a8b9f7a"
       },
       {
-        "url": "/assets/startup-app-DxC2basr.css",
+        "url": "/creative/assets/startup-app-DxC2basr.css",
         "revision": "a69b85e4"
       },
       {
-        "url": "/assets/startup-runtime-Di8qk2Fd.js",
+        "url": "/creative/assets/startup-runtime-Di8qk2Fd.js",
         "revision": "aa8ca7d9"
       },
       {
-        "url": "/assets/task-sync-DbfaoKRg.js",
-        "revision": "de79328b"
+        "url": "/creative/assets/task-sync-BeP76Jdh.js",
+        "revision": "6679d353"
       },
       {
-        "url": "/assets/TaskQueuePanel-BdCdn8gn.js",
-        "revision": "f0e36808"
+        "url": "/creative/assets/TaskQueuePanel-Bqg47IwA.js",
+        "revision": "ed6c99e6"
       },
       {
-        "url": "/assets/tool-windows-C3C0gINy.js",
-        "revision": "fa9da039"
-      },
-      {
-        "url": "/assets/tool-windows-CegtMid1.css",
+        "url": "/creative/assets/tool-windows-CegtMid1.css",
         "revision": "bada06d8"
       },
       {
-        "url": "/assets/ttd-dialog-DaiCKXiC.css",
+        "url": "/creative/assets/tool-windows-CSgjVGwj.js",
+        "revision": "12af3732"
+      },
+      {
+        "url": "/creative/assets/ttd-dialog-DaiCKXiC.css",
         "revision": "77f9e727"
       },
       {
-        "url": "/assets/ttd-dialog-G4SVZcMU.js",
-        "revision": "f380e71a"
+        "url": "/creative/assets/ttd-dialog-DgrFPIo4.js",
+        "revision": "51aea74e"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-DYBqLOL7.js",
-        "revision": "9ec8c479"
+        "url": "/creative/assets/ttd-dialog-submit-shortcut-BBbesVaP.js",
+        "revision": "b8f4510d"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
+        "url": "/creative/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
         "revision": "d2575a60"
       },
       {
-        "url": "/assets/useCharacters-DRBoWvvj.css",
+        "url": "/creative/assets/useCharacters-DRBoWvvj.css",
         "revision": "5dc00e5f"
       },
       {
-        "url": "/assets/useCharacters-wZMsg65t.js",
-        "revision": "2885a146"
+        "url": "/creative/assets/useCharacters-GnNZ2o0z.js",
+        "revision": "58c83586"
       },
       {
-        "url": "/assets/useMediaViewer-CFU6nd8d.js",
-        "revision": "e812c74b"
+        "url": "/creative/assets/useMediaViewer-DcU0Nday.js",
+        "revision": "aa54437c"
       },
       {
-        "url": "/assets/useWorkflowSubmission-BvCmA9BC.js",
-        "revision": "73f80fa0"
+        "url": "/creative/assets/useWorkflowSubmission-B3f1blSM.js",
+        "revision": "12a82a70"
       },
       {
-        "url": "/assets/video-recovery-service-DMAuMAIA.js",
-        "revision": "c59441de"
+        "url": "/creative/assets/video-recovery-service-8k9IZwe7.js",
+        "revision": "7b835a12"
       },
       {
-        "url": "/assets/VideoAnalyzer-BsBfn7c-.js",
-        "revision": "efcd42cc"
+        "url": "/creative/assets/VideoAnalyzer-Dt38R2yz.js",
+        "revision": "0aa28074"
       },
       {
-        "url": "/assets/VideoAnalyzer-DvF56ngj.css",
+        "url": "/creative/assets/VideoAnalyzer-DvF56ngj.css",
         "revision": "cb9f5b00"
       },
       {
-        "url": "/assets/VideoAnalyzer-Dvtiv9S2.js",
-        "revision": "0dc3b86f"
+        "url": "/creative/assets/VideoAnalyzer-QapDkYOh.js",
+        "revision": "f1dd6a25"
       },
       {
-        "url": "/assets/web-vitals-DcvjKPr-.js",
+        "url": "/creative/assets/web-vitals-DcvjKPr-.js",
         "revision": "ee79e5ca"
       },
       {
-        "url": "/assets/workflow-generation-utils-CPcFdNt6.js",
-        "revision": "2930bbbb"
+        "url": "/creative/assets/workflow-generation-utils-Cf2rx8Aw.js",
+        "revision": "79b79e62"
       },
       {
-        "url": "/assets/workflow-submission-service-BGSA5j3P.js",
-        "revision": "a7e8697d"
+        "url": "/creative/assets/workflow-submission-service-B2mtZFQX.js",
+        "revision": "669655e5"
       }
     ],
     "diagram-engines": [
       {
-        "url": "/assets/ai-generation-preferences-service-I4RNNpKo.js",
-        "revision": "cefcbcc1"
+        "url": "/creative/assets/ai-generation-preferences-service-8bY0Rnpa.js",
+        "revision": "9086825b"
       },
       {
-        "url": "/assets/batch-image-generation-CtaUrbIl.js",
-        "revision": "7152208c"
+        "url": "/creative/assets/batch-image-generation-Cl7GRiGy.js",
+        "revision": "0b5d34cc"
       },
       {
-        "url": "/assets/batch-image-generation-DgBXF-sY.css",
+        "url": "/creative/assets/batch-image-generation-DgBXF-sY.css",
         "revision": "2a45636a"
       },
       {
-        "url": "/assets/CanvasAudioPlayer-Cy0ehpYi.js",
-        "revision": "5356126f"
+        "url": "/creative/assets/CanvasAudioPlayer-BE55_I-I.js",
+        "revision": "d58d1c22"
       },
       {
-        "url": "/assets/CanvasAudioPlayer-QLXKZ5KP.css",
+        "url": "/creative/assets/CanvasAudioPlayer-QLXKZ5KP.css",
         "revision": "8f08351c"
       },
       {
-        "url": "/assets/character-Bo9jcTNu.css",
+        "url": "/creative/assets/character-Bo9jcTNu.css",
         "revision": "ae5a11b8"
       },
       {
-        "url": "/assets/clipper-D1ZIDHd9.js",
+        "url": "/creative/assets/clipper-D1ZIDHd9.js",
         "revision": "2e4f833e"
       },
       {
-        "url": "/assets/DeferredAIInputBar-BWaS5I7y.js",
-        "revision": "cee163a4"
+        "url": "/creative/assets/DeferredAIInputBar-Cat8Iik-.js",
+        "revision": "6f75bd4b"
       },
       {
-        "url": "/assets/DeferredAIInputBar-CVXfAbVO.css",
+        "url": "/creative/assets/DeferredAIInputBar-CVXfAbVO.css",
         "revision": "4c7ee753"
       },
       {
-        "url": "/assets/diagram-engines-DhnntvaL.js",
-        "revision": "90d94bb7"
+        "url": "/creative/assets/diagram-engines-DLya7jah.js",
+        "revision": "b47b64e6"
       },
       {
-        "url": "/assets/DrawnixDeferredFeatures-DfbU8rT5.js",
-        "revision": "480eccd9"
+        "url": "/creative/assets/DrawnixDeferredFeatures-CfZ1YzDA.js",
+        "revision": "398e3400"
       },
       {
-        "url": "/assets/index-BYyWCcUV.js",
-        "revision": "1e074fca"
+        "url": "/creative/assets/index-BAamkGkI.js",
+        "revision": "b44d10ea"
       },
       {
-        "url": "/assets/index-CKs7wIZf.js",
-        "revision": "d2a56959"
+        "url": "/creative/assets/index-BfaFsiCo.js",
+        "revision": "4dd4a686"
       },
       {
-        "url": "/assets/index-CNf6xI65.js",
-        "revision": "869667b1"
+        "url": "/creative/assets/index-D1T9PsdW.js",
+        "revision": "6f7eedab"
       },
       {
-        "url": "/assets/index-mZ0iCPPk.js",
-        "revision": "e1809c6e"
+        "url": "/creative/assets/index-DDPYYZP3.js",
+        "revision": "276bceb8"
       },
       {
-        "url": "/assets/markdown-to-drawnix-CC9aXq_-.js",
-        "revision": "506323e1"
+        "url": "/creative/assets/markdown-to-drawnix-Dx27IDNE.js",
+        "revision": "257a3146"
       },
       {
-        "url": "/assets/MediaLibrarySidebar-CNCXXhfY.css",
+        "url": "/creative/assets/MediaLibrarySidebar-CNCXXhfY.css",
         "revision": "45bb0ebe"
       },
       {
-        "url": "/assets/mermaid-to-drawnix-DJv9SBnU.js",
-        "revision": "1d398a14"
+        "url": "/creative/assets/mermaid-to-drawnix-B0WgkQYX.js",
+        "revision": "aa5d0058"
       },
       {
-        "url": "/assets/mj-params-M-7csAp7.js",
+        "url": "/creative/assets/mj-params-M-7csAp7.js",
         "revision": "76a86778"
       },
       {
-        "url": "/assets/model-benchmark-launcher-C-1wi4on.js",
-        "revision": "f1ab73be"
+        "url": "/creative/assets/model-benchmark-launcher-Coovj9xn.js",
+        "revision": "9d260ebc"
       },
       {
-        "url": "/assets/ParametersDropdown-BE58BbHs.css",
+        "url": "/creative/assets/ParametersDropdown-BE58BbHs.css",
         "revision": "778a003b"
       },
       {
-        "url": "/assets/ParametersDropdown-BUA9kttT.js",
-        "revision": "5c01b42a"
+        "url": "/creative/assets/ParametersDropdown-BwLQwyX3.js",
+        "revision": "f86122c6"
       },
       {
-        "url": "/assets/photo-wall-splitter-C8hvM3PM.js",
-        "revision": "173aa9be"
+        "url": "/creative/assets/photo-wall-splitter-Q-AzAyrb.js",
+        "revision": "b09fd54d"
       },
       {
-        "url": "/assets/prompt-utils-XlGO0qIC.js",
-        "revision": "1f90015c"
+        "url": "/creative/assets/prompt-utils-3_dk8gkl.js",
+        "revision": "b9e838fa"
       },
       {
-        "url": "/assets/ResizableDivider-ClzYJk-6.css",
+        "url": "/creative/assets/ResizableDivider-ClzYJk-6.css",
         "revision": "99c24be4"
       },
       {
-        "url": "/assets/ResizableDivider-FzdJQsCw.js",
-        "revision": "63ce8863"
+        "url": "/creative/assets/ResizableDivider-poMotvWD.js",
+        "revision": "63425c66"
       },
       {
-        "url": "/assets/settings-dialog-CqexarGK.js",
-        "revision": "7f3637fa"
+        "url": "/creative/assets/settings-dialog-_L_6P09e.js",
+        "revision": "2fa88007"
       },
       {
-        "url": "/assets/settings-dialog-Dcm1G4kx.css",
+        "url": "/creative/assets/settings-dialog-Dcm1G4kx.css",
         "revision": "e29060f9"
       },
       {
-        "url": "/assets/skill-dsl-parser-Cx9_KbTw.js",
-        "revision": "3421b297"
+        "url": "/creative/assets/skill-dsl-parser-mWOGOCQJ.js",
+        "revision": "4f99370c"
       },
       {
-        "url": "/assets/startup-app-CARGtTpt.js",
-        "revision": "e348490b"
+        "url": "/creative/assets/startup-app-DIRBIlUs.js",
+        "revision": "8a8b9f7a"
       },
       {
-        "url": "/assets/startup-app-DxC2basr.css",
+        "url": "/creative/assets/startup-app-DxC2basr.css",
         "revision": "a69b85e4"
       },
       {
-        "url": "/assets/startup-runtime-Di8qk2Fd.js",
+        "url": "/creative/assets/startup-runtime-Di8qk2Fd.js",
         "revision": "aa8ca7d9"
       },
       {
-        "url": "/assets/TaskQueuePanel-BdCdn8gn.js",
-        "revision": "f0e36808"
+        "url": "/creative/assets/TaskQueuePanel-Bqg47IwA.js",
+        "revision": "ed6c99e6"
       },
       {
-        "url": "/assets/ttd-dialog-DaiCKXiC.css",
+        "url": "/creative/assets/ttd-dialog-DaiCKXiC.css",
         "revision": "77f9e727"
       },
       {
-        "url": "/assets/ttd-dialog-G4SVZcMU.js",
-        "revision": "f380e71a"
+        "url": "/creative/assets/ttd-dialog-DgrFPIo4.js",
+        "revision": "51aea74e"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-DYBqLOL7.js",
-        "revision": "9ec8c479"
+        "url": "/creative/assets/ttd-dialog-submit-shortcut-BBbesVaP.js",
+        "revision": "b8f4510d"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
+        "url": "/creative/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
         "revision": "d2575a60"
       },
       {
-        "url": "/assets/useCharacters-DRBoWvvj.css",
+        "url": "/creative/assets/useCharacters-DRBoWvvj.css",
         "revision": "5dc00e5f"
       },
       {
-        "url": "/assets/useCharacters-wZMsg65t.js",
-        "revision": "2885a146"
+        "url": "/creative/assets/useCharacters-GnNZ2o0z.js",
+        "revision": "58c83586"
       },
       {
-        "url": "/assets/useMediaViewer-CFU6nd8d.js",
-        "revision": "e812c74b"
+        "url": "/creative/assets/useMediaViewer-DcU0Nday.js",
+        "revision": "aa54437c"
       },
       {
-        "url": "/assets/useWorkflowSubmission-BvCmA9BC.js",
-        "revision": "73f80fa0"
+        "url": "/creative/assets/useWorkflowSubmission-B3f1blSM.js",
+        "revision": "12a82a70"
       },
       {
-        "url": "/assets/web-vitals-DcvjKPr-.js",
+        "url": "/creative/assets/web-vitals-DcvjKPr-.js",
         "revision": "ee79e5ca"
       },
       {
-        "url": "/assets/workflow-submission-service-BGSA5j3P.js",
-        "revision": "a7e8697d"
+        "url": "/creative/assets/workflow-submission-service-B2mtZFQX.js",
+        "revision": "669655e5"
       }
     ],
     "office-data": [
       {
-        "url": "/assets/__vite-browser-external-UePf-KSV.js",
+        "url": "/creative/assets/__vite-browser-external-UePf-KSV.js",
         "revision": "bce18c5b"
       },
       {
-        "url": "/assets/office-data-Bramlb8p.js",
+        "url": "/creative/assets/office-data-Bramlb8p.js",
         "revision": "dffe535b"
       },
       {
-        "url": "/assets/startup-runtime-Di8qk2Fd.js",
+        "url": "/creative/assets/startup-runtime-Di8qk2Fd.js",
         "revision": "aa8ca7d9"
       }
     ],
     "editor-engines": [
       {
-        "url": "/assets/ai-generation-preferences-service-I4RNNpKo.js",
-        "revision": "cefcbcc1"
+        "url": "/creative/assets/ai-generation-preferences-service-8bY0Rnpa.js",
+        "revision": "9086825b"
       },
       {
-        "url": "/assets/batch-image-generation-CtaUrbIl.js",
-        "revision": "7152208c"
+        "url": "/creative/assets/batch-image-generation-Cl7GRiGy.js",
+        "revision": "0b5d34cc"
       },
       {
-        "url": "/assets/batch-image-generation-DgBXF-sY.css",
+        "url": "/creative/assets/batch-image-generation-DgBXF-sY.css",
         "revision": "2a45636a"
       },
       {
-        "url": "/assets/CanvasAudioPlayer-Cy0ehpYi.js",
-        "revision": "5356126f"
+        "url": "/creative/assets/CanvasAudioPlayer-BE55_I-I.js",
+        "revision": "d58d1c22"
       },
       {
-        "url": "/assets/CanvasAudioPlayer-QLXKZ5KP.css",
+        "url": "/creative/assets/CanvasAudioPlayer-QLXKZ5KP.css",
         "revision": "8f08351c"
       },
       {
-        "url": "/assets/character-Bo9jcTNu.css",
+        "url": "/creative/assets/character-Bo9jcTNu.css",
         "revision": "ae5a11b8"
       },
       {
-        "url": "/assets/clipper-D1ZIDHd9.js",
+        "url": "/creative/assets/clipper-D1ZIDHd9.js",
         "revision": "2e4f833e"
       },
       {
-        "url": "/assets/DeferredAIInputBar-BWaS5I7y.js",
-        "revision": "cee163a4"
+        "url": "/creative/assets/DeferredAIInputBar-Cat8Iik-.js",
+        "revision": "6f75bd4b"
       },
       {
-        "url": "/assets/DeferredAIInputBar-CVXfAbVO.css",
+        "url": "/creative/assets/DeferredAIInputBar-CVXfAbVO.css",
         "revision": "4c7ee753"
       },
       {
-        "url": "/assets/DrawnixDeferredFeatures-DfbU8rT5.js",
-        "revision": "480eccd9"
+        "url": "/creative/assets/DrawnixDeferredFeatures-CfZ1YzDA.js",
+        "revision": "398e3400"
       },
       {
-        "url": "/assets/editor-engines-C8LHZ47f.css",
+        "url": "/creative/assets/editor-engines-BOWIYR4V.js",
+        "revision": "0d4263a8"
+      },
+      {
+        "url": "/creative/assets/editor-engines-C8LHZ47f.css",
         "revision": "a8c4f109"
       },
       {
-        "url": "/assets/editor-engines-CO24JRG0.js",
-        "revision": "49b05d22"
+        "url": "/creative/assets/index-BAamkGkI.js",
+        "revision": "b44d10ea"
       },
       {
-        "url": "/assets/index-BYyWCcUV.js",
-        "revision": "1e074fca"
+        "url": "/creative/assets/index-BfaFsiCo.js",
+        "revision": "4dd4a686"
       },
       {
-        "url": "/assets/index-CKs7wIZf.js",
-        "revision": "d2a56959"
+        "url": "/creative/assets/index-D1T9PsdW.js",
+        "revision": "6f7eedab"
       },
       {
-        "url": "/assets/index-CNf6xI65.js",
-        "revision": "869667b1"
+        "url": "/creative/assets/index-DDPYYZP3.js",
+        "revision": "276bceb8"
       },
       {
-        "url": "/assets/index-mZ0iCPPk.js",
-        "revision": "e1809c6e"
+        "url": "/creative/assets/markdown-to-drawnix-Dx27IDNE.js",
+        "revision": "257a3146"
       },
       {
-        "url": "/assets/markdown-to-drawnix-CC9aXq_-.js",
-        "revision": "506323e1"
-      },
-      {
-        "url": "/assets/MediaLibrarySidebar-CNCXXhfY.css",
+        "url": "/creative/assets/MediaLibrarySidebar-CNCXXhfY.css",
         "revision": "45bb0ebe"
       },
       {
-        "url": "/assets/mermaid-to-drawnix-DJv9SBnU.js",
-        "revision": "1d398a14"
+        "url": "/creative/assets/mermaid-to-drawnix-B0WgkQYX.js",
+        "revision": "aa5d0058"
       },
       {
-        "url": "/assets/mj-params-M-7csAp7.js",
+        "url": "/creative/assets/mj-params-M-7csAp7.js",
         "revision": "76a86778"
       },
       {
-        "url": "/assets/model-benchmark-launcher-C-1wi4on.js",
-        "revision": "f1ab73be"
+        "url": "/creative/assets/model-benchmark-launcher-Coovj9xn.js",
+        "revision": "9d260ebc"
       },
       {
-        "url": "/assets/ParametersDropdown-BE58BbHs.css",
+        "url": "/creative/assets/ParametersDropdown-BE58BbHs.css",
         "revision": "778a003b"
       },
       {
-        "url": "/assets/ParametersDropdown-BUA9kttT.js",
-        "revision": "5c01b42a"
+        "url": "/creative/assets/ParametersDropdown-BwLQwyX3.js",
+        "revision": "f86122c6"
       },
       {
-        "url": "/assets/photo-wall-splitter-C8hvM3PM.js",
-        "revision": "173aa9be"
+        "url": "/creative/assets/photo-wall-splitter-Q-AzAyrb.js",
+        "revision": "b09fd54d"
       },
       {
-        "url": "/assets/prompt-utils-XlGO0qIC.js",
-        "revision": "1f90015c"
+        "url": "/creative/assets/prompt-utils-3_dk8gkl.js",
+        "revision": "b9e838fa"
       },
       {
-        "url": "/assets/ResizableDivider-ClzYJk-6.css",
+        "url": "/creative/assets/ResizableDivider-ClzYJk-6.css",
         "revision": "99c24be4"
       },
       {
-        "url": "/assets/ResizableDivider-FzdJQsCw.js",
-        "revision": "63ce8863"
+        "url": "/creative/assets/ResizableDivider-poMotvWD.js",
+        "revision": "63425c66"
       },
       {
-        "url": "/assets/settings-dialog-CqexarGK.js",
-        "revision": "7f3637fa"
+        "url": "/creative/assets/settings-dialog-_L_6P09e.js",
+        "revision": "2fa88007"
       },
       {
-        "url": "/assets/settings-dialog-Dcm1G4kx.css",
+        "url": "/creative/assets/settings-dialog-Dcm1G4kx.css",
         "revision": "e29060f9"
       },
       {
-        "url": "/assets/skill-dsl-parser-Cx9_KbTw.js",
-        "revision": "3421b297"
+        "url": "/creative/assets/skill-dsl-parser-mWOGOCQJ.js",
+        "revision": "4f99370c"
       },
       {
-        "url": "/assets/startup-app-CARGtTpt.js",
-        "revision": "e348490b"
+        "url": "/creative/assets/startup-app-DIRBIlUs.js",
+        "revision": "8a8b9f7a"
       },
       {
-        "url": "/assets/startup-app-DxC2basr.css",
+        "url": "/creative/assets/startup-app-DxC2basr.css",
         "revision": "a69b85e4"
       },
       {
-        "url": "/assets/startup-runtime-Di8qk2Fd.js",
+        "url": "/creative/assets/startup-runtime-Di8qk2Fd.js",
         "revision": "aa8ca7d9"
       },
       {
-        "url": "/assets/TaskQueuePanel-BdCdn8gn.js",
-        "revision": "f0e36808"
+        "url": "/creative/assets/TaskQueuePanel-Bqg47IwA.js",
+        "revision": "ed6c99e6"
       },
       {
-        "url": "/assets/ttd-dialog-DaiCKXiC.css",
+        "url": "/creative/assets/ttd-dialog-DaiCKXiC.css",
         "revision": "77f9e727"
       },
       {
-        "url": "/assets/ttd-dialog-G4SVZcMU.js",
-        "revision": "f380e71a"
+        "url": "/creative/assets/ttd-dialog-DgrFPIo4.js",
+        "revision": "51aea74e"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-DYBqLOL7.js",
-        "revision": "9ec8c479"
+        "url": "/creative/assets/ttd-dialog-submit-shortcut-BBbesVaP.js",
+        "revision": "b8f4510d"
       },
       {
-        "url": "/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
+        "url": "/creative/assets/ttd-dialog-submit-shortcut-DyioEoKX.css",
         "revision": "d2575a60"
       },
       {
-        "url": "/assets/useCharacters-DRBoWvvj.css",
+        "url": "/creative/assets/useCharacters-DRBoWvvj.css",
         "revision": "5dc00e5f"
       },
       {
-        "url": "/assets/useCharacters-wZMsg65t.js",
-        "revision": "2885a146"
+        "url": "/creative/assets/useCharacters-GnNZ2o0z.js",
+        "revision": "58c83586"
       },
       {
-        "url": "/assets/useMediaViewer-CFU6nd8d.js",
-        "revision": "e812c74b"
+        "url": "/creative/assets/useMediaViewer-DcU0Nday.js",
+        "revision": "aa54437c"
       },
       {
-        "url": "/assets/useWorkflowSubmission-BvCmA9BC.js",
-        "revision": "73f80fa0"
+        "url": "/creative/assets/useWorkflowSubmission-B3f1blSM.js",
+        "revision": "12a82a70"
       },
       {
-        "url": "/assets/web-vitals-DcvjKPr-.js",
+        "url": "/creative/assets/web-vitals-DcvjKPr-.js",
         "revision": "ee79e5ca"
       },
       {
-        "url": "/assets/workflow-submission-service-BGSA5j3P.js",
-        "revision": "a7e8697d"
+        "url": "/creative/assets/workflow-submission-service-B2mtZFQX.js",
+        "revision": "669655e5"
       }
     ],
     "media-viewer": [
       {
-        "url": "/assets/media-viewer-DoEpBmJL.css",
+        "url": "/creative/assets/media-viewer-DoEpBmJL.css",
         "revision": "60684ce4"
       },
       {
-        "url": "/assets/media-viewer-xSaTD7_w.js",
+        "url": "/creative/assets/media-viewer-xSaTD7_w.js",
         "revision": "3a8ca19d"
       }
     ],
     "external-skills": [
       {
-        "url": "/assets/external-skills-BcV6ATYi.js",
+        "url": "/creative/assets/external-skills-BcV6ATYi.js",
         "revision": "47101f8c"
       }
     ],
     "runtime-static-assets": [
       {
-        "url": "/assets/KaTeX_AMS-Regular-BQhdFMY1.woff2",
+        "url": "/creative/assets/KaTeX_AMS-Regular-BQhdFMY1.woff2",
         "revision": "66c67820"
       },
       {
-        "url": "/assets/KaTeX_AMS-Regular-DMm9YOAa.woff",
+        "url": "/creative/assets/KaTeX_AMS-Regular-DMm9YOAa.woff",
         "revision": "10824af7"
       },
       {
-        "url": "/assets/KaTeX_AMS-Regular-DRggAlZN.ttf",
+        "url": "/creative/assets/KaTeX_AMS-Regular-DRggAlZN.ttf",
         "revision": "56573229"
       },
       {
-        "url": "/assets/KaTeX_Caligraphic-Bold-ATXxdsX0.ttf",
+        "url": "/creative/assets/KaTeX_Caligraphic-Bold-ATXxdsX0.ttf",
         "revision": "497bf407"
       },
       {
-        "url": "/assets/KaTeX_Caligraphic-Bold-BEiXGLvX.woff",
+        "url": "/creative/assets/KaTeX_Caligraphic-Bold-BEiXGLvX.woff",
         "revision": "de2ba279"
       },
       {
-        "url": "/assets/KaTeX_Caligraphic-Bold-Dq_IR9rO.woff2",
+        "url": "/creative/assets/KaTeX_Caligraphic-Bold-Dq_IR9rO.woff2",
         "revision": "a9e9b095"
       },
       {
-        "url": "/assets/KaTeX_Caligraphic-Regular-CTRA-rTL.woff",
+        "url": "/creative/assets/KaTeX_Caligraphic-Regular-CTRA-rTL.woff",
         "revision": "a25140fb"
       },
       {
-        "url": "/assets/KaTeX_Caligraphic-Regular-Di6jR-x-.woff2",
+        "url": "/creative/assets/KaTeX_Caligraphic-Regular-Di6jR-x-.woff2",
         "revision": "08d95d99"
       },
       {
-        "url": "/assets/KaTeX_Caligraphic-Regular-wX97UBjC.ttf",
+        "url": "/creative/assets/KaTeX_Caligraphic-Regular-wX97UBjC.ttf",
         "revision": "e6fb499f"
       },
       {
-        "url": "/assets/KaTeX_Fraktur-Bold-BdnERNNW.ttf",
+        "url": "/creative/assets/KaTeX_Fraktur-Bold-BdnERNNW.ttf",
         "revision": "b9d7c449"
       },
       {
-        "url": "/assets/KaTeX_Fraktur-Bold-BsDP51OF.woff",
+        "url": "/creative/assets/KaTeX_Fraktur-Bold-BsDP51OF.woff",
         "revision": "40934fc0"
       },
       {
-        "url": "/assets/KaTeX_Fraktur-Bold-CL6g_b3V.woff2",
+        "url": "/creative/assets/KaTeX_Fraktur-Bold-CL6g_b3V.woff2",
         "revision": "796f3797"
       },
       {
-        "url": "/assets/KaTeX_Fraktur-Regular-CB_wures.ttf",
+        "url": "/creative/assets/KaTeX_Fraktur-Regular-CB_wures.ttf",
         "revision": "97a699d8"
       },
       {
-        "url": "/assets/KaTeX_Fraktur-Regular-CTYiF6lA.woff2",
+        "url": "/creative/assets/KaTeX_Fraktur-Regular-CTYiF6lA.woff2",
         "revision": "f9e6a99f"
       },
       {
-        "url": "/assets/KaTeX_Fraktur-Regular-Dxdc4cR9.woff",
+        "url": "/creative/assets/KaTeX_Fraktur-Regular-Dxdc4cR9.woff",
         "revision": "e435cda5"
       },
       {
-        "url": "/assets/KaTeX_Main-Bold-Cx986IdX.woff2",
+        "url": "/creative/assets/KaTeX_Main-Bold-Cx986IdX.woff2",
         "revision": "a9382e25"
       },
       {
-        "url": "/assets/KaTeX_Main-Bold-Jm3AIy58.woff",
+        "url": "/creative/assets/KaTeX_Main-Bold-Jm3AIy58.woff",
         "revision": "4cdba646"
       },
       {
-        "url": "/assets/KaTeX_Main-Bold-waoOVXN0.ttf",
+        "url": "/creative/assets/KaTeX_Main-Bold-waoOVXN0.ttf",
         "revision": "8e431f7e"
       },
       {
-        "url": "/assets/KaTeX_Main-BoldItalic-DxDJ3AOS.woff2",
+        "url": "/creative/assets/KaTeX_Main-BoldItalic-DxDJ3AOS.woff2",
         "revision": "d8737343"
       },
       {
-        "url": "/assets/KaTeX_Main-BoldItalic-DzxPMmG6.ttf",
+        "url": "/creative/assets/KaTeX_Main-BoldItalic-DzxPMmG6.ttf",
         "revision": "52fb39b0"
       },
       {
-        "url": "/assets/KaTeX_Main-BoldItalic-SpSLRI95.woff",
+        "url": "/creative/assets/KaTeX_Main-BoldItalic-SpSLRI95.woff",
         "revision": "5f875f98"
       },
       {
-        "url": "/assets/KaTeX_Main-Italic-3WenGoN9.ttf",
+        "url": "/creative/assets/KaTeX_Main-Italic-3WenGoN9.ttf",
         "revision": "39349e0a"
       },
       {
-        "url": "/assets/KaTeX_Main-Italic-BMLOBm91.woff",
+        "url": "/creative/assets/KaTeX_Main-Italic-BMLOBm91.woff",
         "revision": "8ffd28f6"
       },
       {
-        "url": "/assets/KaTeX_Main-Italic-NWA7e6Wa.woff2",
+        "url": "/creative/assets/KaTeX_Main-Italic-NWA7e6Wa.woff2",
         "revision": "65297062"
       },
       {
-        "url": "/assets/KaTeX_Main-Regular-B22Nviop.woff2",
+        "url": "/creative/assets/KaTeX_Main-Regular-B22Nviop.woff2",
         "revision": "f8a7f19f"
       },
       {
-        "url": "/assets/KaTeX_Main-Regular-Dr94JaBh.woff",
+        "url": "/creative/assets/KaTeX_Main-Regular-Dr94JaBh.woff",
         "revision": "f1cdb692"
       },
       {
-        "url": "/assets/KaTeX_Main-Regular-ypZvNtVU.ttf",
+        "url": "/creative/assets/KaTeX_Main-Regular-ypZvNtVU.ttf",
         "revision": "818582da"
       },
       {
-        "url": "/assets/KaTeX_Math-BoldItalic-B3XSjfu4.ttf",
+        "url": "/creative/assets/KaTeX_Math-BoldItalic-B3XSjfu4.ttf",
         "revision": "6589c4f1"
       },
       {
-        "url": "/assets/KaTeX_Math-BoldItalic-CZnvNsCZ.woff2",
+        "url": "/creative/assets/KaTeX_Math-BoldItalic-CZnvNsCZ.woff2",
         "revision": "1320454d"
       },
       {
-        "url": "/assets/KaTeX_Math-BoldItalic-iY-2wyZ7.woff",
+        "url": "/creative/assets/KaTeX_Math-BoldItalic-iY-2wyZ7.woff",
         "revision": "48155e43"
       },
       {
-        "url": "/assets/KaTeX_Math-Italic-DA0__PXp.woff",
+        "url": "/creative/assets/KaTeX_Math-Italic-DA0__PXp.woff",
         "revision": "ed7aea12"
       },
       {
-        "url": "/assets/KaTeX_Math-Italic-flOr_0UB.ttf",
+        "url": "/creative/assets/KaTeX_Math-Italic-flOr_0UB.ttf",
         "revision": "fe5ed587"
       },
       {
-        "url": "/assets/KaTeX_Math-Italic-t53AETM-.woff2",
+        "url": "/creative/assets/KaTeX_Math-Italic-t53AETM-.woff2",
         "revision": "d8b7a801"
       },
       {
-        "url": "/assets/KaTeX_SansSerif-Bold-CFMepnvq.ttf",
+        "url": "/creative/assets/KaTeX_SansSerif-Bold-CFMepnvq.ttf",
         "revision": "f2ac7312"
       },
       {
-        "url": "/assets/KaTeX_SansSerif-Bold-D1sUS0GD.woff2",
+        "url": "/creative/assets/KaTeX_SansSerif-Bold-D1sUS0GD.woff2",
         "revision": "ad546b47"
       },
       {
-        "url": "/assets/KaTeX_SansSerif-Bold-DbIhKOiC.woff",
+        "url": "/creative/assets/KaTeX_SansSerif-Bold-DbIhKOiC.woff",
         "revision": "0e897d27"
       },
       {
-        "url": "/assets/KaTeX_SansSerif-Italic-C3H0VqGB.woff2",
+        "url": "/creative/assets/KaTeX_SansSerif-Italic-C3H0VqGB.woff2",
         "revision": "e934cbc8"
       },
       {
-        "url": "/assets/KaTeX_SansSerif-Italic-DN2j7dab.woff",
+        "url": "/creative/assets/KaTeX_SansSerif-Italic-DN2j7dab.woff",
         "revision": "ef725de5"
       },
       {
-        "url": "/assets/KaTeX_SansSerif-Italic-YYjJ1zSn.ttf",
+        "url": "/creative/assets/KaTeX_SansSerif-Italic-YYjJ1zSn.ttf",
         "revision": "f60b4a34"
       },
       {
-        "url": "/assets/KaTeX_SansSerif-Regular-BNo7hRIc.ttf",
+        "url": "/creative/assets/KaTeX_SansSerif-Regular-BNo7hRIc.ttf",
         "revision": "3243452e"
       },
       {
-        "url": "/assets/KaTeX_SansSerif-Regular-CS6fqUqJ.woff",
+        "url": "/creative/assets/KaTeX_SansSerif-Regular-CS6fqUqJ.woff",
         "revision": "5f8637ee"
       },
       {
-        "url": "/assets/KaTeX_SansSerif-Regular-DDBCnlJ7.woff2",
+        "url": "/creative/assets/KaTeX_SansSerif-Regular-DDBCnlJ7.woff2",
         "revision": "1ac3ed6e"
       },
       {
-        "url": "/assets/KaTeX_Script-Regular-C5JkGWo-.ttf",
+        "url": "/creative/assets/KaTeX_Script-Regular-C5JkGWo-.ttf",
         "revision": "a189c37d"
       },
       {
-        "url": "/assets/KaTeX_Script-Regular-D3wIWfF6.woff2",
+        "url": "/creative/assets/KaTeX_Script-Regular-D3wIWfF6.woff2",
         "revision": "1b3161eb"
       },
       {
-        "url": "/assets/KaTeX_Script-Regular-D5yQViql.woff",
+        "url": "/creative/assets/KaTeX_Script-Regular-D5yQViql.woff",
         "revision": "a82fa2a7"
       },
       {
-        "url": "/assets/KaTeX_Size1-Regular-C195tn64.woff",
+        "url": "/creative/assets/KaTeX_Size1-Regular-C195tn64.woff",
         "revision": "4788ba5b"
       },
       {
-        "url": "/assets/KaTeX_Size1-Regular-Dbsnue_I.ttf",
+        "url": "/creative/assets/KaTeX_Size1-Regular-Dbsnue_I.ttf",
         "revision": "0d8d9204"
       },
       {
-        "url": "/assets/KaTeX_Size1-Regular-mCD8mA8B.woff2",
+        "url": "/creative/assets/KaTeX_Size1-Regular-mCD8mA8B.woff2",
         "revision": "82ef26dc"
       },
       {
-        "url": "/assets/KaTeX_Size2-Regular-B7gKUWhC.ttf",
+        "url": "/creative/assets/KaTeX_Size2-Regular-B7gKUWhC.ttf",
         "revision": "1fdda0e5"
       },
       {
-        "url": "/assets/KaTeX_Size2-Regular-Dy4dx90m.woff2",
+        "url": "/creative/assets/KaTeX_Size2-Regular-Dy4dx90m.woff2",
         "revision": "95a1da91"
       },
       {
-        "url": "/assets/KaTeX_Size2-Regular-oD1tc_U0.woff",
+        "url": "/creative/assets/KaTeX_Size2-Regular-oD1tc_U0.woff",
         "revision": "b0628bfd"
       },
       {
-        "url": "/assets/KaTeX_Size3-Regular-CTq5MqoE.woff",
+        "url": "/creative/assets/KaTeX_Size3-Regular-CTq5MqoE.woff",
         "revision": "4de844d4"
       },
       {
-        "url": "/assets/KaTeX_Size3-Regular-DgpXs0kz.ttf",
+        "url": "/creative/assets/KaTeX_Size3-Regular-DgpXs0kz.ttf",
         "revision": "963af864"
       },
       {
-        "url": "/assets/KaTeX_Size4-Regular-BF-4gkZK.woff",
+        "url": "/creative/assets/KaTeX_Size4-Regular-BF-4gkZK.woff",
         "revision": "3045a61f"
       },
       {
-        "url": "/assets/KaTeX_Size4-Regular-Dl5lxZxV.woff2",
+        "url": "/creative/assets/KaTeX_Size4-Regular-Dl5lxZxV.woff2",
         "revision": "61522cd3"
       },
       {
-        "url": "/assets/KaTeX_Size4-Regular-DWFBv043.ttf",
+        "url": "/creative/assets/KaTeX_Size4-Regular-DWFBv043.ttf",
         "revision": "27a23ee6"
       },
       {
-        "url": "/assets/KaTeX_Typewriter-Regular-C0xS9mPB.woff",
+        "url": "/creative/assets/KaTeX_Typewriter-Regular-C0xS9mPB.woff",
         "revision": "0e046058"
       },
       {
-        "url": "/assets/KaTeX_Typewriter-Regular-CO6r4hn1.woff2",
+        "url": "/creative/assets/KaTeX_Typewriter-Regular-CO6r4hn1.woff2",
         "revision": "b8b8393d"
       },
       {
-        "url": "/assets/KaTeX_Typewriter-Regular-D3Ib7_Hf.ttf",
+        "url": "/creative/assets/KaTeX_Typewriter-Regular-D3Ib7_Hf.ttf",
         "revision": "6bf42875"
       }
     ],
     "offline-static-assets": [
       {
-        "url": "/icons/aitu10.png",
+        "url": "/creative/icons/aitu10.png",
         "revision": "075cd0d2"
       },
       {
-        "url": "/icons/android-chrome-192x192.png",
+        "url": "/creative/icons/android-chrome-192x192.png",
         "revision": "1d5d2967"
       },
       {
-        "url": "/icons/android-chrome-512x512.png",
+        "url": "/creative/icons/android-chrome-512x512.png",
         "revision": "27d688da"
       },
       {
-        "url": "/icons/apple-touch-icon.png",
+        "url": "/creative/icons/apple-touch-icon.png",
         "revision": "dc340e9c"
       },
       {
-        "url": "/icons/favicon-16x16.png",
+        "url": "/creative/icons/favicon-16x16.png",
         "revision": "b2dc9229"
       },
       {
-        "url": "/icons/favicon-32x32.png",
+        "url": "/creative/icons/favicon-32x32.png",
         "revision": "951ce31d"
       },
       {
-        "url": "/icons/favicon-new.svg.png",
+        "url": "/creative/icons/favicon-new.svg.png",
         "revision": "97bb5627"
       },
       {
-        "url": "/icons/icon-96x96.png",
+        "url": "/creative/icons/icon-96x96.png",
         "revision": "620abaa8"
       },
       {
-        "url": "/icons/README.md",
+        "url": "/creative/icons/README.md",
         "revision": "f04bf2e9"
       },
       {
-        "url": "/logo-tuzi.png",
-        "revision": "8b1b20ba"
-      },
-      {
-        "url": "/logo/cardid.jpg",
-        "revision": "27c50ee3"
-      },
-      {
-        "url": "/logo/group-qr.png",
-        "revision": "d2f184d2"
-      },
-      {
-        "url": "/robots.txt",
-        "revision": "5d7d772c"
+        "url": "/creative/robots.txt",
+        "revision": "f71d2019"
       }
     ]
   }

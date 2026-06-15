@@ -35,7 +35,7 @@ var (
 func TestCreativeProductionRootDistMatchesRouterDistAndContract(t *testing.T) {
 	rootIndex := mainReadCreativeRootFile(t, "index.html")
 	require.True(t, bytes.Equal(rootIndex, creativeIndexPage), "main.go creativeIndexPage must be the same bytes as web/creative/dist/index.html")
-	mainRequireCreativeIndexProductMarkup(t, string(rootIndex))
+	mainRequireCreativeIndexEmbeddedMarkup(t, string(rootIndex))
 	rootAssets := mainCreativeAssetPathsReferencedByIndex(t, string(rootIndex))
 
 	mainRequireCreativeRootRouterDistTreesEqual(t)
@@ -136,10 +136,17 @@ func mainCreativeAssetPathsReferencedByIndex(t *testing.T, indexHTML string) mai
 	return assets
 }
 
-func mainRequireCreativeIndexProductMarkup(t *testing.T, body string) {
+func mainRequireCreativeIndexEmbeddedMarkup(t *testing.T, body string) {
 	t.Helper()
 
-	require.True(t, strings.Contains(body, "Opentu") || strings.Contains(body, "OpenTu"), "creative index should contain Opentu/OpenTu product markup")
+	require.Contains(t, body, "New API Creative", "creative index should expose embedded New API Creative product markup")
+	require.Contains(t, body, `id="app-boot-loading"`, "creative index should keep the boot loading shell")
+	require.Contains(t, body, `data-app-boot-title`, "creative index boot shell should keep title node")
+	require.Contains(t, body, `data-app-boot-progress`, "creative index boot shell should keep progress node")
+	require.Contains(t, body, `id="root"`, "creative index should keep the React mount root")
+	require.NotContains(t, body, "OpenTu", "embedded creative index must not expose standalone OpenTU branding")
+	require.NotContains(t, body, "Opentu", "embedded creative index must not expose standalone Opentu branding")
+	require.NotContains(t, strings.ToLower(body), "opentu.ai", "embedded creative index must not expose standalone Opentu host")
 }
 
 func mainRequireNoCreativeFixtureMarkersInText(t *testing.T, body string, context string) {

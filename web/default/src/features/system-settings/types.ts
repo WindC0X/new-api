@@ -61,6 +61,7 @@ export type CreativeModelPolicyGroupPool = {
   group: string
   description?: string
   models: string[]
+  modelsByModality?: Record<string, string[]>
   modelCount: number
   effectivePolicy: CreativeEffectiveModelPolicy
 }

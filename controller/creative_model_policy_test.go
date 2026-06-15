@@ -53,6 +53,106 @@ func TestCreativeBootstrapReturnsEffectiveFilteredModelPolicy(t *testing.T) {
 	require.Equal(t, []any{"creative-model-shadow"}, staleRecommended["text"])
 }
 
+func TestCreativeListModelsReturnsSafeMetadataCatalog(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Model{}, &model.Vendor{}))
+	seedCreativeControllerUser(t, 902)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group:     "default",
+		Model:     "custom-image-alias",
+		ChannelId: 9101,
+		Enabled:   true,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group:     "default",
+		Model:     "leaky-metadata-model",
+		ChannelId: 9102,
+		Enabled:   true,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Vendor{
+		Id:     77,
+		Name:   "Safe Vendor",
+		Status: 1,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Vendor{
+		Id:     78,
+		Name:   "api key vendor token",
+		Status: 1,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Model{
+		ModelName:   "custom-image-alias",
+		Description: "A safe image model alias",
+		Tags:        "image, custom, apiKey",
+		VendorID:    77,
+		Status:      1,
+		Endpoints:   `{"image-generation":"/v1/images/generations"}`,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Model{
+		ModelName:   "leaky-metadata-model",
+		Description: "Display label mentions sk-hidden-token but must not ship",
+		Tags:        "image, safe-tag, api-key, api key, base-url, base url, selected-key, channel-id, owner-id, token, password, sk-inline-secret",
+		VendorID:    78,
+		Status:      1,
+		Endpoints:   `{"image-generation":"/v1/images/generations"}`,
+	}).Error)
+	model.InvalidatePricingCache()
+	t.Cleanup(model.InvalidatePricingCache)
+
+	router := newCreativeSessionTestRouter(902)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/creative/api/models", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	requireCreativeResponseOmitsSecretFields(t, recorder.Body.String())
+	raw := recorder.Body.String()
+	for _, forbidden := range []string{
+		"channel_id",
+		"channelId",
+		"api_key",
+		"apiKey",
+		"base_url",
+		"baseUrl",
+		"selected_key",
+		"selectedKey",
+		"owner_id",
+		"ownerId",
+	} {
+		require.NotContains(t, raw, `"`+forbidden+`"`)
+	}
+	payload := decodeCreativeResponse(t, recorder)
+	data := creativeResponseArray(t, payload, "data")
+	require.Len(t, data, 2)
+	itemsByID := map[string]map[string]any{}
+	for _, rawItem := range data {
+		item, ok := rawItem.(map[string]any)
+		require.True(t, ok)
+		id, ok := item["id"].(string)
+		require.True(t, ok)
+		itemsByID[id] = item
+	}
+	item := itemsByID["custom-image-alias"]
+	require.NotNil(t, item)
+	require.Equal(t, "custom-image-alias", item["id"])
+	require.Equal(t, "custom-image-alias", item["label"])
+	require.Equal(t, "cia", item["shortCode"])
+	require.Equal(t, "image", item["type"])
+	require.Equal(t, "image", item["modality"])
+	require.Equal(t, "Safe Vendor", item["vendor"])
+	require.Equal(t, []any{"image", "custom"}, item["tags"])
+	require.Equal(t, "A safe image model alias", item["description"])
+	leakyItem := itemsByID["leaky-metadata-model"]
+	require.NotNil(t, leakyItem)
+	require.Equal(t, "leaky-metadata-model", leakyItem["id"])
+	require.NotContains(t, recorder.Body.String(), "api key vendor token")
+	require.NotContains(t, recorder.Body.String(), "sk-hidden-token")
+	require.NotContains(t, recorder.Body.String(), "sk-inline-secret")
+	require.Equal(t, []any{"image", "safe-tag"}, leakyItem["tags"])
+	require.NotContains(t, leakyItem, "description")
+	require.NotEqual(t, "api key vendor token", leakyItem["vendor"])
+	require.NotEmpty(t, payload["catalogVersion"])
+}
+
 func TestCreativeModelPolicyAdminEndpointsNormalizeAndDiagnose(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))

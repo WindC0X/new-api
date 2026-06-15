@@ -273,7 +273,8 @@ func TestCreativeAssetFakeS3StorageSupportsRangeAndDelete(t *testing.T) {
 	require.False(t, duplicate)
 	require.Equal(t, model.CreativeAssetStorageS3Compatible, asset.StorageBackend)
 	require.NotEmpty(t, asset.ObjectKey)
-	require.NotContains(t, asset.ObjectKey, "601")
+	require.NotContains(t, strings.Split(asset.ObjectKey, "/"), "601")
+	require.NotContains(t, asset.ObjectKey, "/601/")
 	require.NotContains(t, asset.ObjectKey, asset.ContentHash)
 
 	content, err := runtime.OpenContent(context.Background(), 601, asset.AssetId, "bytes=4-11")

@@ -11,6 +11,22 @@ type OpenAIModels struct {
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
 }
 
+type CreativeModelCatalogItem struct {
+	Id                     string                  `json:"id"`
+	Object                 string                  `json:"object"`
+	Created                int                     `json:"created"`
+	OwnedBy                string                  `json:"owned_by"`
+	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
+	Label                  string                  `json:"label,omitempty"`
+	ShortLabel             string                  `json:"shortLabel,omitempty"`
+	ShortCode              string                  `json:"shortCode,omitempty"`
+	Description            string                  `json:"description,omitempty"`
+	Type                   string                  `json:"type,omitempty"`
+	Modality               string                  `json:"modality,omitempty"`
+	Vendor                 string                  `json:"vendor,omitempty"`
+	Tags                   []string                `json:"tags,omitempty"`
+}
+
 type AnthropicModel struct {
 	ID          string `json:"id"`
 	CreatedAt   string `json:"created_at"`

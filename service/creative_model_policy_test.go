@@ -40,7 +40,12 @@ func TestNormalizeCreativeModelPolicyRejectsUnsafeFields(t *testing.T) {
 		`{"groups":{"default":{"recommended":{"text":["gpt-4o"]},"base_url":"https://upstream.example"}}}`,
 		`{"global":{"defaults":{"text":"gpt-4o"}},"provider":{"name":"openai"}}`,
 		`{"global":{"recommended":{"text":["gpt-4o"]}},"webhook":"https://example.test/callback"}`,
+		`{"global":{"recommended":{"text":["gpt-4o"]}},"notificationUrl":"https://example.test/callback"}`,
+		`{"global":{"recommended":{"text":["gpt-4o"]}},"notifyEndpoint":"https://example.test/callback"}`,
 		`{"global":{"defaults":{"text":"gpt-4o"}},"ownerOverride":"vip"}`,
+		`{"global":{"defaults":{"text":"gpt-4o"}},"modelOwner":"vip"}`,
+		`{"global":{"defaults":{"text":"gpt-4o"}},"xOwnerId":"vip"}`,
+		`{"global":{"defaults":{"text":"gpt-4o"}},"targetUserId":"42"}`,
 		`{"global":{"defaults":{"text":"gpt-4o"},"routingGroup":"vip"}}`,
 	}
 

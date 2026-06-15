@@ -58,7 +58,7 @@ func creativeModelPolicyPayloadValue(payload any) any {
 	return payload
 }
 
-func creativeEffectiveModelPolicyForRequest(c *gin.Context, models []dto.OpenAIModels) (service.CreativeEffectiveModelPolicy, string, error) {
+func creativeEffectiveModelPolicyForRequest(c *gin.Context, models []dto.CreativeModelCatalogItem) (service.CreativeEffectiveModelPolicy, string, error) {
 	userCache, err := model.GetUserCache(c.GetInt("id"))
 	if err != nil {
 		return service.CreativeEffectiveModelPolicy{}, "", err

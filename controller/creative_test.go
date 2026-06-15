@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-contrib/sessions"
@@ -355,6 +356,71 @@ func TestCreativeListModelsReturnsCompleteSessionUserCallablePool(t *testing.T) 
 
 	requireCreativeResponseOmitsPolicyFields(t, recorder.Body.String())
 	requireCreativeResponseOmitsSecretFields(t, recorder.Body.String())
+}
+
+func TestCreativeListModelsIncludesMockPreviewBindingOnlyForEnabledCanary(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 35)
+	seedCreativeControllerModelPool(t)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:      "true",
+		service.CreativeAdapterCanaryGroupsOptionKey: "default",
+	})
+	router := newCreativeSessionTestRouter(35)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/creative/api/models", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	payload := decodeCreativeResponse(t, recorder)
+	models, ok := payload["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, models, 31)
+
+	var mockBinding map[string]any
+	for _, rawModel := range models {
+		modelObject, ok := rawModel.(map[string]any)
+		require.True(t, ok)
+		if modelObject["id"] == "mock:gpt-image-2:preview" {
+			mockBinding = modelObject
+			break
+		}
+	}
+	require.NotNil(t, mockBinding)
+	require.Equal(t, "gpt-image-2", mockBinding["providerModelId"])
+	require.Equal(t, "mock-gpt-image-2-price", mockBinding["priceModelId"])
+	require.NotEqual(t, mockBinding["id"], mockBinding["providerModelId"])
+	require.NotEqual(t, mockBinding["providerModelId"], mockBinding["priceModelId"])
+	schema, ok := mockBinding["parameterSchema"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, schema)
+
+	requireCreativeResponseOmitsSecretFields(t, recorder.Body.String())
+}
+
+func TestCreativeListModelsDoesNotIncludeMockPreviewBindingWhenCanaryMisses(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 36)
+	seedCreativeControllerModelPool(t)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:      "true",
+		service.CreativeAdapterCanaryGroupsOptionKey: "vip",
+	})
+	router := newCreativeSessionTestRouter(36)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/creative/api/models", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	payload := decodeCreativeResponse(t, recorder)
+	models, ok := payload["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, models, 30)
+	for _, rawModel := range models {
+		modelObject, ok := rawModel.(map[string]any)
+		require.True(t, ok)
+		require.NotEqual(t, "mock:gpt-image-2:preview", modelObject["id"])
+	}
 }
 
 func TestCreativeBootstrapAndModelsDoNotReturnUIDisplayPolicyFields(t *testing.T) {
@@ -2739,6 +2805,32 @@ func seedCreativeControllerUser(t *testing.T, userId int) {
 		Quota:    100000,
 		AffCode:  fmt.Sprintf("creative-aff-%d", userId),
 	}).Error)
+}
+
+func withCreativeControllerOptions(t *testing.T, values map[string]string) {
+	t.Helper()
+
+	common.OptionMapRWMutex.Lock()
+	originalMap := common.OptionMap
+	nextMap := make(map[string]string, len(originalMap)+len(values))
+	for key, value := range originalMap {
+		nextMap[key] = value
+	}
+	for key, value := range values {
+		if value == "" {
+			delete(nextMap, key)
+			continue
+		}
+		nextMap[key] = value
+	}
+	common.OptionMap = nextMap
+	common.OptionMapRWMutex.Unlock()
+
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalMap
+		common.OptionMapRWMutex.Unlock()
+	})
 }
 
 func seedCreativeControllerModelPool(t *testing.T) []string {

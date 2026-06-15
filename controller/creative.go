@@ -1400,6 +1400,7 @@ func creativeModelsForUser(c *gin.Context) ([]dto.CreativeModelCatalogItem, stri
 	for _, modelName := range modelNames {
 		models = append(models, buildCreativeModelCatalogItem(modelName, ownerByModel, metadataByModel, vendorNameByID))
 	}
+	models = append(models, service.GetCreativePreviewModelBindingsForGroup(userCache.Group)...)
 	encoded, err := common.Marshal(models)
 	if err != nil {
 		return nil, "", err

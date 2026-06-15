@@ -203,6 +203,10 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			creativeAdminRoute.GET("/model-policy", controller.GetCreativeModelPolicy)
 			creativeAdminRoute.PUT("/model-policy", controller.UpdateCreativeModelPolicy)
+			creativeAdminRoute.GET("/model-bindings", controller.GetCreativeModelBindings)
+			creativeAdminRoute.PUT("/model-bindings", middleware.CreativeRequireNonce(), controller.UpdateCreativeModelBindings)
+			creativeAdminRoute.POST("/model-bindings/validate", middleware.CreativeRequireNonce(), controller.ValidateCreativeModelBindings)
+			creativeAdminRoute.POST("/model-bindings/dry-run", middleware.CreativeRequireNonce(), controller.DryRunCreativeModelBindings)
 		}
 
 		// Custom OAuth provider management (root only)

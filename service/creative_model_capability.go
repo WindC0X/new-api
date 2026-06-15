@@ -1,16 +1,19 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 )
 
 const (
@@ -27,6 +30,60 @@ var creativeParameterAllowedTypes = map[string]struct{}{
 	"number":  {},
 	"integer": {},
 	"boolean": {},
+}
+
+var creativeAdapterAllowedModalities = map[string]struct{}{
+	"image": {},
+}
+
+var creativeAdapterAllowedPresets = map[string]struct{}{
+	"mock_image_task": {},
+}
+
+var creativeAdapterAllowedParameterTemplates = map[string]struct{}{
+	"mock_gpt_image": {},
+}
+
+var creativeModelBindingsTopLevelKeys = map[string]struct{}{
+	"version":  {},
+	"bindings": {},
+}
+
+var creativeModelBindingAllowedKeys = map[string]struct{}{
+	"id":                {},
+	"providerModelId":   {},
+	"priceModelId":      {},
+	"displayName":       {},
+	"modality":          {},
+	"enabled":           {},
+	"canaryGroups":      {},
+	"channelId":         {},
+	"adapterPreset":     {},
+	"parameterTemplate": {},
+	"recommendedScore":  {},
+	"sortOrder":         {},
+	"parameterSchema":   {},
+}
+
+var creativeParameterSchemaAllowedKeys = map[string]struct{}{
+	"id":           {},
+	"label":        {},
+	"shortLabel":   {},
+	"description":  {},
+	"type":         {},
+	"defaultValue": {},
+	"options":      {},
+	"min":          {},
+	"max":          {},
+	"step":         {},
+	"required":     {},
+	"order":        {},
+	"hidden":       {},
+}
+
+var creativeParameterOptionAllowedKeys = map[string]struct{}{
+	"value": {},
+	"label": {},
 }
 
 type CreativeModelBindingsConfig struct {
@@ -48,6 +105,27 @@ type CreativeModelBindingConfig struct {
 	RecommendedScore  *int                              `json:"recommendedScore,omitempty"`
 	SortOrder         *int                              `json:"sortOrder,omitempty"`
 	ParameterSchema   []dto.CreativeParameterSchemaItem `json:"parameterSchema,omitempty"`
+}
+
+type CreativeModelBindingsAdminState struct {
+	Config     CreativeModelBindingsConfig `json:"config"`
+	ConfigJSON string                      `json:"configJSON"`
+}
+
+type CreativeModelBindingsDryRunResult struct {
+	NoProviderCall bool                             `json:"noProviderCall"`
+	Bindings       []CreativeModelBindingDryRunItem `json:"bindings"`
+}
+
+type CreativeModelBindingDryRunItem struct {
+	Id                string         `json:"id"`
+	ProviderModelId   string         `json:"providerModelId"`
+	PriceModelId      string         `json:"priceModelId"`
+	Modality          string         `json:"modality"`
+	Enabled           bool           `json:"enabled"`
+	AdapterPreset     string         `json:"adapterPreset"`
+	ParameterTemplate string         `json:"parameterTemplate"`
+	RequestPreview    map[string]any `json:"requestPreview"`
 }
 
 var creativeParameterForbiddenFragments = []string{
@@ -79,6 +157,7 @@ var creativeParameterForbiddenFragments = []string{
 	"group",
 	"user",
 	"owner",
+	"notify",
 	"notifyhook",
 	"callback",
 	"webhook",
@@ -106,6 +185,9 @@ func ParseCreativeModelBindingsConfig(raw string) (CreativeModelBindingsConfig, 
 	if trimmed == "" {
 		return CreativeModelBindingsConfig{Version: 1}, nil
 	}
+	if err := validateCreativeModelBindingsRawJSONKeys(trimmed); err != nil {
+		return CreativeModelBindingsConfig{}, err
+	}
 	var config CreativeModelBindingsConfig
 	if err := common.UnmarshalJsonStr(trimmed, &config); err != nil {
 		return CreativeModelBindingsConfig{}, err
@@ -119,10 +201,250 @@ func ParseCreativeModelBindingsConfig(raw string) (CreativeModelBindingsConfig, 
 	if config.Bindings == nil {
 		config.Bindings = []CreativeModelBindingConfig{}
 	}
+	config, err := NormalizeCreativeModelBindingsConfig(config)
+	if err != nil {
+		return CreativeModelBindingsConfig{}, err
+	}
+	return config, nil
+}
+
+func GetStoredCreativeModelBindingsConfig() (CreativeModelBindingsConfig, error) {
+	return ParseCreativeModelBindingsConfig(creativeOptionValue(CreativeModelBindingsOptionKey))
+}
+
+func BuildCreativeModelBindingsAdminState(config CreativeModelBindingsConfig) (CreativeModelBindingsAdminState, error) {
+	normalized, err := NormalizeCreativeModelBindingsConfig(config)
+	if err != nil {
+		return CreativeModelBindingsAdminState{}, err
+	}
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	if err != nil {
+		return CreativeModelBindingsAdminState{}, err
+	}
+	return CreativeModelBindingsAdminState{Config: normalized, ConfigJSON: configJSON}, nil
+}
+
+func GetCreativeModelBindingsAdminState() (CreativeModelBindingsAdminState, error) {
+	config, err := GetStoredCreativeModelBindingsConfig()
+	if err != nil {
+		return CreativeModelBindingsAdminState{}, err
+	}
+	return BuildCreativeModelBindingsAdminState(config)
+}
+
+func NormalizeCreativeModelBindingsConfig(config CreativeModelBindingsConfig) (CreativeModelBindingsConfig, error) {
+	if config.Version == 0 {
+		config.Version = 1
+	}
+	if config.Bindings == nil {
+		config.Bindings = []CreativeModelBindingConfig{}
+	}
+	for index := range config.Bindings {
+		binding := &config.Bindings[index]
+		binding.Id = strings.TrimSpace(binding.Id)
+		binding.ProviderModelId = strings.TrimSpace(binding.ProviderModelId)
+		binding.PriceModelId = strings.TrimSpace(binding.PriceModelId)
+		binding.DisplayName = strings.TrimSpace(binding.DisplayName)
+		binding.Modality = strings.ToLower(strings.TrimSpace(binding.Modality))
+		binding.AdapterPreset = strings.TrimSpace(binding.AdapterPreset)
+		binding.ParameterTemplate = strings.TrimSpace(binding.ParameterTemplate)
+		for groupIndex := range binding.CanaryGroups {
+			binding.CanaryGroups[groupIndex] = strings.TrimSpace(binding.CanaryGroups[groupIndex])
+		}
+		for schemaIndex := range binding.ParameterSchema {
+			item := &binding.ParameterSchema[schemaIndex]
+			item.Id = strings.TrimSpace(item.Id)
+			item.Label = strings.TrimSpace(item.Label)
+			item.ShortLabel = strings.TrimSpace(item.ShortLabel)
+			item.Description = strings.TrimSpace(item.Description)
+			item.Type = strings.ToLower(strings.TrimSpace(item.Type))
+			for optionIndex := range item.Options {
+				item.Options[optionIndex].Label = strings.TrimSpace(item.Options[optionIndex].Label)
+			}
+		}
+	}
 	if err := ValidateCreativeModelBindingsConfig(config); err != nil {
 		return CreativeModelBindingsConfig{}, err
 	}
 	return config, nil
+}
+
+func NormalizeCreativeModelBindingsConfigJSON(config CreativeModelBindingsConfig) (string, error) {
+	normalized, err := NormalizeCreativeModelBindingsConfig(config)
+	if err != nil {
+		return "", err
+	}
+	bytes, err := common.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
+}
+
+func UpdateStoredCreativeModelBindingsConfig(config CreativeModelBindingsConfig) (CreativeModelBindingsConfig, string, error) {
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	if err != nil {
+		return CreativeModelBindingsConfig{}, "", err
+	}
+	if err := model.UpdateOption(CreativeModelBindingsOptionKey, configJSON); err != nil {
+		return CreativeModelBindingsConfig{}, "", err
+	}
+	parsed, err := ParseCreativeModelBindingsConfig(configJSON)
+	if err != nil {
+		return CreativeModelBindingsConfig{}, "", err
+	}
+	return parsed, configJSON, nil
+}
+
+func BuildCreativeModelBindingsDryRun(config CreativeModelBindingsConfig) (CreativeModelBindingsDryRunResult, error) {
+	config, err := NormalizeCreativeModelBindingsConfig(config)
+	if err != nil {
+		return CreativeModelBindingsDryRunResult{}, err
+	}
+	result := CreativeModelBindingsDryRunResult{
+		NoProviderCall: true,
+		Bindings:       make([]CreativeModelBindingDryRunItem, 0, len(config.Bindings)),
+	}
+	for _, binding := range config.Bindings {
+		preview := map[string]any{
+			"transport":         "mock",
+			"operation":         "image_task_preview",
+			"model":             binding.ProviderModelId,
+			"priceModel":        binding.PriceModelId,
+			"parameterTemplate": binding.ParameterTemplate,
+		}
+		result.Bindings = append(result.Bindings, CreativeModelBindingDryRunItem{
+			Id:                binding.Id,
+			ProviderModelId:   binding.ProviderModelId,
+			PriceModelId:      binding.PriceModelId,
+			Modality:          binding.Modality,
+			Enabled:           binding.Enabled,
+			AdapterPreset:     binding.AdapterPreset,
+			ParameterTemplate: binding.ParameterTemplate,
+			RequestPreview:    RedactCreativeDryRunValue(preview).(map[string]any),
+		})
+	}
+	return result, nil
+}
+
+func validateCreativeModelBindingsRawJSONKeys(raw string) error {
+	var root map[string]json.RawMessage
+	if err := common.Unmarshal([]byte(raw), &root); err != nil {
+		return err
+	}
+	if root == nil {
+		return errors.New("creative.model_bindings must be an object")
+	}
+	if err := validateCreativeRawObjectKeys("creative.model_bindings", root, creativeModelBindingsTopLevelKeys); err != nil {
+		return err
+	}
+	if rawBindings, ok := root["bindings"]; ok {
+		if creativeRawJSONIsNull(rawBindings) {
+			return errors.New("creative.model_bindings bindings must be an array")
+		}
+		var bindings []json.RawMessage
+		if err := common.Unmarshal(rawBindings, &bindings); err != nil {
+			return fmt.Errorf("creative.model_bindings bindings must be an array: %w", err)
+		}
+		for index, rawBinding := range bindings {
+			scope := fmt.Sprintf("creative.model_bindings.bindings[%d]", index)
+			var binding map[string]json.RawMessage
+			if err := common.Unmarshal(rawBinding, &binding); err != nil {
+				return fmt.Errorf("%s must be an object: %w", scope, err)
+			}
+			if err := validateCreativeRawObjectKeys(scope, binding, creativeModelBindingAllowedKeys); err != nil {
+				return err
+			}
+			if rawSchema, ok := binding["parameterSchema"]; ok {
+				if creativeRawJSONIsNull(rawSchema) {
+					return fmt.Errorf("%s.parameterSchema must be an array", scope)
+				}
+				var schema []json.RawMessage
+				if err := common.Unmarshal(rawSchema, &schema); err != nil {
+					return fmt.Errorf("%s.parameterSchema must be an array: %w", scope, err)
+				}
+				for schemaIndex, rawItem := range schema {
+					schemaScope := fmt.Sprintf("%s.parameterSchema[%d]", scope, schemaIndex)
+					var item map[string]json.RawMessage
+					if err := common.Unmarshal(rawItem, &item); err != nil {
+						return fmt.Errorf("%s must be an object: %w", schemaScope, err)
+					}
+					if err := validateCreativeRawObjectKeys(schemaScope, item, creativeParameterSchemaAllowedKeys); err != nil {
+						return err
+					}
+					if rawOptions, ok := item["options"]; ok {
+						if creativeRawJSONIsNull(rawOptions) {
+							return fmt.Errorf("%s.options must be an array", schemaScope)
+						}
+						var options []json.RawMessage
+						if err := common.Unmarshal(rawOptions, &options); err != nil {
+							return fmt.Errorf("%s.options must be an array: %w", schemaScope, err)
+						}
+						for optionIndex, rawOption := range options {
+							optionScope := fmt.Sprintf("%s.options[%d]", schemaScope, optionIndex)
+							var option map[string]json.RawMessage
+							if err := common.Unmarshal(rawOption, &option); err != nil {
+								return fmt.Errorf("%s must be an object: %w", optionScope, err)
+							}
+							if err := validateCreativeRawObjectKeys(optionScope, option, creativeParameterOptionAllowedKeys); err != nil {
+								return err
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func creativeRawJSONIsNull(raw json.RawMessage) bool {
+	return strings.EqualFold(strings.TrimSpace(string(raw)), "null")
+}
+
+func validateCreativeRawObjectKeys(scope string, object map[string]json.RawMessage, allowed map[string]struct{}) error {
+	for key := range object {
+		if _, ok := allowed[key]; ok {
+			continue
+		}
+		if CreativeForbiddenKey(key) {
+			return fmt.Errorf("%s contains forbidden key %q", scope, key)
+		}
+		return fmt.Errorf("%s contains unsupported key %q", scope, key)
+	}
+	return nil
+}
+
+func RedactCreativeDryRunValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		redacted := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if CreativeForbiddenKey(key) {
+				redacted[key] = "[REDACTED]"
+				continue
+			}
+			redacted[key] = RedactCreativeDryRunValue(item)
+		}
+		return redacted
+	case []any:
+		redacted := make([]any, 0, len(typed))
+		for _, item := range typed {
+			redacted = append(redacted, RedactCreativeDryRunValue(item))
+		}
+		return redacted
+	case []string:
+		redacted := make([]any, 0, len(typed))
+		for _, item := range typed {
+			redacted = append(redacted, RedactCreativeDryRunValue(item))
+		}
+		return redacted
+	default:
+		if text, ok := value.(string); ok && CreativeSensitiveStringValue(text) {
+			return "[REDACTED]"
+		}
+		return value
+	}
 }
 
 func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) error {
@@ -141,6 +463,9 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 		if CreativeForbiddenKey(id) {
 			return fmt.Errorf("binding %q uses a forbidden control field", id)
 		}
+		if CreativeSensitiveStringValue(binding.DisplayName) {
+			return fmt.Errorf("binding %q displayName contains sensitive material", id)
+		}
 		key := strings.ToLower(id)
 		if _, ok := seen[key]; ok {
 			return fmt.Errorf("binding %q is duplicated", id)
@@ -149,11 +474,50 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 		if strings.TrimSpace(binding.ProviderModelId) == "" {
 			return fmt.Errorf("binding %q providerModelId is required", id)
 		}
+		if CreativeSensitiveStringValue(binding.ProviderModelId) {
+			return fmt.Errorf("binding %q providerModelId contains sensitive material", id)
+		}
 		if strings.TrimSpace(binding.PriceModelId) == "" {
 			return fmt.Errorf("binding %q priceModelId is required", id)
 		}
-		if strings.TrimSpace(binding.Modality) == "" {
+		if CreativeSensitiveStringValue(binding.PriceModelId) {
+			return fmt.Errorf("binding %q priceModelId contains sensitive material", id)
+		}
+		modality := strings.TrimSpace(strings.ToLower(binding.Modality))
+		if modality == "" {
 			return fmt.Errorf("binding %q modality is required", id)
+		}
+		if _, ok := creativeAdapterAllowedModalities[modality]; !ok {
+			return fmt.Errorf("binding %q modality %q is not supported", id, binding.Modality)
+		}
+		preset := strings.TrimSpace(binding.AdapterPreset)
+		if preset == "" {
+			return fmt.Errorf("binding %q adapterPreset is required", id)
+		}
+		if _, ok := creativeAdapterAllowedPresets[preset]; !ok {
+			return fmt.Errorf("binding %q adapterPreset %q is not supported", id, binding.AdapterPreset)
+		}
+		template := strings.TrimSpace(binding.ParameterTemplate)
+		if template == "" {
+			return fmt.Errorf("binding %q parameterTemplate is required", id)
+		}
+		if _, ok := creativeAdapterAllowedParameterTemplates[template]; !ok {
+			return fmt.Errorf("binding %q parameterTemplate %q is not supported", id, binding.ParameterTemplate)
+		}
+		if binding.ChannelId != nil && *binding.ChannelId <= 0 {
+			return fmt.Errorf("binding %q channelId must be positive", id)
+		}
+		for _, group := range binding.CanaryGroups {
+			trimmedGroup := strings.TrimSpace(group)
+			if trimmedGroup == "" {
+				return fmt.Errorf("binding %q canaryGroups contains an empty group", id)
+			}
+			if CreativeSensitiveStringValue(trimmedGroup) {
+				return fmt.Errorf("binding %q canary group %q contains sensitive material", id, group)
+			}
+			if trimmedGroup != "*" && CreativeForbiddenKey(trimmedGroup) {
+				return fmt.Errorf("binding %q canary group %q is forbidden", id, group)
+			}
 		}
 		if err := ValidateCreativeParameterSchema(binding.ParameterSchema); err != nil {
 			return fmt.Errorf("binding %q parameterSchema invalid: %w", id, err)
@@ -186,6 +550,11 @@ func ValidateCreativeParameterSchema(schema []dto.CreativeParameterSchemaItem) e
 		if strings.TrimSpace(item.Label) == "" {
 			return fmt.Errorf("schema item %q label is required", id)
 		}
+		for _, label := range []string{item.Label, item.ShortLabel, item.Description} {
+			if CreativeSensitiveStringValue(label) {
+				return fmt.Errorf("schema item %q display text contains sensitive material", id)
+			}
+		}
 		paramType := strings.TrimSpace(strings.ToLower(item.Type))
 		if _, ok := creativeParameterAllowedTypes[paramType]; !ok {
 			return fmt.Errorf("schema item %q has unsupported type %q", id, item.Type)
@@ -193,6 +562,9 @@ func ValidateCreativeParameterSchema(schema []dto.CreativeParameterSchemaItem) e
 		if item.DefaultValue != nil {
 			if !creativeParameterScalarValue(item.DefaultValue) {
 				return fmt.Errorf("schema item %q defaultValue has non-scalar value", id)
+			}
+			if creativeParameterValueSensitive(item.DefaultValue) {
+				return fmt.Errorf("schema item %q defaultValue contains sensitive material", id)
 			}
 			if paramType != "enum" && !creativeParameterDefaultMatchesType(paramType, item.DefaultValue) {
 				return fmt.Errorf("schema item %q defaultValue does not match type %q", id, paramType)
@@ -205,6 +577,9 @@ func ValidateCreativeParameterSchema(schema []dto.CreativeParameterSchemaItem) e
 			for _, option := range item.Options {
 				if !creativeParameterScalarValue(option.Value) {
 					return fmt.Errorf("schema item %q enum option has non-scalar value", id)
+				}
+				if creativeParameterValueSensitive(option.Value) || CreativeSensitiveStringValue(option.Label) {
+					return fmt.Errorf("schema item %q enum option contains sensitive material", id)
 				}
 			}
 			if item.DefaultValue != nil && !creativeParameterOptionContainsValue(item.Options, item.DefaultValue) {
@@ -270,7 +645,13 @@ func creativeOptionList(key string) []string {
 }
 
 func NormalizeCreativeForbiddenKey(key string) string {
-	return strings.NewReplacer("_", "", "-", "", ":", "", " ", "", ".", "").Replace(strings.ToLower(strings.TrimSpace(key)))
+	var builder strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(key)) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
 
 func CreativeForbiddenKey(key string) bool {
@@ -284,6 +665,42 @@ func CreativeForbiddenKey(key string) bool {
 		}
 	}
 	return false
+}
+
+func CreativeSensitiveStringValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "://") || strings.HasPrefix(lower, "data:") {
+		return true
+	}
+	for _, marker := range []string{
+		"bearer ",
+		"sk-",
+		"x-amz-",
+		"x-oss-",
+		"signature=",
+		"credential=",
+		"expires=",
+		"api_key=",
+		"apikey=",
+		"access_key=",
+		"accesskey=",
+		"secret=",
+		"token=",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return CreativeForbiddenKey(trimmed)
+}
+
+func creativeParameterValueSensitive(value any) bool {
+	text, ok := value.(string)
+	return ok && CreativeSensitiveStringValue(text)
 }
 
 func creativeParameterDefaultMatchesType(paramType string, value any) bool {

@@ -1,7 +1,13 @@
 package service
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -197,9 +203,12 @@ func TestCreativeForbiddenKeyNormalizerCoversControlVariants(t *testing.T) {
 		"headers.Authorization",
 		"callback_url",
 		"owner-id",
+		"X-Notify",
 		"sourceProfileId",
 		"idempotency:key",
 		"base URL",
+		"base\tURL",
+		"headers/Authorization",
 	} {
 		require.True(t, CreativeForbiddenKey(key), key)
 	}
@@ -243,6 +252,43 @@ func TestParseCreativeModelBindingsConfigValidatesVersionAndDistinctIDs(t *testi
 	require.NotEqual(t, config.Bindings[0].ProviderModelId, config.Bindings[0].PriceModelId)
 }
 
+func validCreativeModelBindingsConfigForTest() CreativeModelBindingsConfig {
+	return CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "mock:gpt-image-2:preview",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "mock-gpt-image-2-price",
+			DisplayName:       "Mock GPT Image 2",
+			Modality:          "image",
+			Enabled:           false,
+			CanaryGroups:      []string{"test"},
+			AdapterPreset:     "mock_image_task",
+			ParameterTemplate: "mock_gpt_image",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{{
+				Id:           "size",
+				Label:        "Size",
+				Type:         "enum",
+				DefaultValue: "1024x1024",
+				Options:      []dto.CreativeParamOption{{Value: "1024x1024", Label: "1024×1024"}},
+			}},
+		}},
+	}
+}
+
+func creativeFakeSecretCorpusForTest() []string {
+	return []string{
+		"Bearer sk-test-secret",
+		"sk-test-secret",
+		"https://provider.example/v1/images?X-Amz-Signature=abc&X-Amz-Credential=credential",
+		"https://oss.example/object?Expires=999999&Signature=abc",
+		"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+		"api_key=secret",
+		"access_key=secret",
+		"token=secret",
+	}
+}
+
 func TestParseCreativeModelBindingsConfigRejectsUnsafeConfig(t *testing.T) {
 	tests := []struct {
 		name string
@@ -254,19 +300,59 @@ func TestParseCreativeModelBindingsConfigRejectsUnsafeConfig(t *testing.T) {
 		},
 		{
 			name: "duplicate binding id",
-			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image"},{"id":"MOCK:IMAGE:A","providerModelId":"p","priceModelId":"price","modality":"image"}]}`,
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image"},{"id":"MOCK:IMAGE:A","providerModelId":"p","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image"}]}`,
 		},
 		{
 			name: "forbidden binding id",
-			raw:  `{"version":1,"bindings":[{"id":"callback:image","providerModelId":"p","priceModelId":"price","modality":"image"}]}`,
+			raw:  `{"version":1,"bindings":[{"id":"callback:image","providerModelId":"p","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image"}]}`,
 		},
 		{
 			name: "missing provider model",
-			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","priceModelId":"price","modality":"image"}]}`,
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image"}]}`,
 		},
 		{
 			name: "forbidden schema id",
-			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image","parameterSchema":[{"id":"notifyHook","label":"Hook","type":"string"}]}]}`,
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image","parameterSchema":[{"id":"notifyHook","label":"Hook","type":"string"}]}]}`,
+		},
+		{
+			name: "forbidden raw admin key",
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image","baseURL":"https://provider.example"}]}`,
+		},
+		{
+			name: "unsupported raw schema key",
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image","parameterSchema":[{"id":"size","label":"Size","type":"string","headers":{"Authorization":"Bearer sk-test"}}]}]}`,
+		},
+		{
+			name: "sensitive provider model value",
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"https://provider.example/model?X-Amz-Signature=secret","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image"}]}`,
+		},
+		{
+			name: "sensitive price model value",
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"Bearer sk-test-secret","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image"}]}`,
+		},
+		{
+			name: "null root",
+			raw:  `null`,
+		},
+		{
+			name: "null bindings",
+			raw:  `{"version":1,"bindings":null}`,
+		},
+		{
+			name: "null parameter schema",
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image","parameterSchema":null}]}`,
+		},
+		{
+			name: "null options",
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"mock_gpt_image","parameterSchema":[{"id":"size","label":"Size","type":"enum","options":null}]}]}`,
+		},
+		{
+			name: "duomi preset blocked",
+			raw:  `{"version":1,"bindings":[{"id":"duomi:image:a","providerModelId":"gpt-image-2","priceModelId":"price","modality":"image","adapterPreset":"duomi_gpt_image","parameterTemplate":"mock_gpt_image"}]}`,
+		},
+		{
+			name: "grsai template blocked",
+			raw:  `{"version":1,"bindings":[{"id":"grsai:image:a","providerModelId":"gpt-image-2","priceModelId":"price","modality":"image","adapterPreset":"mock_image_task","parameterTemplate":"grsai_gpt_image"}]}`,
 		},
 	}
 
@@ -276,4 +362,226 @@ func TestParseCreativeModelBindingsConfigRejectsUnsafeConfig(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestCreativeModelBindingsRejectFakeSecretCorpusBeforeDiagnostics(t *testing.T) {
+	for _, secret := range creativeFakeSecretCorpusForTest() {
+		t.Run("provider "+secret, func(t *testing.T) {
+			config := validCreativeModelBindingsConfigForTest()
+			config.Bindings[0].ProviderModelId = secret
+			state, err := BuildCreativeModelBindingsAdminState(config)
+			require.Error(t, err)
+			require.Empty(t, state.ConfigJSON)
+			require.NotContains(t, err.Error(), secret)
+		})
+		t.Run("schema default "+secret, func(t *testing.T) {
+			config := validCreativeModelBindingsConfigForTest()
+			config.Bindings[0].ParameterSchema = []dto.CreativeParameterSchemaItem{{
+				Id:           "style",
+				Label:        "Style",
+				Type:         "string",
+				DefaultValue: secret,
+			}}
+			state, err := BuildCreativeModelBindingsAdminState(config)
+			require.Error(t, err)
+			require.Empty(t, state.ConfigJSON)
+			require.NotContains(t, err.Error(), secret)
+		})
+		t.Run("schema option "+secret, func(t *testing.T) {
+			config := validCreativeModelBindingsConfigForTest()
+			config.Bindings[0].ParameterSchema = []dto.CreativeParameterSchemaItem{{
+				Id:           "style",
+				Label:        "Style",
+				Type:         "enum",
+				DefaultValue: "safe",
+				Options: []dto.CreativeParamOption{
+					{Value: "safe", Label: "Safe"},
+					{Value: secret, Label: "Unsafe"},
+				},
+			}}
+			_, err := BuildCreativeModelBindingsDryRun(config)
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), secret)
+		})
+	}
+}
+
+func TestNormalizeCreativeModelBindingsConfigTrimsAndPersistsCanonicalValues(t *testing.T) {
+	raw := `{
+		"version": 1,
+		"bindings": [{
+			"id": " mock:gpt-image-2:preview ",
+			"providerModelId": " gpt-image-2 ",
+			"priceModelId": " mock-gpt-image-2-price ",
+			"displayName": " Mock GPT Image 2 ",
+			"modality": " IMAGE ",
+			"enabled": false,
+			"canaryGroups": [" test "],
+			"adapterPreset": " mock_image_task ",
+			"parameterTemplate": " mock_gpt_image ",
+			"parameterSchema": [{
+				"id": " size ",
+				"label": " Size ",
+				"type": " ENUM ",
+				"defaultValue": "1024x1024",
+				"options": [{"value": "1024x1024", "label": " 1024×1024 "}]
+			}]
+		}]
+	}`
+
+	config, err := ParseCreativeModelBindingsConfig(raw)
+	require.NoError(t, err)
+	binding := config.Bindings[0]
+	require.Equal(t, "mock:gpt-image-2:preview", binding.Id)
+	require.Equal(t, "gpt-image-2", binding.ProviderModelId)
+	require.Equal(t, "mock-gpt-image-2-price", binding.PriceModelId)
+	require.Equal(t, "Mock GPT Image 2", binding.DisplayName)
+	require.Equal(t, "image", binding.Modality)
+	require.Equal(t, []string{"test"}, binding.CanaryGroups)
+	require.Equal(t, "mock_image_task", binding.AdapterPreset)
+	require.Equal(t, "mock_gpt_image", binding.ParameterTemplate)
+	require.Equal(t, "size", binding.ParameterSchema[0].Id)
+	require.Equal(t, "Size", binding.ParameterSchema[0].Label)
+	require.Equal(t, "enum", binding.ParameterSchema[0].Type)
+	require.Equal(t, "1024×1024", binding.ParameterSchema[0].Options[0].Label)
+
+	normalizedJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	require.NotContains(t, normalizedJSON, `" IMAGE "`)
+	require.NotContains(t, normalizedJSON, `" size "`)
+}
+
+func TestValidateCreativeModelBindingsConfigRejectsUnsupportedRoutingFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*CreativeModelBindingConfig)
+	}{
+		{
+			name: "unknown preset",
+			mutate: func(binding *CreativeModelBindingConfig) {
+				binding.AdapterPreset = "duomi_live_call"
+			},
+		},
+		{
+			name: "unknown parameter template",
+			mutate: func(binding *CreativeModelBindingConfig) {
+				binding.ParameterTemplate = "grsai_live_template"
+			},
+		},
+		{
+			name: "wrong modality",
+			mutate: func(binding *CreativeModelBindingConfig) {
+				binding.Modality = "video"
+			},
+		},
+		{
+			name: "invalid channel",
+			mutate: func(binding *CreativeModelBindingConfig) {
+				channelId := 0
+				binding.ChannelId = &channelId
+			},
+		},
+		{
+			name: "forbidden canary group",
+			mutate: func(binding *CreativeModelBindingConfig) {
+				binding.CanaryGroups = []string{"ownerId"}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := validCreativeModelBindingsConfigForTest()
+			tt.mutate(&config.Bindings[0])
+			require.Error(t, ValidateCreativeModelBindingsConfig(config))
+		})
+	}
+}
+
+func TestBuildCreativeModelBindingsDryRunIsMockOnlyAndRedactsUnsafePreviewFields(t *testing.T) {
+	config := validCreativeModelBindingsConfigForTest()
+
+	result, err := BuildCreativeModelBindingsDryRun(config)
+	require.NoError(t, err)
+	require.True(t, result.NoProviderCall)
+	require.Len(t, result.Bindings, 1)
+	require.Equal(t, "mock", result.Bindings[0].RequestPreview["transport"])
+	require.Equal(t, "gpt-image-2", result.Bindings[0].RequestPreview["model"])
+
+	redacted := RedactCreativeDryRunValue(map[string]any{
+		"Authorization": "Bearer sk-test",
+		"baseURL":       "https://provider.example",
+		"model":         "https://provider.example/model?X-Amz-Signature=secret",
+		"artifact":      creativeFakeSecretCorpusForTest(),
+		"body": map[string]any{
+			"callbackUrl": "https://evil.example/cb",
+			"size":        "1024x1024",
+		},
+	}).(map[string]any)
+	require.Equal(t, "[REDACTED]", redacted["Authorization"])
+	require.Equal(t, "[REDACTED]", redacted["baseURL"])
+	require.Equal(t, "[REDACTED]", redacted["model"])
+	for _, artifact := range redacted["artifact"].([]any) {
+		require.Equal(t, "[REDACTED]", artifact)
+	}
+	body := redacted["body"].(map[string]any)
+	require.Equal(t, "[REDACTED]", body["callbackUrl"])
+	require.Equal(t, "1024x1024", body["size"])
+}
+
+func TestBuildCreativeModelBindingsDryRunHasNoProviderTransportReferences(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	sourceFile := filepath.Join(filepath.Dir(testFile), "creative_model_capability.go")
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, sourceFile, nil, 0)
+	require.NoError(t, err)
+
+	var dryRunFunc *ast.FuncDecl
+	for _, declaration := range parsed.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
+		if ok && fn.Name.Name == "BuildCreativeModelBindingsDryRun" {
+			dryRunFunc = fn
+			break
+		}
+	}
+	require.NotNil(t, dryRunFunc)
+
+	forbiddenIdents := map[string]struct{}{
+		"http":          {},
+		"DefaultClient": {},
+		"GetHttpClient": {},
+		"RoundTrip":     {},
+		"Do":            {},
+		"Channel":       {},
+		"BaseURL":       {},
+		"ApiKey":        {},
+		"APIKey":        {},
+		"Key":           {},
+	}
+	forbiddenStringFragments := []string{
+		"duomi",
+		"grsai",
+		"http://",
+		"https://",
+		"authorization",
+		"api_key",
+		"base_url",
+	}
+
+	ast.Inspect(dryRunFunc.Body, func(node ast.Node) bool {
+		switch typed := node.(type) {
+		case *ast.Ident:
+			if _, forbidden := forbiddenIdents[typed.Name]; forbidden {
+				t.Fatalf("BuildCreativeModelBindingsDryRun must remain provider-transport-free, found identifier %q", typed.Name)
+			}
+		case *ast.BasicLit:
+			for _, fragment := range forbiddenStringFragments {
+				if strings.Contains(strings.ToLower(typed.Value), fragment) {
+					t.Fatalf("BuildCreativeModelBindingsDryRun must remain provider-transport-free, found literal %s", typed.Value)
+				}
+			}
+		}
+		return true
+	})
 }

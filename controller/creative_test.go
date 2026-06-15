@@ -401,6 +401,55 @@ func TestCreativeListModelsIncludesMockPreviewBindingOnlyForEnabledCanary(t *tes
 	requireCreativeResponseOmitsSecretFields(t, recorder.Body.String())
 }
 
+func TestCreativeListModelsIncludesStoredEnabledBindingsAndDedupesPreview(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 3501)
+	seedCreativeControllerModelPool(t)
+	withCreativeImageTaskMockBinding(t, true, []string{"default"})
+	router := newCreativeSessionTestRouter(3501)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/creative/api/models", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	payload := decodeCreativeResponse(t, recorder)
+	models, ok := payload["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, models, 31)
+	count := 0
+	for _, rawModel := range models {
+		modelObject, ok := rawModel.(map[string]any)
+		require.True(t, ok)
+		if modelObject["id"] != "mock:gpt-image-2:preview" {
+			continue
+		}
+		count++
+		require.Equal(t, "gpt-image-2", modelObject["providerModelId"])
+		require.Equal(t, "mock-gpt-image-2-price", modelObject["priceModelId"])
+		schema, ok := modelObject["parameterSchema"].([]any)
+		require.True(t, ok)
+		require.NotEmpty(t, schema)
+	}
+	require.Equal(t, 1, count)
+
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterCanaryGroupsOptionKey: "default",
+	})
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/creative/api/models", nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	models = decodeCreativeResponse(t, recorder)["data"].([]any)
+	require.Len(t, models, 31)
+	count = 0
+	for _, rawModel := range models {
+		modelObject := rawModel.(map[string]any)
+		if modelObject["id"] == "mock:gpt-image-2:preview" {
+			count++
+		}
+	}
+	require.Equal(t, 1, count)
+}
+
 func TestCreativeListModelsDoesNotIncludeMockPreviewBindingWhenCanaryMisses(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 36)

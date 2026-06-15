@@ -237,6 +237,49 @@ func TestResolveCreativeImageModelBindingForGroupIsMockOnlyAndGroupScoped(t *tes
 	require.Error(t, err)
 }
 
+func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchema(t *testing.T) {
+	config := validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = true
+	config.Bindings[0].CanaryGroups = []string{"test"}
+	config.Bindings[0].ParameterSchema = append(config.Bindings[0].ParameterSchema, dto.CreativeParameterSchemaItem{
+		Id:     "serverOnly",
+		Label:  "Server Only",
+		Type:   "string",
+		Hidden: true,
+	})
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:  configJSON,
+	})
+	items := GetStoredCreativeModelBindingsCatalogForGroup("test")
+	require.Len(t, items, 1)
+	require.Equal(t, "mock:gpt-image-2:preview", items[0].Id)
+	require.Equal(t, "gpt-image-2", items[0].ProviderModelId)
+	require.Equal(t, "mock-gpt-image-2-price", items[0].PriceModelId)
+	require.Len(t, items[0].ParameterSchema, 1)
+	require.Equal(t, "size", items[0].ParameterSchema[0].Id)
+
+	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("default"))
+
+	config.Bindings[0].Enabled = false
+	disabledJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:  disabledJSON,
+	})
+	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("test"))
+
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey: "",
+		CreativeModelBindingsOptionKey:  configJSON,
+	})
+	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("test"))
+}
+
 func withCreativeAdapterPreviewOptions(t *testing.T, enabled string, canaryGroups string) {
 	t.Helper()
 

@@ -190,6 +190,45 @@ func GetCreativePreviewModelBindingsForGroup(userGroup string) []dto.CreativeMod
 	return []dto.CreativeModelCatalogItem{binding}
 }
 
+func GetStoredCreativeModelBindingsCatalogForGroup(userGroup string) []dto.CreativeModelCatalogItem {
+	if !creativeAdapterPreviewEnabled() {
+		return nil
+	}
+	config, err := GetStoredCreativeModelBindingsConfig()
+	if err != nil {
+		common.SysError("invalid creative model bindings config: " + err.Error())
+		return nil
+	}
+	items := make([]dto.CreativeModelCatalogItem, 0, len(config.Bindings))
+	for _, binding := range config.Bindings {
+		if !binding.Enabled || binding.Modality != "image" || !creativeBindingCanaryGroupAllowed(binding, userGroup) {
+			continue
+		}
+		if binding.AdapterPreset != "mock_image_task" || binding.ParameterTemplate != "mock_gpt_image" {
+			continue
+		}
+		if err := ValidateCreativeParameterSchema(binding.ParameterSchema); err != nil {
+			common.SysError("invalid stored creative binding schema for " + binding.Id + ": " + err.Error())
+			continue
+		}
+		items = append(items, creativeModelCatalogItemFromBinding(binding))
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		left, right := items[i], items[j]
+		if left.SortOrder != nil && right.SortOrder != nil && *left.SortOrder != *right.SortOrder {
+			return *left.SortOrder < *right.SortOrder
+		}
+		if left.SortOrder != nil && right.SortOrder == nil {
+			return true
+		}
+		if left.SortOrder == nil && right.SortOrder != nil {
+			return false
+		}
+		return left.Id < right.Id
+	})
+	return items
+}
+
 func ParseCreativeModelBindingsConfig(raw string) (CreativeModelBindingsConfig, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -302,6 +341,47 @@ func GetCreativeModelBindingByID(bindingID string) (CreativeModelBindingConfig, 
 		}
 	}
 	return CreativeModelBindingConfig{}, false, nil
+}
+
+func creativeModelCatalogItemFromBinding(binding CreativeModelBindingConfig) dto.CreativeModelCatalogItem {
+	displayName := binding.DisplayName
+	if displayName == "" {
+		displayName = binding.Id
+	}
+	return dto.CreativeModelCatalogItem{
+		Id:                     binding.Id,
+		Object:                 "model",
+		Created:                0,
+		OwnedBy:                "new-api-creative",
+		SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeImageGeneration},
+		ProviderModelId:        binding.ProviderModelId,
+		PriceModelId:           binding.PriceModelId,
+		Label:                  displayName,
+		DisplayName:            displayName,
+		ShortLabel:             displayName,
+		Description:            "Creative adapter binding managed by new-api.",
+		Type:                   binding.Modality,
+		Modality:               binding.Modality,
+		Vendor:                 "new-api-creative",
+		Tags:                   []string{"creative-adapter", "mock", binding.Modality},
+		RecommendedScore:       binding.RecommendedScore,
+		SortOrder:              binding.SortOrder,
+		ParameterSchema:        creativeVisibleParameterSchema(binding.ParameterSchema),
+	}
+}
+
+func creativeVisibleParameterSchema(schema []dto.CreativeParameterSchemaItem) []dto.CreativeParameterSchemaItem {
+	if len(schema) == 0 {
+		return nil
+	}
+	visible := make([]dto.CreativeParameterSchemaItem, 0, len(schema))
+	for _, item := range schema {
+		if item.Hidden {
+			continue
+		}
+		visible = append(visible, item)
+	}
+	return visible
 }
 
 func creativeBindingCanaryGroupAllowed(binding CreativeModelBindingConfig, userGroup string) bool {

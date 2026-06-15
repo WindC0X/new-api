@@ -1400,12 +1400,31 @@ func creativeModelsForUser(c *gin.Context) ([]dto.CreativeModelCatalogItem, stri
 	for _, modelName := range modelNames {
 		models = append(models, buildCreativeModelCatalogItem(modelName, ownerByModel, metadataByModel, vendorNameByID))
 	}
-	models = append(models, service.GetCreativePreviewModelBindingsForGroup(userCache.Group)...)
+	models = appendCreativeModelCatalogItemsDedup(models, service.GetStoredCreativeModelBindingsCatalogForGroup(userCache.Group)...)
+	models = appendCreativeModelCatalogItemsDedup(models, service.GetCreativePreviewModelBindingsForGroup(userCache.Group)...)
 	encoded, err := common.Marshal(models)
 	if err != nil {
 		return nil, "", err
 	}
 	return models, common.Sha1(encoded), nil
+}
+
+func appendCreativeModelCatalogItemsDedup(models []dto.CreativeModelCatalogItem, extra ...dto.CreativeModelCatalogItem) []dto.CreativeModelCatalogItem {
+	if len(extra) == 0 {
+		return models
+	}
+	seen := make(map[string]struct{}, len(models)+len(extra))
+	for _, model := range models {
+		seen[model.Id] = struct{}{}
+	}
+	for _, model := range extra {
+		if _, ok := seen[model.Id]; ok {
+			continue
+		}
+		models = append(models, model)
+		seen[model.Id] = struct{}{}
+	}
+	return models
 }
 
 func buildCreativeModelCatalogItem(modelName string, ownerByModel map[string]string, metadataByModel map[string]model.Pricing, vendorNameByID map[int]string) dto.CreativeModelCatalogItem {

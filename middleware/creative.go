@@ -318,23 +318,67 @@ func creativeRequestOrigin(c *gin.Context) string {
 		return ""
 	}
 
-	scheme := ""
-	if c.Request.URL != nil {
-		scheme = strings.TrimSpace(c.Request.URL.Scheme)
-	}
-	if scheme == "" {
-		if c.Request.TLS != nil {
-			scheme = "https"
-		} else {
-			scheme = "http"
-		}
-	}
+	scheme := creativeRequestScheme(c.Request)
 
 	host := strings.TrimSpace(c.Request.Host)
 	if host == "" {
 		return ""
 	}
 	return scheme + "://" + host
+}
+
+func creativeRequestScheme(request *http.Request) string {
+	if scheme := creativeForwardedProto(request.Header.Get("Forwarded")); scheme != "" {
+		return scheme
+	}
+	if scheme := creativeFirstHeaderScheme(request.Header.Get("X-Forwarded-Proto")); scheme != "" {
+		return scheme
+	}
+	if scheme := creativeFirstHeaderScheme(request.Header.Get("X-Forwarded-Scheme")); scheme != "" {
+		return scheme
+	}
+	if request.TLS != nil {
+		return "https"
+	}
+	if request.URL != nil {
+		if scheme := creativeSafeScheme(request.URL.Scheme); scheme != "" {
+			return scheme
+		}
+	}
+	return "http"
+}
+
+func creativeForwardedProto(header string) string {
+	if strings.TrimSpace(header) == "" {
+		return ""
+	}
+	firstForwarded := strings.Split(header, ",")[0]
+	for _, part := range strings.Split(firstForwarded, ";") {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "proto") {
+			continue
+		}
+		value = strings.Trim(strings.TrimSpace(value), `"`)
+		return creativeSafeScheme(value)
+	}
+	return ""
+}
+
+func creativeFirstHeaderScheme(header string) string {
+	if strings.TrimSpace(header) == "" {
+		return ""
+	}
+	return creativeSafeScheme(strings.Split(header, ",")[0])
+}
+
+func creativeSafeScheme(scheme string) string {
+	scheme = strings.ToLower(strings.TrimSpace(scheme))
+	switch scheme {
+	case "http", "https":
+		return scheme
+	default:
+		return ""
+	}
 }
 
 func creativeOriginHeaderMatches(origin string, expectedOrigin string) bool {

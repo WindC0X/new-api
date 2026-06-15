@@ -41,18 +41,78 @@ func TestCreativeRelayModelReaderSupportsMultipartAndReplaysBody(t *testing.T) {
 	require.Equal(t, []string{"a cat playing piano"}, form.Value["prompt"])
 }
 
-func TestCreativeOriginIgnoresUntrustedForwardedHeaders(t *testing.T) {
+func TestCreativeOriginUsesForwardedProtoButKeepsRequestHost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "http://internal.example/creative/relay/v1/suno/fetch/task_1", nil)
 	ctx.Request.Host = "internal.example"
-	ctx.Request.Header.Set("Origin", "https://evil.example")
+	ctx.Request.Header.Set("Origin", "https://internal.example")
 	ctx.Request.Header.Set("X-Forwarded-Proto", "https")
 	ctx.Request.Header.Set("X-Forwarded-Host", "evil.example")
 
+	require.True(t, creativeUnsafeRequestOriginIsValid(ctx))
+	require.Equal(t, "https://internal.example", creativeRequestOrigin(ctx))
+
+	ctx.Request.Header.Set("Origin", "https://evil.example")
 	require.False(t, creativeUnsafeRequestOriginIsValid(ctx))
-	require.Equal(t, "http://internal.example", creativeRequestOrigin(ctx))
+}
+
+func TestCreativeOriginUsesStandardForwardedProto(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "http://console.example/creative/api/bootstrap", nil)
+	ctx.Request.Host = "console.example"
+	ctx.Request.Header.Set("Forwarded", `for=127.0.0.1;proto=https;host=evil.example`)
+	ctx.Request.Header.Set("Referer", "https://console.example/creative/")
+
+	require.Equal(t, "https://console.example", creativeRequestOrigin(ctx))
+	require.True(t, creativeUnsafeRequestOriginIsValid(ctx))
+
+	ctx.Request.Header.Set("Referer", "https://evil.example/creative/")
+	require.False(t, creativeUnsafeRequestOriginIsValid(ctx))
+}
+
+func TestCreativeOriginUsesFirstForwardedProtoValue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "http://console.example/creative/api/bootstrap", nil)
+	ctx.Request.Host = "console.example"
+	ctx.Request.Header.Set("X-Forwarded-Proto", "https,http")
+	ctx.Request.Header.Set("Origin", "https://console.example")
+
+	require.Equal(t, "https://console.example", creativeRequestOrigin(ctx))
+	require.True(t, creativeUnsafeRequestOriginIsValid(ctx))
+}
+
+func TestCreativeOriginWithoutForwardedHeadersKeepsHTTPFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "http://console.example/creative/api/bootstrap", nil)
+	ctx.Request.Host = "console.example"
+	ctx.Request.Header.Set("Origin", "http://console.example")
+
+	require.Equal(t, "http://console.example", creativeRequestOrigin(ctx))
+	require.True(t, creativeUnsafeRequestOriginIsValid(ctx))
+
+	ctx.Request.Header.Set("Origin", "https://console.example")
+	require.False(t, creativeUnsafeRequestOriginIsValid(ctx))
+}
+
+func TestCreativeOriginIgnoresInvalidForwardedProto(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "http://console.example/creative/api/bootstrap", nil)
+	ctx.Request.Host = "console.example"
+	ctx.Request.Header.Set("X-Forwarded-Proto", "javascript")
+	ctx.Request.Header.Set("Origin", "http://console.example")
+
+	require.Equal(t, "http://console.example", creativeRequestOrigin(ctx))
+	require.True(t, creativeUnsafeRequestOriginIsValid(ctx))
 }
 
 func TestCreativeRejectCrossOriginWhenPresentAllowsOriginlessSafeGet(t *testing.T) {

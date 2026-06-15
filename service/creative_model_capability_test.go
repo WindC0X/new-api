@@ -425,6 +425,10 @@ func creativeFakeSecretCorpusForTest() []string {
 		"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
 		"api_key=secret",
 		"access_key=secret",
+		"cookie=session-secret",
+		"csrf=csrf-secret",
+		"nonce=nonce-secret",
+		"object_key=private/object.png",
 		"token=secret",
 	}
 }

@@ -121,6 +121,49 @@ func TestCreativeModelBindingsAdminRejectsUnsafeAndAccessToken(t *testing.T) {
 	require.Contains(t, decodeCreativeResponse(t, accessToken)["message"], "dashboard session")
 }
 
+func TestCreativeModelBindingsAdminRejectsFakeSecretCorpusWithoutLogging(t *testing.T) {
+	router := newCreativeModelBindingsAdminTestRouter(false)
+	secrets := []string{
+		"Bearer sk-test-secret",
+		"sk-test-secret",
+		"https://provider.example/v1/images?X-Amz-Signature=abc&X-Amz-Credential=credential",
+		"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+		"cookie=session-secret",
+		"csrf=csrf-secret",
+		"nonce=nonce-secret",
+		"object_key=private/object.png",
+		"token=secret",
+	}
+	var logBuffer bytes.Buffer
+	common.LogWriterMu.Lock()
+	originalWriter := gin.DefaultWriter
+	gin.DefaultWriter = &logBuffer
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = originalWriter
+		common.LogWriterMu.Unlock()
+	})
+
+	for _, secret := range secrets {
+		t.Run(secret, func(t *testing.T) {
+			payload := validCreativeModelBindingsPayload()
+			config := payload["config"].(map[string]any)
+			bindings := config["bindings"].([]any)
+			binding := bindings[0].(map[string]any)
+			binding["providerModelId"] = secret
+
+			validate := performJSONRequest(t, router, http.MethodPost, "/api/creative/model-bindings/validate", payload)
+			require.Equal(t, http.StatusBadRequest, validate.Code)
+			dryRun := performJSONRequest(t, router, http.MethodPost, "/api/creative/model-bindings/dry-run", payload)
+			require.Equal(t, http.StatusBadRequest, dryRun.Code)
+			for _, surface := range []string{validate.Body.String(), dryRun.Body.String(), logBuffer.String()} {
+				require.NotContains(t, surface, secret)
+			}
+		})
+	}
+}
+
 func TestCreativeModelBindingsAdminRouteRequiresNonce(t *testing.T) {
 	router := newCreativeModelBindingsRouteTestRouter(t, common.RoleRootUser)
 	encoded, err := common.Marshal(validCreativeModelBindingsPayload())

@@ -9,6 +9,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1824,6 +1827,78 @@ func TestCreativeImageTaskRouteBoundariesAndResolverFailClosed(t *testing.T) {
 	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, disabled), "error")["message"], "disabled")
 }
 
+func TestCreativeImageTaskRejectsBoundaryAliasesBeforeMockInsert(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 808)
+	seedCreativeControllerModelPool(t)
+	withCreativeImageTaskMockBinding(t, true, []string{"default"})
+	router := newCreativeRelayBrokerTestRouter(t, 808, func(c *gin.Context) {
+		t.Fatal("image task route must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	body := map[string]any{"model": "mock:gpt-image-2:preview", "prompt": "safe mock image"}
+	previousInsert := creativeImageTaskInsert
+	insertCount := 0
+	creativeImageTaskInsert = func(task *model.Task) error {
+		insertCount++
+		return previousInsert(task)
+	}
+	t.Cleanup(func() { creativeImageTaskInsert = previousInsert })
+
+	noSessionHeaders := map[string]string{
+		"Origin":          "http://example.com",
+		"Idempotency-Key": "image-no-session",
+	}
+	noSession := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, nil, noSessionHeaders)
+	require.NotEqual(t, http.StatusAccepted, noSession.Code)
+
+	badNonceHeaders := map[string]string{
+		"Origin":           "http://example.com",
+		"X-Creative-CSRF":  auth.csrfToken,
+		"X-Creative-Nonce": "wrong-nonce",
+		"Idempotency-Key":  "image-bad-nonce",
+	}
+	badNonce := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, badNonceHeaders)
+	require.Equal(t, http.StatusForbidden, badNonce.Code)
+
+	headerHeaders := creativeSameOriginNonceHeaders(auth)
+	headerHeaders["Idempotency-Key"] = "image-forbidden-header"
+	headerHeaders["X-Notify-Hook"] = "https://evil.example/callback"
+	headerCase := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, headerHeaders)
+	require.Equal(t, http.StatusBadRequest, headerCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, headerCase), "error")["message"], "forbidden field X-Notify-Hook")
+
+	queryHeaders := creativeSameOriginNonceHeaders(auth)
+	queryHeaders["Idempotency-Key"] = "image-forbidden-query"
+	queryCase := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks?ownerId=999", body, auth.cookies, queryHeaders)
+	require.Equal(t, http.StatusBadRequest, queryCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, queryCase), "error")["message"], "forbidden field ownerId")
+
+	formHeaders := creativeSameOriginNonceHeaders(auth)
+	formHeaders["Idempotency-Key"] = "image-forbidden-form"
+	formCase := performCreativeSessionMultipart(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", auth.cookies, formHeaders, map[string]string{
+		"model":         "mock:gpt-image-2:preview",
+		"prompt":        "safe mock image",
+		"mj-api-secret": "leaked-secret",
+	})
+	require.Equal(t, http.StatusBadRequest, formCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, formCase), "error")["message"], "forbidden field mj-api-secret")
+
+	fileHeaders := creativeSameOriginNonceHeaders(auth)
+	fileHeaders["Idempotency-Key"] = "image-forbidden-file"
+	fileCase := performCreativeSessionMultipartWithFiles(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", auth.cookies, fileHeaders, map[string]string{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe mock image",
+	}, map[string]string{
+		"callback": "file contents",
+	})
+	require.Equal(t, http.StatusBadRequest, fileCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, fileCase), "error")["message"], "forbidden field callback")
+
+	require.Equal(t, 0, insertCount)
+}
+
 func TestCreativeImageSyncRouteRejectsManagedBindingBeforeProviderRelay(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
@@ -1938,6 +2013,31 @@ func TestCreativeImageTaskAcceptedInsertFailureKeepsIdempotencyGuard(t *testing.
 	var record model.CreativeVideoIdempotency
 	require.NoError(t, model.DB.Where("user_id = ? AND scope = ? AND request_id = ?", 805, creativeImageTaskIdempotencyScope, "image-insert-fail").First(&record).Error)
 	require.NotEmpty(t, record.TaskID)
+}
+
+func TestCreativeImageTaskSourceHasNoProviderTransportReferences(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	sourceFile := filepath.Join(filepath.Dir(thisFile), "creative_image_tasks.go")
+	source, err := os.ReadFile(sourceFile)
+	require.NoError(t, err)
+	text := string(source)
+	for _, forbidden := range []string{
+		"CreativeRelaySessionBroker",
+		"Distribute(",
+		"http.NewRequest",
+		"DoRequest(",
+		"ChannelBaseUrl",
+		"ApiKey",
+		"Authorization",
+		"baseURL",
+		"Duomi",
+		"GrsAI",
+		"duomi",
+		"grsai",
+	} {
+		require.NotContains(t, text, forbidden)
+	}
 }
 
 func TestCreativeSubmitIdempotencyKeepsRecordAfterProviderAcceptedLocalFailure(t *testing.T) {

@@ -12,7 +12,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestCreativePreviewBindingsAreFailClosedByDefault(t *testing.T) {
@@ -640,6 +643,60 @@ func TestValidateCreativeModelBindingsConfigRejectsUnsupportedRoutingFields(t *t
 			require.Error(t, ValidateCreativeModelBindingsConfig(config))
 		})
 	}
+}
+
+func TestValidateCreativeModelBindingsConfigRejectsMissingOrDisabledChannel(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	config := validCreativeModelBindingsConfigForTest()
+	missingChannelID := 404
+	config.Bindings[0].ChannelId = &missingChannelID
+	require.Error(t, ValidateCreativeModelBindingsConfig(config))
+
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:     12,
+		Type:   1,
+		Key:    "redacted",
+		Status: common.ChannelStatusManuallyDisabled,
+		Name:   "disabled creative channel",
+	}).Error)
+	config = validCreativeModelBindingsConfigForTest()
+	disabledChannelID := 12
+	config.Bindings[0].ChannelId = &disabledChannelID
+	require.Error(t, ValidateCreativeModelBindingsConfig(config))
+
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 12).Update("status", common.ChannelStatusEnabled).Error)
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+}
+
+func setupCreativeCapabilityServiceTestDB(t *testing.T) {
+	t.Helper()
+	originalDB := model.DB
+	originalUsingSQLite := common.UsingSQLite
+	originalUsingMySQL := common.UsingMySQL
+	originalUsingPostgreSQL := common.UsingPostgreSQL
+	originalRedisEnabled := common.RedisEnabled
+
+	common.UsingSQLite = true
+	common.UsingMySQL = false
+	common.UsingPostgreSQL = false
+	common.RedisEnabled = false
+
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	model.DB = db
+	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+
+	t.Cleanup(func() {
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+		model.DB = originalDB
+		common.UsingSQLite = originalUsingSQLite
+		common.UsingMySQL = originalUsingMySQL
+		common.UsingPostgreSQL = originalUsingPostgreSQL
+		common.RedisEnabled = originalRedisEnabled
+	})
 }
 
 func TestBuildCreativeModelBindingsDryRunIsMockOnlyAndRedactsUnsafePreviewFields(t *testing.T) {

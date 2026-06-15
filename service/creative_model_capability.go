@@ -717,6 +717,15 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 		if binding.ChannelId != nil && *binding.ChannelId <= 0 {
 			return fmt.Errorf("binding %q channelId must be positive", id)
 		}
+		if binding.ChannelId != nil {
+			channel, err := model.GetChannelById(*binding.ChannelId, false)
+			if err != nil {
+				return fmt.Errorf("binding %q channelId %d was not found", id, *binding.ChannelId)
+			}
+			if channel.Status != common.ChannelStatusEnabled {
+				return fmt.Errorf("binding %q channelId %d is disabled", id, *binding.ChannelId)
+			}
+		}
 		for _, group := range binding.CanaryGroups {
 			trimmedGroup := strings.TrimSpace(group)
 			if trimmedGroup == "" {

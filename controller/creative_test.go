@@ -2054,6 +2054,67 @@ func TestCreativeImageTaskFetchIsOwnerScopedAndPlatformScoped(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, unmanaged.Code)
 }
 
+func TestCreativeImageTaskPublicSurfacesDoNotLeakFakeSecretCorpus(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 810)
+	corpus := []string{
+		"Bearer sk-test-secret",
+		"sk-test-secret",
+		"https://provider.example/v1/images?X-Amz-Signature=abc&X-Amz-Credential=credential",
+		"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+		"token=secret",
+	}
+	task := &model.Task{
+		TaskID:    "task_image_secret_private",
+		UserId:    810,
+		Group:     "default",
+		Platform:  constant.TaskPlatformCreativeImage,
+		Action:    creativeImageTaskActionGenerate,
+		Status:    model.TaskStatusSuccess,
+		Progress:  "100%",
+		ChannelId: 99,
+		Quota:     123,
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: corpus[0],
+			Key:            corpus[1],
+			ResultURL:      corpus[2],
+			BillingContext: &model.TaskBillingContext{OriginModelName: "mock-gpt-image-2-price", PreConsumedQuota: 456},
+		},
+		FailReason: strings.Join(corpus, " "),
+	}
+	task.SetData(creativeImageTaskMetadata{
+		Version:           1,
+		CreativeManaged:   true,
+		BindingId:         "mock:gpt-image-2:preview",
+		ProviderModelId:   "gpt-image-2",
+		PriceModelId:      "mock-gpt-image-2-price",
+		AdapterPreset:     "mock_image_task",
+		ParameterTemplate: "mock_gpt_image",
+		ChannelId:         99,
+	})
+	require.NoError(t, model.DB.Create(task).Error)
+	router := newCreativeRelayBrokerTestRouter(t, 810, func(c *gin.Context) {})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	fetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_image_secret_private", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, fetch.Code)
+	content := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_image_secret_private/content", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, content.Code)
+
+	publicBodies := []string{fetch.Body.String(), content.Body.String()}
+	for _, body := range publicBodies {
+		require.NotContains(t, body, "user_id")
+		require.NotContains(t, body, "channel_id")
+		require.NotContains(t, body, "channelId")
+		require.NotContains(t, body, "quota")
+		require.NotContains(t, body, "private_data")
+		for _, secret := range corpus {
+			require.NotContains(t, body, secret)
+		}
+	}
+}
+
 func TestCreativeImageTaskHandlersRejectAccessTokenOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tt := range []struct {

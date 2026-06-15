@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -2701,6 +2702,111 @@ func TestCreativeRelayRejectsForbiddenAliasesInHeaderQueryFormAndFileNames(t *te
 	require.Equal(t, 0, relayReachedCount)
 }
 
+func TestCreativeForbiddenNormalizerMatrixCoversAdminSchemaDryRunAndRelay(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 7503)
+	seedCreativeControllerModelPool(t)
+
+	dangerousKeys := []string{
+		"notifyHook",
+		"ownerId",
+		"callback_url",
+		"x_upstream_base_url",
+		"providerOverride",
+		"channelId",
+		"modelName",
+	}
+	for _, key := range dangerousKeys {
+		t.Run("service "+key, func(t *testing.T) {
+			require.True(t, service.CreativeForbiddenKey(key), key)
+			require.Error(t, service.ValidateCreativeParameterSchema([]dto.CreativeParameterSchemaItem{{
+				Id:    key,
+				Label: "Unsafe",
+				Type:  "string",
+			}}))
+			raw, err := common.Marshal(map[string]any{
+				"version": 1,
+				"bindings": []any{map[string]any{
+					"id":                "mock:image:matrix",
+					"providerModelId":   "p",
+					"priceModelId":      "price",
+					"modality":          "image",
+					"adapterPreset":     "mock_image_task",
+					"parameterTemplate": "mock_gpt_image",
+					key:                 "unsafe",
+				}},
+			})
+			require.NoError(t, err)
+			_, err = service.ParseCreativeModelBindingsConfig(string(raw))
+			require.Error(t, err)
+			_, err = service.ValidateCreativeUserParamsForSchema([]dto.CreativeParameterSchemaItem{{
+				Id:    "size",
+				Label: "Size",
+				Type:  "string",
+			}}, map[string]any{key: "unsafe"})
+			require.Error(t, err)
+			redacted := service.RedactCreativeDryRunValue(map[string]any{key: "unsafe"}).(map[string]any)
+			require.Equal(t, "[REDACTED]", redacted[key])
+		})
+	}
+	_, err := service.ValidateCreativeUserParamsForSchema([]dto.CreativeParameterSchemaItem{{
+		Id:     "serverOnly",
+		Label:  "Server Only",
+		Type:   "string",
+		Hidden: true,
+	}}, map[string]any{"serverOnly": "unsafe"})
+	require.Error(t, err)
+
+	relayReachedCount := 0
+	router := newCreativeRelayBrokerTestRouter(t, 7503, func(c *gin.Context) {
+		relayReachedCount++
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	for _, key := range dangerousKeys {
+		t.Run("relay json "+key, func(t *testing.T) {
+			recorder := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/generations", map[string]any{
+				"model":  "creative-model-05",
+				"prompt": "safe image prompt",
+				"params": map[string]any{key: "unsafe"},
+			}, auth.cookies, creativeSameOriginNonceHeaders(auth))
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+		})
+		t.Run("relay query "+key, func(t *testing.T) {
+			target := "/creative/relay/v1/images/generations?" + url.Values{key: []string{"unsafe"}}.Encode()
+			recorder := performCreativeSessionJSON(t, router, http.MethodPost, target, map[string]any{
+				"model":  "creative-model-05",
+				"prompt": "safe image prompt",
+			}, auth.cookies, creativeSameOriginNonceHeaders(auth))
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+		})
+		t.Run("relay form "+key, func(t *testing.T) {
+			recorder := performCreativeSessionForm(t, router, http.MethodPost, "/creative/relay/v1/images/generations", auth.cookies, creativeSameOriginNonceHeaders(auth), map[string]string{
+				"model":  "creative-model-05",
+				"prompt": "safe image prompt",
+				key:      "unsafe",
+			})
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+		})
+		t.Run("relay multipart field "+key, func(t *testing.T) {
+			recorder := performCreativeSessionMultipart(t, router, http.MethodPost, "/creative/relay/v1/images/generations", auth.cookies, creativeSameOriginNonceHeaders(auth), map[string]string{
+				"model":  "creative-model-05",
+				"prompt": "safe image prompt",
+				key:      "unsafe",
+			})
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+		})
+		t.Run("relay multipart file "+key, func(t *testing.T) {
+			recorder := performCreativeSessionMultipartWithFiles(t, router, http.MethodPost, "/creative/relay/v1/images/generations", auth.cookies, creativeSameOriginNonceHeaders(auth), map[string]string{
+				"model":  "creative-model-05",
+				"prompt": "safe image prompt",
+			}, map[string]string{key: "file contents"})
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+		})
+	}
+	require.Equal(t, 0, relayReachedCount)
+}
+
 func TestCreativeMJSubmitIdempotencyIsScopedAndReplaysPublicTask(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 76)
@@ -3650,6 +3756,26 @@ func performCreativeSessionMultipart(t *testing.T, router *gin.Engine, method st
 	t.Helper()
 
 	return performCreativeSessionMultipartWithFiles(t, router, method, target, cookies, headers, fields, nil)
+}
+
+func performCreativeSessionForm(t *testing.T, router *gin.Engine, method string, target string, cookies []*http.Cookie, headers map[string]string, fields map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	values := url.Values{}
+	for key, value := range fields {
+		values.Set(key, value)
+	}
+	request := httptest.NewRequest(method, target, strings.NewReader(values.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, sessionCookie := range cookies {
+		request.AddCookie(sessionCookie)
+	}
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	return recorder
 }
 
 func performCreativeSessionMultipartWithFiles(t *testing.T, router *gin.Engine, method string, target string, cookies []*http.Cookie, headers map[string]string, fields map[string]string, files map[string]string) *httptest.ResponseRecorder {

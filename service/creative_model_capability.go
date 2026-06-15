@@ -128,6 +128,16 @@ type CreativeModelBindingDryRunItem struct {
 	RequestPreview    map[string]any `json:"requestPreview"`
 }
 
+type CreativeResolvedModelBinding struct {
+	Binding           CreativeModelBindingConfig
+	BindingId         string         `json:"bindingId"`
+	ProviderModelId   string         `json:"providerModelId"`
+	PriceModelId      string         `json:"priceModelId"`
+	AdapterPreset     string         `json:"adapterPreset"`
+	ParameterTemplate string         `json:"parameterTemplate"`
+	UserParams        map[string]any `json:"userParams"`
+}
+
 var creativeParameterForbiddenFragments = []string{
 	"apikey",
 	"authorization",
@@ -230,6 +240,126 @@ func GetCreativeModelBindingsAdminState() (CreativeModelBindingsAdminState, erro
 		return CreativeModelBindingsAdminState{}, err
 	}
 	return BuildCreativeModelBindingsAdminState(config)
+}
+
+func ResolveCreativeImageModelBindingForGroup(bindingID string, userGroup string, userParams map[string]any) (CreativeResolvedModelBinding, error) {
+	if !creativeAdapterPreviewEnabled() {
+		return CreativeResolvedModelBinding{}, errors.New("creative adapter is disabled")
+	}
+	bindingID = strings.TrimSpace(bindingID)
+	if bindingID == "" {
+		return CreativeResolvedModelBinding{}, errors.New("creative image model is required")
+	}
+	config, err := GetStoredCreativeModelBindingsConfig()
+	if err != nil {
+		return CreativeResolvedModelBinding{}, err
+	}
+	for _, binding := range config.Bindings {
+		if binding.Id != bindingID {
+			continue
+		}
+		if !binding.Enabled {
+			return CreativeResolvedModelBinding{}, fmt.Errorf("creative image binding %q is disabled", bindingID)
+		}
+		if binding.Modality != "image" {
+			return CreativeResolvedModelBinding{}, fmt.Errorf("creative binding %q is not an image binding", bindingID)
+		}
+		if binding.AdapterPreset != "mock_image_task" || binding.ParameterTemplate != "mock_gpt_image" {
+			return CreativeResolvedModelBinding{}, fmt.Errorf("creative binding %q is not available for mock image tasks", bindingID)
+		}
+		if !creativeBindingCanaryGroupAllowed(binding, userGroup) {
+			return CreativeResolvedModelBinding{}, fmt.Errorf("creative image binding %q is not enabled for this group", bindingID)
+		}
+		normalizedParams, err := ValidateCreativeUserParamsForSchema(binding.ParameterSchema, userParams)
+		if err != nil {
+			return CreativeResolvedModelBinding{}, err
+		}
+		return CreativeResolvedModelBinding{
+			Binding:           binding,
+			BindingId:         binding.Id,
+			ProviderModelId:   binding.ProviderModelId,
+			PriceModelId:      binding.PriceModelId,
+			AdapterPreset:     binding.AdapterPreset,
+			ParameterTemplate: binding.ParameterTemplate,
+			UserParams:        normalizedParams,
+		}, nil
+	}
+	return CreativeResolvedModelBinding{}, fmt.Errorf("creative image binding %q was not found", bindingID)
+}
+
+func GetCreativeModelBindingByID(bindingID string) (CreativeModelBindingConfig, bool, error) {
+	bindingID = strings.TrimSpace(bindingID)
+	if bindingID == "" {
+		return CreativeModelBindingConfig{}, false, nil
+	}
+	config, err := GetStoredCreativeModelBindingsConfig()
+	if err != nil {
+		return CreativeModelBindingConfig{}, false, err
+	}
+	for _, binding := range config.Bindings {
+		if binding.Id == bindingID {
+			return binding, true, nil
+		}
+	}
+	return CreativeModelBindingConfig{}, false, nil
+}
+
+func creativeBindingCanaryGroupAllowed(binding CreativeModelBindingConfig, userGroup string) bool {
+	if len(binding.CanaryGroups) == 0 {
+		return false
+	}
+	userGroup = strings.TrimSpace(userGroup)
+	for _, group := range binding.CanaryGroups {
+		if group == "*" || group == userGroup {
+			return true
+		}
+	}
+	return false
+}
+
+func ValidateCreativeUserParamsForSchema(schema []dto.CreativeParameterSchemaItem, userParams map[string]any) (map[string]any, error) {
+	allowed := make(map[string]dto.CreativeParameterSchemaItem, len(schema))
+	hidden := make(map[string]struct{}, len(schema))
+	normalized := make(map[string]any, len(userParams))
+	for _, item := range schema {
+		if item.Hidden {
+			hidden[item.Id] = struct{}{}
+			continue
+		}
+		allowed[item.Id] = item
+	}
+	for key, value := range userParams {
+		trimmedKey := strings.TrimSpace(key)
+		item, ok := allowed[trimmedKey]
+		if !ok {
+			if _, isHidden := hidden[trimmedKey]; isHidden {
+				return nil, fmt.Errorf("userParams contains hidden field %q", trimmedKey)
+			}
+			if CreativeForbiddenKey(trimmedKey) {
+				return nil, fmt.Errorf("userParams contains forbidden field %q", trimmedKey)
+			}
+			return nil, fmt.Errorf("userParams contains unsupported field %q", trimmedKey)
+		}
+		typedValue, err := validateCreativeUserParamValue(item, value)
+		if err != nil {
+			return nil, fmt.Errorf("userParams.%s invalid: %w", trimmedKey, err)
+		}
+		normalized[trimmedKey] = typedValue
+	}
+	for _, item := range schema {
+		if item.Hidden {
+			if _, exists := userParams[item.Id]; exists {
+				return nil, fmt.Errorf("userParams contains hidden field %q", item.Id)
+			}
+			continue
+		}
+		if item.Required {
+			if _, exists := normalized[item.Id]; !exists {
+				return nil, fmt.Errorf("userParams.%s is required", item.Id)
+			}
+		}
+	}
+	return normalized, nil
 }
 
 func NormalizeCreativeModelBindingsConfig(config CreativeModelBindingsConfig) (CreativeModelBindingsConfig, error) {
@@ -588,6 +718,62 @@ func ValidateCreativeParameterSchema(schema []dto.CreativeParameterSchemaItem) e
 		}
 	}
 	return nil
+}
+
+func validateCreativeUserParamValue(item dto.CreativeParameterSchemaItem, value any) (any, error) {
+	if value == nil {
+		return nil, errors.New("value is required")
+	}
+	if creativeParameterValueSensitive(value) {
+		return nil, errors.New("value contains sensitive material")
+	}
+	paramType := strings.TrimSpace(strings.ToLower(item.Type))
+	switch paramType {
+	case "enum":
+		if !creativeParameterScalarValue(value) {
+			return nil, errors.New("enum value must be scalar")
+		}
+		if !creativeParameterOptionContainsValue(item.Options, value) {
+			return nil, errors.New("enum value is not allowed")
+		}
+		return value, nil
+	case "string":
+		if _, ok := value.(string); !ok {
+			return nil, errors.New("string value expected")
+		}
+		return value, nil
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return nil, errors.New("boolean value expected")
+		}
+		return value, nil
+	case "number":
+		number, _, ok := creativeParameterNumber(value)
+		if !ok {
+			return nil, errors.New("number value expected")
+		}
+		if item.Min != nil && number < *item.Min {
+			return nil, errors.New("number is below minimum")
+		}
+		if item.Max != nil && number > *item.Max {
+			return nil, errors.New("number is above maximum")
+		}
+		return value, nil
+	case "integer":
+		number, _, ok := creativeParameterNumber(value)
+		if !ok || math.Trunc(number) != number {
+			return nil, errors.New("integer value expected")
+		}
+		if item.Min != nil && number < *item.Min {
+			return nil, errors.New("integer is below minimum")
+		}
+		if item.Max != nil && number > *item.Max {
+			return nil, errors.New("integer is above maximum")
+		}
+		return int(number), nil
+	default:
+		return nil, errors.New("unsupported schema type")
+	}
 }
 
 func creativeAdapterPreviewEnabled() bool {

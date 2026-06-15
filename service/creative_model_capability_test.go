@@ -166,6 +166,77 @@ func TestValidateCreativeParameterSchemaAcceptsTypedValues(t *testing.T) {
 	require.NoError(t, ValidateCreativeParameterSchema(schema))
 }
 
+func TestValidateCreativeUserParamsForSchemaIsTypedAndFailClosed(t *testing.T) {
+	schema := []dto.CreativeParameterSchemaItem{
+		{
+			Id:      "size",
+			Label:   "Size",
+			Type:    "enum",
+			Options: []dto.CreativeParamOption{{Value: "1024x1024", Label: "1024×1024"}},
+		},
+		{Id: "seed", Label: "Seed", Type: "integer", Min: common.GetPointer[float64](1), Max: common.GetPointer[float64](10)},
+		{Id: "enhance", Label: "Enhance", Type: "boolean"},
+		{Id: "internalCallback", Label: "Internal Callback", Type: "string", Hidden: true},
+	}
+
+	normalized, err := ValidateCreativeUserParamsForSchema(schema, map[string]any{
+		"size":    "1024x1024",
+		"seed":    float64(2),
+		"enhance": true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "1024x1024", normalized["size"])
+	require.Equal(t, 2, normalized["seed"])
+	require.Equal(t, true, normalized["enhance"])
+
+	for _, tt := range []struct {
+		name   string
+		params map[string]any
+	}{
+		{name: "hidden field", params: map[string]any{"internalCallback": "server-only"}},
+		{name: "forbidden field", params: map[string]any{"callback": "https://evil.example/cb"}},
+		{name: "unsupported field", params: map[string]any{"style": "oil"}},
+		{name: "wrong type", params: map[string]any{"enhance": "true"}},
+		{name: "enum outside options", params: map[string]any{"size": "2048x2048"}},
+		{name: "integer outside bounds", params: map[string]any{"seed": float64(11)}},
+		{name: "sensitive value", params: map[string]any{"size": "https://provider.example/object?token=secret"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ValidateCreativeUserParamsForSchema(schema, tt.params)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestResolveCreativeImageModelBindingForGroupIsMockOnlyAndGroupScoped(t *testing.T) {
+	config := validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = true
+	config.Bindings[0].CanaryGroups = []string{"test"}
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:  configJSON,
+	})
+
+	resolved, err := ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "test", map[string]any{"size": "1024x1024"})
+	require.NoError(t, err)
+	require.Equal(t, "mock:gpt-image-2:preview", resolved.BindingId)
+	require.Equal(t, "gpt-image-2", resolved.ProviderModelId)
+	require.Equal(t, "mock-gpt-image-2-price", resolved.PriceModelId)
+	require.Equal(t, map[string]any{"size": "1024x1024"}, resolved.UserParams)
+
+	_, err = ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "default", map[string]any{"size": "1024x1024"})
+	require.Error(t, err)
+
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey: "",
+		CreativeModelBindingsOptionKey:  configJSON,
+	})
+	_, err = ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "test", map[string]any{"size": "1024x1024"})
+	require.Error(t, err)
+}
+
 func withCreativeAdapterPreviewOptions(t *testing.T, enabled string, canaryGroups string) {
 	t.Helper()
 
@@ -184,6 +255,32 @@ func withCreativeAdapterPreviewOptions(t *testing.T, enabled string, canaryGroup
 		delete(copyMap, CreativeAdapterCanaryGroupsOptionKey)
 	} else {
 		copyMap[CreativeAdapterCanaryGroupsOptionKey] = canaryGroups
+	}
+	common.OptionMap = copyMap
+	common.OptionMapRWMutex.Unlock()
+
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalMap
+		common.OptionMapRWMutex.Unlock()
+	})
+}
+
+func withCreativeCapabilityOptions(t *testing.T, values map[string]string) {
+	t.Helper()
+
+	common.OptionMapRWMutex.Lock()
+	originalMap := common.OptionMap
+	copyMap := make(map[string]string, len(originalMap)+len(values))
+	for key, value := range originalMap {
+		copyMap[key] = value
+	}
+	for key, value := range values {
+		if value == "" {
+			delete(copyMap, key)
+			continue
+		}
+		copyMap[key] = value
 	}
 	common.OptionMap = copyMap
 	common.OptionMapRWMutex.Unlock()

@@ -1715,6 +1715,231 @@ func TestCreativeVideoSubmitIdempotencyCleansRecordWhenSessionBrokerRejects(t *t
 	require.Equal(t, int64(0), count)
 }
 
+func TestCreativeImageTaskSubmitFetchAndReplayAreMockOnlyAndPrivate(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 801)
+	seedCreativeControllerModelPool(t)
+	withCreativeImageTaskMockBinding(t, true, []string{"default"})
+	router := newCreativeRelayBrokerTestRouter(t, 801, func(c *gin.Context) {
+		t.Fatal("image task route must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "image-task-submit-1"
+
+	submit := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe mock image",
+		"userParams": map[string]any{
+			"size":    "1024x1024",
+			"quality": "auto",
+		},
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusAccepted, submit.Code)
+	require.NotContains(t, submit.Body.String(), "user_id")
+	require.NotContains(t, submit.Body.String(), "channel_id")
+	require.NotContains(t, submit.Body.String(), "channelId")
+	require.NotContains(t, submit.Body.String(), "quota")
+	require.NotContains(t, submit.Body.String(), "private_data")
+	require.NotContains(t, submit.Body.String(), "mock://")
+	require.NotContains(t, submit.Body.String(), "token=secret")
+	payload := decodeCreativeResponse(t, submit)
+	taskID, ok := payload["task_id"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, taskID)
+	require.Equal(t, "completed", payload["status"])
+	require.Equal(t, "mock:gpt-image-2:preview", payload["model"])
+	result := creativeResponseObject(t, payload, "result")
+	require.Equal(t, "/creative/relay/v1/images/tasks/"+taskID+"/content", result["url"])
+	metadata := creativeResponseObject(t, payload, "metadata")
+	require.Equal(t, "mock:gpt-image-2:preview", metadata["bindingId"])
+	require.Equal(t, "gpt-image-2", metadata["providerModelId"])
+	require.Equal(t, "mock-gpt-image-2-price", metadata["priceModelId"])
+
+	replay := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe mock image",
+		"userParams": map[string]any{
+			"size":    "1024x1024",
+			"quality": "auto",
+		},
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusOK, replay.Code)
+	require.Equal(t, taskID, decodeCreativeResponse(t, replay)["task_id"])
+
+	fetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/"+taskID, nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, fetch.Code)
+	require.Equal(t, taskID, decodeCreativeResponse(t, fetch)["task_id"])
+	require.NotContains(t, fetch.Body.String(), "mock://")
+	require.NotContains(t, fetch.Body.String(), "token=secret")
+
+	content := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/"+taskID+"/content", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, content.Code)
+	require.Equal(t, "image/png", content.Header().Get("Content-Type"))
+	require.Equal(t, "private, no-store", content.Header().Get("Cache-Control"))
+}
+
+func TestCreativeImageTaskRouteBoundariesAndResolverFailClosed(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 802)
+	seedCreativeControllerModelPool(t)
+	withCreativeImageTaskMockBinding(t, true, []string{"default"})
+	router := newCreativeRelayBrokerTestRouter(t, 802, func(c *gin.Context) {
+		t.Fatal("image task route must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	body := map[string]any{"model": "mock:gpt-image-2:preview", "prompt": "safe mock image", "userParams": map[string]any{"size": "1024x1024"}}
+	missingNonce := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, map[string]string{"Idempotency-Key": "missing-nonce"})
+	require.Equal(t, http.StatusForbidden, missingNonce.Code)
+
+	crossHeaders := creativeNonceHeaders(auth)
+	crossHeaders["Origin"] = "https://evil.example"
+	crossHeaders["Idempotency-Key"] = "cross-origin"
+	crossOrigin := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, crossHeaders)
+	require.Equal(t, http.StatusForbidden, crossOrigin.Code)
+
+	noIdempotency := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, creativeSameOriginNonceHeaders(auth))
+	require.Equal(t, http.StatusBadRequest, noIdempotency.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, noIdempotency), "error")["message"], "Idempotency-Key")
+
+	forbiddenHeaders := creativeSameOriginNonceHeaders(auth)
+	forbiddenHeaders["Idempotency-Key"] = "forbidden-body"
+	forbidden := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe",
+		"userParams": map[string]any{
+			"callback": "https://evil.example/cb",
+		},
+	}, auth.cookies, forbiddenHeaders)
+	require.Equal(t, http.StatusBadRequest, forbidden.Code)
+
+	disabledHeaders := creativeSameOriginNonceHeaders(auth)
+	disabledHeaders["Idempotency-Key"] = "adapter-disabled"
+	withCreativeImageTaskMockBinding(t, false, []string{"default"})
+	disabled := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, disabledHeaders)
+	require.Equal(t, http.StatusBadRequest, disabled.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, disabled), "error")["message"], "disabled")
+}
+
+func TestCreativeImageSyncRouteRejectsManagedBindingBeforeProviderRelay(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 807)
+	seedCreativeControllerModelPool(t)
+	withCreativeImageTaskMockBinding(t, true, []string{"default"})
+	router := newCreativeRelayBrokerTestRouter(t, 807, func(c *gin.Context) {
+		t.Fatal("managed image binding sync route must fail before provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	recorder := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/generations", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe mock image",
+		"userParams": map[string]any{
+			"size": "1024x1024",
+		},
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, recorder), "error")["message"], "/creative/relay/v1/images/tasks")
+	require.NotContains(t, recorder.Body.String(), "mock://")
+	require.NotContains(t, recorder.Body.String(), "token=secret")
+}
+
+func TestCreativeImageTaskFetchIsOwnerScopedAndPlatformScoped(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 803)
+	seedCreativeControllerUser(t, 804)
+	withCreativeImageTaskMockBinding(t, true, []string{"default"})
+	task := &model.Task{
+		TaskID:      "task_image_owner_scope",
+		UserId:      804,
+		Group:       "default",
+		Platform:    constant.TaskPlatformCreativeImage,
+		Action:      creativeImageTaskActionGenerate,
+		Status:      model.TaskStatusSuccess,
+		Progress:    "100%",
+		PrivateData: model.TaskPrivateData{ResultURL: "mock://creative-image/task_image_owner_scope?token=secret"},
+	}
+	task.SetData(creativeImageTaskMetadata{
+		Version:           1,
+		CreativeManaged:   true,
+		BindingId:         "mock:gpt-image-2:preview",
+		ProviderModelId:   "gpt-image-2",
+		PriceModelId:      "mock-gpt-image-2-price",
+		AdapterPreset:     "mock_image_task",
+		ParameterTemplate: "mock_gpt_image",
+	})
+	require.NoError(t, model.DB.Create(task).Error)
+	router := newCreativeRelayBrokerTestRouter(t, 803, func(c *gin.Context) {})
+	auth := bootstrapCreativeSessionAuth(t, router)
+
+	fetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_image_owner_scope", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusNotFound, fetch.Code)
+	require.NotContains(t, fetch.Body.String(), "token=secret")
+}
+
+func TestCreativeImageTaskHandlersRejectAccessTokenOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name    string
+		method  string
+		target  string
+		params  gin.Params
+		handler gin.HandlerFunc
+	}{
+		{name: "submit", method: http.MethodPost, target: "/creative/relay/v1/images/tasks", handler: CreativeRelayImageTaskSubmit},
+		{name: "fetch", method: http.MethodGet, target: "/creative/relay/v1/images/tasks/task_abc", params: gin.Params{{Key: "task_id", Value: "task_abc"}}, handler: CreativeRelayImageTaskFetch},
+		{name: "content", method: http.MethodGet, target: "/creative/relay/v1/images/tasks/task_abc/content", params: gin.Params{{Key: "task_id", Value: "task_abc"}}, handler: CreativeRelayImageTaskContent},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(tt.method, tt.target, strings.NewReader(`{"model":"mock:gpt-image-2:preview"}`))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			ctx.Params = tt.params
+			ctx.Set("id", 806)
+			ctx.Set("group", "default")
+			ctx.Set("use_access_token", true)
+
+			tt.handler(ctx)
+
+			require.Equal(t, http.StatusForbidden, recorder.Code)
+			errorObject := creativeResponseObject(t, decodeCreativeResponse(t, recorder), "error")
+			require.Contains(t, errorObject["message"], "browser session")
+		})
+	}
+}
+
+func TestCreativeImageTaskAcceptedInsertFailureKeepsIdempotencyGuard(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 805)
+	withCreativeImageTaskMockBinding(t, true, []string{"default"})
+	previousInsert := creativeImageTaskInsert
+	creativeImageTaskInsert = func(task *model.Task) error {
+		return fmt.Errorf("forced insert failure")
+	}
+	t.Cleanup(func() { creativeImageTaskInsert = previousInsert })
+
+	router := newCreativeRelayBrokerTestRouter(t, 805, func(c *gin.Context) {})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "image-insert-fail"
+	recorder := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe mock image",
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+
+	var record model.CreativeVideoIdempotency
+	require.NoError(t, model.DB.Where("user_id = ? AND scope = ? AND request_id = ?", 805, creativeImageTaskIdempotencyScope, "image-insert-fail").First(&record).Error)
+	require.NotEmpty(t, record.TaskID)
+}
+
 func TestCreativeSubmitIdempotencyKeepsRecordAfterProviderAcceptedLocalFailure(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
@@ -2833,6 +3058,54 @@ func withCreativeControllerOptions(t *testing.T, values map[string]string) {
 	})
 }
 
+func withCreativeImageTaskMockBinding(t *testing.T, adapterEnabled bool, canaryGroups []string) {
+	t.Helper()
+	config := service.CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []service.CreativeModelBindingConfig{{
+			Id:                "mock:gpt-image-2:preview",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "mock-gpt-image-2-price",
+			DisplayName:       "Mock GPT Image 2",
+			Modality:          "image",
+			Enabled:           true,
+			CanaryGroups:      canaryGroups,
+			AdapterPreset:     "mock_image_task",
+			ParameterTemplate: "mock_gpt_image",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{
+					Id:           "size",
+					Label:        "Size",
+					Type:         "enum",
+					DefaultValue: "1024x1024",
+					Options: []dto.CreativeParamOption{
+						{Value: "1024x1024", Label: "1024×1024"},
+					},
+				},
+				{
+					Id:           "quality",
+					Label:        "Quality",
+					Type:         "enum",
+					DefaultValue: "auto",
+					Options: []dto.CreativeParamOption{
+						{Value: "auto", Label: "Auto"},
+					},
+				},
+			},
+		}},
+	}
+	configJSON, err := service.NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	enabledValue := ""
+	if adapterEnabled {
+		enabledValue = "true"
+	}
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey: enabledValue,
+		service.CreativeModelBindingsOptionKey:  configJSON,
+	})
+}
+
 func seedCreativeControllerModelPool(t *testing.T) []string {
 	t.Helper()
 
@@ -2942,7 +3215,12 @@ func newCreativeRelayBrokerTestRouter(t *testing.T, userId int, relayHandler gin
 	generalRelayRouter := relayRouter.Group("")
 	generalRelayRouter.Use(middleware.CreativeRelaySessionBroker())
 	generalRelayRouter.POST("/chat/completions", relayHandler)
-	generalRelayRouter.POST("/images/generations", relayHandler)
+	relayRouter.POST("/images/generations", CreativeRejectManagedImageBindingSyncRoute(), middleware.CreativeRelaySessionBroker(), relayHandler)
+	imageTaskRouter := relayRouter.Group("/images/tasks")
+	imageTaskRouter.Use(CreativeImageTaskSubmitIdempotency())
+	imageTaskRouter.POST("", CreativeRelayImageTaskSubmit)
+	imageTaskRouter.GET("/:task_id", CreativeRelayImageTaskFetch)
+	imageTaskRouter.GET("/:task_id/content", CreativeRelayImageTaskContent)
 	videoRelayRouter := relayRouter.Group("/videos")
 	videoRelayRouter.Use(CreativeVideoRelayGate())
 	videoRelayRouter.Use(CreativeVideoSubmitIdempotency())

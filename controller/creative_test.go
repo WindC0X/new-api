@@ -2015,12 +2015,43 @@ func TestCreativeImageTaskFetchIsOwnerScopedAndPlatformScoped(t *testing.T) {
 		ParameterTemplate: "mock_gpt_image",
 	})
 	require.NoError(t, model.DB.Create(task).Error)
+	sameUserWrongPlatform := &model.Task{
+		TaskID:   "task_image_wrong_platform_same_user",
+		UserId:   803,
+		Group:    "default",
+		Platform: constant.TaskPlatformSuno,
+		Action:   creativeImageTaskActionGenerate,
+		Status:   model.TaskStatusSuccess,
+	}
+	sameUserWrongPlatform.SetData(creativeImageTaskMetadata{
+		Version:           1,
+		CreativeManaged:   true,
+		BindingId:         "mock:gpt-image-2:preview",
+		ProviderModelId:   "gpt-image-2",
+		PriceModelId:      "mock-gpt-image-2-price",
+		AdapterPreset:     "mock_image_task",
+		ParameterTemplate: "mock_gpt_image",
+	})
+	require.NoError(t, model.DB.Create(sameUserWrongPlatform).Error)
+	sameUserUnmanaged := &model.Task{
+		TaskID:   "task_image_unmanaged_same_user",
+		UserId:   803,
+		Group:    "default",
+		Platform: constant.TaskPlatformCreativeImage,
+		Action:   creativeImageTaskActionGenerate,
+		Status:   model.TaskStatusSuccess,
+	}
+	require.NoError(t, model.DB.Create(sameUserUnmanaged).Error)
 	router := newCreativeRelayBrokerTestRouter(t, 803, func(c *gin.Context) {})
 	auth := bootstrapCreativeSessionAuth(t, router)
 
 	fetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_image_owner_scope", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
 	require.Equal(t, http.StatusNotFound, fetch.Code)
 	require.NotContains(t, fetch.Body.String(), "token=secret")
+	wrongPlatform := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_image_wrong_platform_same_user", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusNotFound, wrongPlatform.Code)
+	unmanaged := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_image_unmanaged_same_user", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusNotFound, unmanaged.Code)
 }
 
 func TestCreativeImageTaskHandlersRejectAccessTokenOnly(t *testing.T) {

@@ -1415,7 +1415,10 @@ func buildCreativeModelCatalogItem(modelName string, ownerByModel map[string]str
 		Created:                base.Created,
 		OwnedBy:                base.OwnedBy,
 		SupportedEndpointTypes: append([]constant.EndpointType(nil), base.SupportedEndpointTypes...),
+		ProviderModelId:        base.Id,
+		PriceModelId:           base.Id,
 		Label:                  base.Id,
+		DisplayName:            base.Id,
 		ShortLabel:             creativeModelCatalogShortLabel(base.Id),
 		ShortCode:              creativeModelCatalogShortCode(base.Id, ""),
 		Type:                   creativeModelCatalogType(base.Id, base.SupportedEndpointTypes, nil),
@@ -1426,6 +1429,7 @@ func buildCreativeModelCatalogItem(modelName string, ownerByModel map[string]str
 	if metadata, ok := metadataByModel[modelName]; ok {
 		if label := creativeSafeCatalogString(metadata.ModelName, 128); label != "" {
 			item.Label = label
+			item.DisplayName = label
 		}
 		if description := creativeSafeCatalogDescription(metadata.Description); description != "" {
 			item.Description = description
@@ -1446,6 +1450,9 @@ func buildCreativeModelCatalogItem(modelName string, ownerByModel map[string]str
 	}
 	if item.ShortLabel == "" {
 		item.ShortLabel = creativeModelCatalogShortLabel(item.Label)
+	}
+	if item.DisplayName == "" {
+		item.DisplayName = item.Label
 	}
 	item.ShortCode = creativeModelCatalogShortCode(modelName, item.Type)
 	return item

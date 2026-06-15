@@ -12,19 +12,46 @@ type OpenAIModels struct {
 }
 
 type CreativeModelCatalogItem struct {
-	Id                     string                  `json:"id"`
-	Object                 string                  `json:"object"`
-	Created                int                     `json:"created"`
-	OwnedBy                string                  `json:"owned_by"`
-	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
-	Label                  string                  `json:"label,omitempty"`
-	ShortLabel             string                  `json:"shortLabel,omitempty"`
-	ShortCode              string                  `json:"shortCode,omitempty"`
-	Description            string                  `json:"description,omitempty"`
-	Type                   string                  `json:"type,omitempty"`
-	Modality               string                  `json:"modality,omitempty"`
-	Vendor                 string                  `json:"vendor,omitempty"`
-	Tags                   []string                `json:"tags,omitempty"`
+	Id                     string                        `json:"id"`
+	Object                 string                        `json:"object"`
+	Created                int                           `json:"created"`
+	OwnedBy                string                        `json:"owned_by"`
+	SupportedEndpointTypes []constant.EndpointType       `json:"supported_endpoint_types"`
+	ProviderModelId        string                        `json:"providerModelId,omitempty"`
+	PriceModelId           string                        `json:"priceModelId,omitempty"`
+	Label                  string                        `json:"label,omitempty"`
+	DisplayName            string                        `json:"displayName,omitempty"`
+	ShortLabel             string                        `json:"shortLabel,omitempty"`
+	ShortCode              string                        `json:"shortCode,omitempty"`
+	Description            string                        `json:"description,omitempty"`
+	Type                   string                        `json:"type,omitempty"`
+	Modality               string                        `json:"modality,omitempty"`
+	Vendor                 string                        `json:"vendor,omitempty"`
+	Tags                   []string                      `json:"tags,omitempty"`
+	RecommendedScore       *int                          `json:"recommendedScore,omitempty"`
+	SortOrder              *int                          `json:"sortOrder,omitempty"`
+	ParameterSchema        []CreativeParameterSchemaItem `json:"parameterSchema,omitempty"`
+}
+
+type CreativeParamOption struct {
+	Value any    `json:"value"`
+	Label string `json:"label"`
+}
+
+type CreativeParameterSchemaItem struct {
+	Id           string                `json:"id"`
+	Label        string                `json:"label"`
+	ShortLabel   string                `json:"shortLabel,omitempty"`
+	Description  string                `json:"description,omitempty"`
+	Type         string                `json:"type"`
+	DefaultValue any                   `json:"defaultValue,omitempty"`
+	Options      []CreativeParamOption `json:"options,omitempty"`
+	Min          *float64              `json:"min,omitempty"`
+	Max          *float64              `json:"max,omitempty"`
+	Step         *float64              `json:"step,omitempty"`
+	Required     bool                  `json:"required,omitempty"`
+	Order        int                   `json:"order,omitempty"`
+	Hidden       bool                  `json:"hidden,omitempty"`
 }
 
 type AnthropicModel struct {

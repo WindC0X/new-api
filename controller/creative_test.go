@@ -1808,6 +1808,23 @@ func TestCreativeImageTaskSubmitFetchAndReplayAreMockOnlyAndPrivate(t *testing.T
 	require.Equal(t, "mock:gpt-image-2:preview", metadata["bindingId"])
 	require.Equal(t, "gpt-image-2", metadata["providerModelId"])
 	require.Equal(t, "mock-gpt-image-2-price", metadata["priceModelId"])
+	require.NotContains(t, metadata, "channelId")
+	var storedTask model.Task
+	require.NoError(t, model.DB.Where("user_id = ? AND task_id = ?", 801, taskID).First(&storedTask).Error)
+	var storedMetadata creativeImageTaskMetadata
+	require.NoError(t, storedTask.GetData(&storedMetadata))
+	require.True(t, storedMetadata.CreativeManaged)
+	require.Equal(t, "mock:gpt-image-2:preview", storedMetadata.BindingId)
+	require.Equal(t, "gpt-image-2", storedMetadata.ProviderModelId)
+	require.Equal(t, "mock-gpt-image-2-price", storedMetadata.PriceModelId)
+	require.Equal(t, "mock_image_task", storedMetadata.AdapterPreset)
+	require.Equal(t, "mock_gpt_image", storedMetadata.ParameterTemplate)
+	require.Equal(t, 0, storedMetadata.ChannelId)
+	require.Equal(t, map[string]any{"quality": "auto", "size": "1024x1024"}, storedMetadata.UserParams)
+	require.NotNil(t, storedTask.PrivateData.BillingContext)
+	require.Equal(t, "mock-gpt-image-2-price", storedTask.PrivateData.BillingContext.OriginModelName)
+	require.True(t, storedTask.PrivateData.BillingContext.PerCallBilling)
+	require.Equal(t, 0, storedTask.PrivateData.BillingContext.PreConsumedQuota)
 
 	replay := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
 		"model":  "mock:gpt-image-2:preview",

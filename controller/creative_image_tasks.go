@@ -42,19 +42,30 @@ type creativeImageTaskMetadata struct {
 	PriceModelId      string         `json:"priceModelId"`
 	AdapterPreset     string         `json:"adapterPreset"`
 	ParameterTemplate string         `json:"parameterTemplate"`
-	ChannelId         int            `json:"-"`
+	ChannelId         int            `json:"channelId"`
+	UserParams        map[string]any `json:"userParams,omitempty"`
+}
+
+type creativeImageTaskPublicMetadata struct {
+	Version           int            `json:"version"`
+	CreativeManaged   bool           `json:"creativeManaged"`
+	BindingId         string         `json:"bindingId"`
+	ProviderModelId   string         `json:"providerModelId"`
+	PriceModelId      string         `json:"priceModelId"`
+	AdapterPreset     string         `json:"adapterPreset"`
+	ParameterTemplate string         `json:"parameterTemplate"`
 	UserParams        map[string]any `json:"userParams,omitempty"`
 }
 
 type creativeImageTaskDTO struct {
-	TaskID    string                    `json:"task_id"`
-	Status    string                    `json:"status"`
-	CreatedAt int64                     `json:"created_at,omitempty"`
-	UpdatedAt int64                     `json:"updated_at,omitempty"`
-	Progress  string                    `json:"progress,omitempty"`
-	Model     string                    `json:"model"`
-	Result    map[string]any            `json:"result,omitempty"`
-	Metadata  creativeImageTaskMetadata `json:"metadata"`
+	TaskID    string                          `json:"task_id"`
+	Status    string                          `json:"status"`
+	CreatedAt int64                           `json:"created_at,omitempty"`
+	UpdatedAt int64                           `json:"updated_at,omitempty"`
+	Progress  string                          `json:"progress,omitempty"`
+	Model     string                          `json:"model"`
+	Result    map[string]any                  `json:"result,omitempty"`
+	Metadata  creativeImageTaskPublicMetadata `json:"metadata"`
 }
 
 func CreativeImageTaskSubmitIdempotency() gin.HandlerFunc {
@@ -338,7 +349,20 @@ func creativeImageTaskDTOFromTask(task *model.Task) creativeImageTaskDTO {
 		Progress:  task.Progress,
 		Model:     metadata.BindingId,
 		Result:    result,
-		Metadata:  metadata,
+		Metadata:  creativeImageTaskPublicMetadataFromMetadata(metadata),
+	}
+}
+
+func creativeImageTaskPublicMetadataFromMetadata(metadata creativeImageTaskMetadata) creativeImageTaskPublicMetadata {
+	return creativeImageTaskPublicMetadata{
+		Version:           metadata.Version,
+		CreativeManaged:   metadata.CreativeManaged,
+		BindingId:         metadata.BindingId,
+		ProviderModelId:   metadata.ProviderModelId,
+		PriceModelId:      metadata.PriceModelId,
+		AdapterPreset:     metadata.AdapterPreset,
+		ParameterTemplate: metadata.ParameterTemplate,
+		UserParams:        metadata.UserParams,
 	}
 }
 

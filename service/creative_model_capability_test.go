@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -283,6 +284,23 @@ func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchem
 	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("test"))
 }
 
+func TestStoredCreativeModelBindingsCatalogHidesFixtureProviderBindings(t *testing.T) {
+	config := grsAIGPTImageDryRunConfigForTest()
+	config.Bindings[0].Enabled = true
+	config.Bindings[0].CanaryGroups = []string{"test"}
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:  configJSON,
+	})
+
+	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("test"))
+	_, err = ResolveCreativeImageModelBindingForGroup(config.Bindings[0].Id, "test", map[string]any{"aspectRatio": "1024x1024"})
+	require.Error(t, err)
+}
+
 func withCreativeAdapterPreviewOptions(t *testing.T, enabled string, canaryGroups string) {
 	t.Helper()
 
@@ -395,6 +413,35 @@ func TestParseCreativeModelBindingsConfigValidatesVersionAndDistinctIDs(t *testi
 	require.NotEqual(t, config.Bindings[0].ProviderModelId, config.Bindings[0].PriceModelId)
 }
 
+func TestParseCreativeModelBindingsConfigAllowsGrsAIFixtureDryRunOnly(t *testing.T) {
+	raw := `{
+		"version": 1,
+		"bindings": [{
+			"id": "grsai:gpt-image-2:dryrun",
+			"providerModelId": "gpt-image-2",
+			"priceModelId": "grsai-gpt-image-2-price",
+			"displayName": "GrsAI GPT Image 2 Dry Run",
+			"modality": "image",
+			"enabled": false,
+			"canaryGroups": ["test"],
+			"adapterPreset": "grsai_gpt_image_dryrun",
+			"parameterTemplate": "grsai_gpt_image",
+			"parameterSchema": [{
+				"id": "aspectRatio",
+				"label": "Aspect Ratio",
+				"type": "enum",
+				"defaultValue": "1024x1024",
+				"options": [{"value": "1024x1024", "label": "1024×1024"}]
+			}]
+		}]
+	}`
+
+	config, err := ParseCreativeModelBindingsConfig(raw)
+	require.NoError(t, err)
+	require.Equal(t, "grsai_gpt_image_dryrun", config.Bindings[0].AdapterPreset)
+	require.Equal(t, "grsai_gpt_image", config.Bindings[0].ParameterTemplate)
+}
+
 func validCreativeModelBindingsConfigForTest() CreativeModelBindingsConfig {
 	return CreativeModelBindingsConfig{
 		Version: 1,
@@ -414,6 +461,34 @@ func validCreativeModelBindingsConfigForTest() CreativeModelBindingsConfig {
 				Type:         "enum",
 				DefaultValue: "1024x1024",
 				Options:      []dto.CreativeParamOption{{Value: "1024x1024", Label: "1024×1024"}},
+			}},
+		}},
+	}
+}
+
+func grsAIGPTImageDryRunConfigForTest() CreativeModelBindingsConfig {
+	return CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "grsai:gpt-image-2:dryrun",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "grsai-gpt-image-2-price",
+			DisplayName:       "GrsAI GPT Image 2 Dry Run",
+			Modality:          "image",
+			Enabled:           false,
+			CanaryGroups:      []string{"test"},
+			AdapterPreset:     "grsai_gpt_image_dryrun",
+			ParameterTemplate: "grsai_gpt_image",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{{
+				Id:           "aspectRatio",
+				Label:        "Aspect Ratio",
+				Type:         "enum",
+				DefaultValue: "1024x1024",
+				Options: []dto.CreativeParamOption{
+					{Value: "1024x1024", Label: "1024×1024"},
+					{Value: "1536x1024", Label: "1536×1024"},
+					{Value: "1024x1536", Label: "1024×1536"},
+				},
 			}},
 		}},
 	}
@@ -730,6 +805,53 @@ func TestBuildCreativeModelBindingsDryRunIsMockOnlyAndRedactsUnsafePreviewFields
 	require.Equal(t, "1024x1024", body["size"])
 }
 
+func TestBuildCreativeModelBindingsDryRunSupportsGrsAIFixtureWithoutProviderMaterial(t *testing.T) {
+	config := grsAIGPTImageDryRunConfigForTest()
+
+	result, err := BuildCreativeModelBindingsDryRun(config)
+	require.NoError(t, err)
+	require.True(t, result.NoProviderCall)
+	require.Len(t, result.Bindings, 1)
+
+	preview := result.Bindings[0].RequestPreview
+	require.Equal(t, "fixture", preview["transport"])
+	require.Equal(t, "grsai", preview["adapterFamily"])
+	require.Equal(t, true, preview["offline"])
+	require.Equal(t, "gpt-image-2", preview["model"])
+	body := preview["requestBody"].(map[string]any)
+	require.Equal(t, "gpt-image-2", body["model"])
+	require.Equal(t, "1024x1024", body["aspectRatio"])
+	require.Equal(t, "json", body["replyType"])
+	require.NotContains(t, fmtAnyForTest(preview), "authorization")
+	require.NotContains(t, fmtAnyForTest(preview), "bearer")
+	require.NotContains(t, fmtAnyForTest(preview), "http://")
+	require.NotContains(t, fmtAnyForTest(preview), "https://")
+	require.NotContains(t, fmtAnyForTest(preview), "baseurl")
+}
+
+func TestParseCreativeGrsAIImageFixtureResponseRedactsProviderResults(t *testing.T) {
+	summary, err := ParseCreativeGrsAIImageFixtureResponse([]byte(`{
+		"id": "14-fixture-task",
+		"status": "succeeded",
+		"results": [{"url": "https://provider.example/private/result.png?token=secret"}],
+		"progress": 100
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, "14-fixture-task", summary.Id)
+	require.Equal(t, "succeeded", summary.Status)
+	require.Equal(t, 1, summary.ResultCount)
+	require.Equal(t, 100, summary.Progress)
+	require.NotContains(t, fmtAnyForTest(summary), "https://")
+	require.NotContains(t, fmtAnyForTest(summary), "token=secret")
+
+	_, err = ParseCreativeGrsAIImageFixtureResponse([]byte(`{"id":"14-fixture-task","status":"queued"}`))
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "https://")
+
+	_, err = ParseCreativeGrsAIImageFixtureResponse([]byte(`{"id":"14-fixture-task","status":"succeeded","results":[]}`))
+	require.Error(t, err)
+}
+
 func TestBuildCreativeModelBindingsDryRunHasNoProviderTransportReferences(t *testing.T) {
 	_, testFile, _, ok := runtime.Caller(0)
 	require.True(t, ok)
@@ -738,18 +860,22 @@ func TestBuildCreativeModelBindingsDryRunHasNoProviderTransportReferences(t *tes
 	parsed, err := parser.ParseFile(fileSet, sourceFile, nil, 0)
 	require.NoError(t, err)
 
-	var dryRunFunc *ast.FuncDecl
+	dryRunFunctions := map[string]*ast.FuncDecl{}
 	for _, declaration := range parsed.Decls {
 		fn, ok := declaration.(*ast.FuncDecl)
-		if ok && fn.Name.Name == "BuildCreativeModelBindingsDryRun" {
-			dryRunFunc = fn
-			break
+		if !ok {
+			continue
+		}
+		switch fn.Name.Name {
+		case "BuildCreativeModelBindingsDryRun", "creativeModelBindingDryRunRequestPreview", "creativeDryRunSchemaDefault":
+			dryRunFunctions[fn.Name.Name] = fn
 		}
 	}
-	require.NotNil(t, dryRunFunc)
+	require.Len(t, dryRunFunctions, 3)
 
 	forbiddenIdents := map[string]struct{}{
 		"http":          {},
+		"http2":         {},
 		"DefaultClient": {},
 		"GetHttpClient": {},
 		"RoundTrip":     {},
@@ -761,28 +887,34 @@ func TestBuildCreativeModelBindingsDryRunHasNoProviderTransportReferences(t *tes
 		"Key":           {},
 	}
 	forbiddenStringFragments := []string{
-		"duomi",
-		"grsai",
 		"http://",
 		"https://",
 		"authorization",
 		"api_key",
 		"base_url",
+		"baseurl",
+		"bearer ",
 	}
 
-	ast.Inspect(dryRunFunc.Body, func(node ast.Node) bool {
-		switch typed := node.(type) {
-		case *ast.Ident:
-			if _, forbidden := forbiddenIdents[typed.Name]; forbidden {
-				t.Fatalf("BuildCreativeModelBindingsDryRun must remain provider-transport-free, found identifier %q", typed.Name)
-			}
-		case *ast.BasicLit:
-			for _, fragment := range forbiddenStringFragments {
-				if strings.Contains(strings.ToLower(typed.Value), fragment) {
-					t.Fatalf("BuildCreativeModelBindingsDryRun must remain provider-transport-free, found literal %s", typed.Value)
+	for functionName, dryRunFunc := range dryRunFunctions {
+		ast.Inspect(dryRunFunc.Body, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.Ident:
+				if _, forbidden := forbiddenIdents[typed.Name]; forbidden {
+					t.Fatalf("%s must remain provider-transport-free, found identifier %q", functionName, typed.Name)
+				}
+			case *ast.BasicLit:
+				for _, fragment := range forbiddenStringFragments {
+					if strings.Contains(strings.ToLower(typed.Value), fragment) {
+						t.Fatalf("%s must remain provider-transport-free, found literal %s", functionName, typed.Value)
+					}
 				}
 			}
-		}
-		return true
-	})
+			return true
+		})
+	}
+}
+
+func fmtAnyForTest(value any) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(fmt.Sprintf("%#v", value))), "\\\\", "")
 }

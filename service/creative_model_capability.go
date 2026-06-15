@@ -37,11 +37,13 @@ var creativeAdapterAllowedModalities = map[string]struct{}{
 }
 
 var creativeAdapterAllowedPresets = map[string]struct{}{
-	"mock_image_task": {},
+	"mock_image_task":        {},
+	"grsai_gpt_image_dryrun": {},
 }
 
 var creativeAdapterAllowedParameterTemplates = map[string]struct{}{
-	"mock_gpt_image": {},
+	"mock_gpt_image":  {},
+	"grsai_gpt_image": {},
 }
 
 var creativeModelBindingsTopLevelKeys = map[string]struct{}{
@@ -126,6 +128,14 @@ type CreativeModelBindingDryRunItem struct {
 	AdapterPreset     string         `json:"adapterPreset"`
 	ParameterTemplate string         `json:"parameterTemplate"`
 	RequestPreview    map[string]any `json:"requestPreview"`
+}
+
+type CreativeGrsAIImageFixtureSummary struct {
+	Id          string `json:"id"`
+	Status      string `json:"status"`
+	ResultCount int    `json:"resultCount"`
+	Progress    int    `json:"progress,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type CreativeResolvedModelBinding struct {
@@ -516,13 +526,7 @@ func BuildCreativeModelBindingsDryRun(config CreativeModelBindingsConfig) (Creat
 		Bindings:       make([]CreativeModelBindingDryRunItem, 0, len(config.Bindings)),
 	}
 	for _, binding := range config.Bindings {
-		preview := map[string]any{
-			"transport":         "mock",
-			"operation":         "image_task_preview",
-			"model":             binding.ProviderModelId,
-			"priceModel":        binding.PriceModelId,
-			"parameterTemplate": binding.ParameterTemplate,
-		}
+		preview := creativeModelBindingDryRunRequestPreview(binding)
 		result.Bindings = append(result.Bindings, CreativeModelBindingDryRunItem{
 			Id:                binding.Id,
 			ProviderModelId:   binding.ProviderModelId,
@@ -535,6 +539,99 @@ func BuildCreativeModelBindingsDryRun(config CreativeModelBindingsConfig) (Creat
 		})
 	}
 	return result, nil
+}
+
+func creativeModelBindingDryRunRequestPreview(binding CreativeModelBindingConfig) map[string]any {
+	if binding.AdapterPreset == "grsai_gpt_image_dryrun" && binding.ParameterTemplate == "grsai_gpt_image" {
+		return map[string]any{
+			"transport":         "fixture",
+			"adapterFamily":     "grsai",
+			"operation":         "image_generate_request_preview",
+			"offline":           true,
+			"model":             binding.ProviderModelId,
+			"priceModel":        binding.PriceModelId,
+			"parameterTemplate": binding.ParameterTemplate,
+			"requestBody": map[string]any{
+				"model":       binding.ProviderModelId,
+				"prompt":      "<user-prompt>",
+				"images":      []any{"<managed-input-image-ref>"},
+				"aspectRatio": creativeDryRunSchemaDefault(binding.ParameterSchema, "aspectRatio", "1024x1024"),
+				"replyType":   "json",
+			},
+			"responseShape": map[string]any{
+				"id":       "<provider-task-id>",
+				"status":   "running|violation|succeeded|failed",
+				"results":  []any{map[string]any{"url": "[REDACTED]"}},
+				"progress": 0,
+				"error":    "<provider-error>",
+			},
+		}
+	}
+	return map[string]any{
+		"transport":         "mock",
+		"operation":         "image_task_preview",
+		"model":             binding.ProviderModelId,
+		"priceModel":        binding.PriceModelId,
+		"parameterTemplate": binding.ParameterTemplate,
+	}
+}
+
+func creativeDryRunSchemaDefault(schema []dto.CreativeParameterSchemaItem, id string, fallback any) any {
+	for _, item := range schema {
+		if item.Id == id && item.DefaultValue != nil {
+			return item.DefaultValue
+		}
+	}
+	return fallback
+}
+
+func creativeAdapterPresetTemplateAllowed(preset string, template string) bool {
+	switch preset {
+	case "mock_image_task":
+		return template == "mock_gpt_image"
+	case "grsai_gpt_image_dryrun":
+		return template == "grsai_gpt_image"
+	default:
+		return false
+	}
+}
+
+func ParseCreativeGrsAIImageFixtureResponse(raw []byte) (CreativeGrsAIImageFixtureSummary, error) {
+	var response struct {
+		Id      string `json:"id"`
+		Status  string `json:"status"`
+		Results []struct {
+			URL string `json:"url"`
+		} `json:"results"`
+		Progress int    `json:"progress"`
+		Error    string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return CreativeGrsAIImageFixtureSummary{}, err
+	}
+	id := strings.TrimSpace(response.Id)
+	status := strings.TrimSpace(strings.ToLower(response.Status))
+	if id == "" {
+		return CreativeGrsAIImageFixtureSummary{}, errors.New("grsai image fixture response id is required")
+	}
+	switch status {
+	case "running", "violation", "succeeded", "failed":
+	default:
+		return CreativeGrsAIImageFixtureSummary{}, fmt.Errorf("grsai image fixture response status %q is unsupported", status)
+	}
+	if status == "succeeded" && len(response.Results) == 0 {
+		return CreativeGrsAIImageFixtureSummary{}, errors.New("grsai image fixture response has no result")
+	}
+	summary := CreativeGrsAIImageFixtureSummary{
+		Id:          id,
+		Status:      status,
+		ResultCount: len(response.Results),
+		Progress:    response.Progress,
+	}
+	if response.Error != "" && !CreativeSensitiveStringValue(response.Error) {
+		summary.Error = response.Error
+	}
+	return summary, nil
 }
 
 func validateCreativeModelBindingsRawJSONKeys(raw string) error {
@@ -713,6 +810,9 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 		}
 		if _, ok := creativeAdapterAllowedParameterTemplates[template]; !ok {
 			return fmt.Errorf("binding %q parameterTemplate %q is not supported", id, binding.ParameterTemplate)
+		}
+		if !creativeAdapterPresetTemplateAllowed(preset, template) {
+			return fmt.Errorf("binding %q adapterPreset %q cannot use parameterTemplate %q", id, preset, template)
 		}
 		if binding.ChannelId != nil && *binding.ChannelId <= 0 {
 			return fmt.Errorf("binding %q channelId must be positive", id)

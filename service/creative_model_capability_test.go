@@ -188,3 +188,92 @@ func withCreativeAdapterPreviewOptions(t *testing.T, enabled string, canaryGroup
 		common.OptionMapRWMutex.Unlock()
 	})
 }
+
+func TestCreativeForbiddenKeyNormalizerCoversControlVariants(t *testing.T) {
+	for _, key := range []string{
+		"notifyHook",
+		"notify_hook",
+		"notify-hook",
+		"headers.Authorization",
+		"callback_url",
+		"owner-id",
+		"sourceProfileId",
+		"idempotency:key",
+		"base URL",
+	} {
+		require.True(t, CreativeForbiddenKey(key), key)
+	}
+	require.Equal(t, "notifyhook", NormalizeCreativeForbiddenKey("notify_hook"))
+	require.False(t, CreativeForbiddenKey("size"))
+}
+
+func TestParseCreativeModelBindingsConfigValidatesVersionAndDistinctIDs(t *testing.T) {
+	raw := `{
+		"version": 1,
+		"bindings": [{
+			"id": "mock:gpt-image-2:preview",
+			"providerModelId": "gpt-image-2",
+			"priceModelId": "mock-gpt-image-2-price",
+			"displayName": "Mock GPT Image 2",
+			"modality": "image",
+			"enabled": false,
+			"canaryGroups": ["test"],
+			"adapterPreset": "mock_image_task",
+			"parameterTemplate": "mock_gpt_image",
+			"recommendedScore": 10,
+			"sortOrder": 100,
+			"parameterSchema": [{
+				"id": "size",
+				"label": "Size",
+				"type": "enum",
+				"defaultValue": "1024x1024",
+				"options": [{"value": "1024x1024", "label": "1024×1024"}]
+			}]
+		}]
+	}`
+
+	config, err := ParseCreativeModelBindingsConfig(raw)
+	require.NoError(t, err)
+	require.Equal(t, 1, config.Version)
+	require.Len(t, config.Bindings, 1)
+	require.Equal(t, "mock:gpt-image-2:preview", config.Bindings[0].Id)
+	require.Equal(t, "gpt-image-2", config.Bindings[0].ProviderModelId)
+	require.Equal(t, "mock-gpt-image-2-price", config.Bindings[0].PriceModelId)
+	require.NotEqual(t, config.Bindings[0].Id, config.Bindings[0].ProviderModelId)
+	require.NotEqual(t, config.Bindings[0].ProviderModelId, config.Bindings[0].PriceModelId)
+}
+
+func TestParseCreativeModelBindingsConfigRejectsUnsafeConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "unsupported version",
+			raw:  `{"version":2,"bindings":[]}`,
+		},
+		{
+			name: "duplicate binding id",
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image"},{"id":"MOCK:IMAGE:A","providerModelId":"p","priceModelId":"price","modality":"image"}]}`,
+		},
+		{
+			name: "forbidden binding id",
+			raw:  `{"version":1,"bindings":[{"id":"callback:image","providerModelId":"p","priceModelId":"price","modality":"image"}]}`,
+		},
+		{
+			name: "missing provider model",
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","priceModelId":"price","modality":"image"}]}`,
+		},
+		{
+			name: "forbidden schema id",
+			raw:  `{"version":1,"bindings":[{"id":"mock:image:a","providerModelId":"p","priceModelId":"price","modality":"image","parameterSchema":[{"id":"notifyHook","label":"Hook","type":"string"}]}]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseCreativeModelBindingsConfig(tt.raw)
+			require.Error(t, err)
+		})
+	}
+}

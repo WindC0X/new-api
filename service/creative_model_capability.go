@@ -16,6 +16,7 @@ import (
 const (
 	CreativeAdapterEnabledOptionKey      = "creative.adapter.enabled"
 	CreativeAdapterCanaryGroupsOptionKey = "creative.adapter.canary_groups"
+	CreativeModelBindingsOptionKey       = "creative.model_bindings"
 )
 
 var creativeParameterIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_:-]{0,63}$`)
@@ -26,6 +27,27 @@ var creativeParameterAllowedTypes = map[string]struct{}{
 	"number":  {},
 	"integer": {},
 	"boolean": {},
+}
+
+type CreativeModelBindingsConfig struct {
+	Version  int                          `json:"version"`
+	Bindings []CreativeModelBindingConfig `json:"bindings"`
+}
+
+type CreativeModelBindingConfig struct {
+	Id                string                            `json:"id"`
+	ProviderModelId   string                            `json:"providerModelId"`
+	PriceModelId      string                            `json:"priceModelId"`
+	DisplayName       string                            `json:"displayName,omitempty"`
+	Modality          string                            `json:"modality"`
+	Enabled           bool                              `json:"enabled"`
+	CanaryGroups      []string                          `json:"canaryGroups,omitempty"`
+	ChannelId         *int                              `json:"channelId,omitempty"`
+	AdapterPreset     string                            `json:"adapterPreset"`
+	ParameterTemplate string                            `json:"parameterTemplate"`
+	RecommendedScore  *int                              `json:"recommendedScore,omitempty"`
+	SortOrder         *int                              `json:"sortOrder,omitempty"`
+	ParameterSchema   []dto.CreativeParameterSchemaItem `json:"parameterSchema,omitempty"`
 }
 
 var creativeParameterForbiddenFragments = []string{
@@ -79,6 +101,67 @@ func GetCreativePreviewModelBindingsForGroup(userGroup string) []dto.CreativeMod
 	return []dto.CreativeModelCatalogItem{binding}
 }
 
+func ParseCreativeModelBindingsConfig(raw string) (CreativeModelBindingsConfig, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return CreativeModelBindingsConfig{Version: 1}, nil
+	}
+	var config CreativeModelBindingsConfig
+	if err := common.UnmarshalJsonStr(trimmed, &config); err != nil {
+		return CreativeModelBindingsConfig{}, err
+	}
+	if config.Version == 0 {
+		config.Version = 1
+	}
+	if config.Version != 1 {
+		return CreativeModelBindingsConfig{}, fmt.Errorf("unsupported creative model bindings version %d", config.Version)
+	}
+	if config.Bindings == nil {
+		config.Bindings = []CreativeModelBindingConfig{}
+	}
+	if err := ValidateCreativeModelBindingsConfig(config); err != nil {
+		return CreativeModelBindingsConfig{}, err
+	}
+	return config, nil
+}
+
+func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) error {
+	if config.Version != 1 {
+		return fmt.Errorf("unsupported creative model bindings version %d", config.Version)
+	}
+	seen := make(map[string]struct{}, len(config.Bindings))
+	for _, binding := range config.Bindings {
+		id := strings.TrimSpace(binding.Id)
+		if id == "" {
+			return errors.New("binding id is required")
+		}
+		if !creativeParameterIDPattern.MatchString(id) {
+			return fmt.Errorf("binding %q has invalid id", id)
+		}
+		if CreativeForbiddenKey(id) {
+			return fmt.Errorf("binding %q uses a forbidden control field", id)
+		}
+		key := strings.ToLower(id)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("binding %q is duplicated", id)
+		}
+		seen[key] = struct{}{}
+		if strings.TrimSpace(binding.ProviderModelId) == "" {
+			return fmt.Errorf("binding %q providerModelId is required", id)
+		}
+		if strings.TrimSpace(binding.PriceModelId) == "" {
+			return fmt.Errorf("binding %q priceModelId is required", id)
+		}
+		if strings.TrimSpace(binding.Modality) == "" {
+			return fmt.Errorf("binding %q modality is required", id)
+		}
+		if err := ValidateCreativeParameterSchema(binding.ParameterSchema); err != nil {
+			return fmt.Errorf("binding %q parameterSchema invalid: %w", id, err)
+		}
+	}
+	return nil
+}
+
 func ValidateCreativeParameterSchema(schema []dto.CreativeParameterSchemaItem) error {
 	if len(schema) == 0 {
 		return nil
@@ -92,7 +175,7 @@ func ValidateCreativeParameterSchema(schema []dto.CreativeParameterSchemaItem) e
 		if !creativeParameterIDPattern.MatchString(id) {
 			return fmt.Errorf("schema item %q has invalid id", id)
 		}
-		if creativeParameterIDForbidden(id) {
+		if CreativeForbiddenKey(id) {
 			return fmt.Errorf("schema item %q uses a forbidden control field", id)
 		}
 		key := strings.ToLower(id)
@@ -186,9 +269,15 @@ func creativeOptionList(key string) []string {
 	return values
 }
 
-func creativeParameterIDForbidden(id string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(id))
-	normalized = strings.NewReplacer("_", "", "-", "", ":", "", " ", "").Replace(normalized)
+func NormalizeCreativeForbiddenKey(key string) string {
+	return strings.NewReplacer("_", "", "-", "", ":", "", " ", "", ".", "").Replace(strings.ToLower(strings.TrimSpace(key)))
+}
+
+func CreativeForbiddenKey(key string) bool {
+	normalized := NormalizeCreativeForbiddenKey(key)
+	if normalized == "" {
+		return false
+	}
 	for _, fragment := range creativeParameterForbiddenFragments {
 		if strings.Contains(normalized, fragment) {
 			return true

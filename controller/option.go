@@ -147,6 +147,9 @@ func UpdateOption(c *gin.Context) {
 	case service.CreativeModelPolicyOptionKey:
 		common.ApiErrorMsg(c, "Creative model policy must be updated via /api/creative/model-policy")
 		return
+	case service.CreativeModelBindingsOptionKey:
+		common.ApiErrorMsg(c, "Creative model bindings must be updated via /api/creative/model-bindings")
+		return
 	default:
 		if isPaymentComplianceOptionKey(option.Key) {
 			common.ApiErrorMsg(c, "合规确认字段不允许通过通用设置接口修改")

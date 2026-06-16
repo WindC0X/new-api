@@ -1875,6 +1875,16 @@ func TestCreativeImageTaskRouteBoundariesAndResolverFailClosed(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, noIdempotency.Code)
 	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, noIdempotency), "error")["message"], "Idempotency-Key")
 
+	referenceHeaders := creativeSameOriginNonceHeaders(auth)
+	referenceHeaders["Idempotency-Key"] = "image-reference-rejected"
+	reference := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe",
+		"images": []any{"/creative/api/assets/asset-1/content"},
+	}, auth.cookies, referenceHeaders)
+	require.Equal(t, http.StatusBadRequest, reference.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, reference), "error")["message"], "reference images are not supported")
+
 	forbiddenHeaders := creativeSameOriginNonceHeaders(auth)
 	forbiddenHeaders["Idempotency-Key"] = "forbidden-body"
 	forbidden := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
@@ -1941,6 +1951,31 @@ func TestCreativeImageTaskRejectsBoundaryAliasesBeforeMockInsert(t *testing.T) {
 	queryCase := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks?ownerId=999", body, auth.cookies, queryHeaders)
 	require.Equal(t, http.StatusBadRequest, queryCase.Code)
 	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, queryCase), "error")["message"], "forbidden field ownerId")
+
+	bodyAliasHeaders := creativeSameOriginNonceHeaders(auth)
+	bodyAliasHeaders["Idempotency-Key"] = "image-forbidden-body-alias"
+	bodyAliasCase := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe mock image",
+		"metadata": map[string]any{
+			"sourceProfileId": "standalone-provider",
+			"internalOptions": map[string]any{
+				"onProgress": "callback",
+			},
+		},
+	}, auth.cookies, bodyAliasHeaders)
+	require.Equal(t, http.StatusBadRequest, bodyAliasCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, bodyAliasCase), "error")["message"], "forbidden field metadata.")
+
+	routingHeaders := creativeSameOriginNonceHeaders(auth)
+	routingHeaders["Idempotency-Key"] = "image-forbidden-routing"
+	routingCase := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":   "mock:gpt-image-2:preview",
+		"prompt":  "safe mock image",
+		"routing": map[string]any{"channel": 7},
+	}, auth.cookies, routingHeaders)
+	require.Equal(t, http.StatusBadRequest, routingCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, routingCase), "error")["message"], "forbidden field routing.channel")
 
 	formHeaders := creativeSameOriginNonceHeaders(auth)
 	formHeaders["Idempotency-Key"] = "image-forbidden-form"

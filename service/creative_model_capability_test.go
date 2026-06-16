@@ -733,6 +733,7 @@ func TestValidateCreativeModelBindingsConfigRejectsMissingOrDisabledChannel(t *t
 		Key:    "redacted",
 		Status: common.ChannelStatusManuallyDisabled,
 		Name:   "disabled creative channel",
+		Models: "gpt-image-2",
 	}).Error)
 	config = validCreativeModelBindingsConfigForTest()
 	disabledChannelID := 12
@@ -740,6 +741,48 @@ func TestValidateCreativeModelBindingsConfigRejectsMissingOrDisabledChannel(t *t
 	require.Error(t, ValidateCreativeModelBindingsConfig(config))
 
 	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 12).Update("status", common.ChannelStatusEnabled).Error)
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+}
+
+func TestValidateCreativeModelBindingsConfigRequiresChannelProviderModelSupport(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:     21,
+		Type:   1,
+		Key:    "redacted",
+		Status: common.ChannelStatusEnabled,
+		Name:   "wrong model creative channel",
+		Models: "other-model",
+	}).Error)
+	config := validCreativeModelBindingsConfigForTest()
+	channelID := 21
+	config.Bindings[0].ChannelId = &channelID
+	require.Error(t, ValidateCreativeModelBindingsConfig(config))
+
+	mappingToOther := `{"gpt-image-2":"other-upstream-model"}`
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 21).Updates(map[string]any{
+		"model_mapping": &mappingToOther,
+	}).Error)
+	require.Error(t, ValidateCreativeModelBindingsConfig(config))
+
+	mapping := `{"logical-image":"gpt-image-2"}`
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 21).Updates(map[string]any{
+		"models":        "logical-image",
+		"model_mapping": &mapping,
+	}).Error)
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+
+	mappingDirectToOther := `{"gpt-image-2":"other-upstream-model"}`
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 21).Updates(map[string]any{
+		"models":        "gpt-image-2",
+		"model_mapping": &mappingDirectToOther,
+	}).Error)
+	require.Error(t, ValidateCreativeModelBindingsConfig(config))
+
+	mappingDirectIdentity := `{"gpt-image-2":"gpt-image-2"}`
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 21).Updates(map[string]any{
+		"model_mapping": &mappingDirectIdentity,
+	}).Error)
 	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
 }
 

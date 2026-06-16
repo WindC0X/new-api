@@ -125,6 +125,10 @@ func CreativeRelayImageTaskSubmit(c *gin.Context) {
 		creativeOpenAIError(c, http.StatusBadRequest, "prompt is required")
 		return
 	}
+	if len(request.Images) > 0 {
+		creativeOpenAIError(c, http.StatusBadRequest, "creative image reference images are not supported yet")
+		return
+	}
 	resolved, err := service.ResolveCreativeImageModelBindingForGroup(request.Model, c.GetString("group"), request.UserParams)
 	if err != nil {
 		creativeOpenAIError(c, http.StatusBadRequest, err.Error())

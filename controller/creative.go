@@ -1886,6 +1886,9 @@ func creativeForbiddenKey(key string) bool {
 
 func creativeForbiddenRelayHeaderKey(key string) bool {
 	normalized := creativeNormalizeRelayFieldName(key)
+	if normalized == "idempotencykey" {
+		return false
+	}
 	if strings.Contains(normalized, "apikey") ||
 		strings.Contains(normalized, "authorization") ||
 		strings.Contains(normalized, "baseurl") ||
@@ -1944,7 +1947,12 @@ func creativeForbiddenRelayBodyNormalizedKey(normalized string) bool {
 		strings.Contains(normalized, "notifyhook") ||
 		strings.Contains(normalized, "callback") ||
 		strings.Contains(normalized, "webhook") ||
-		strings.Contains(normalized, "accesstoken") {
+		strings.Contains(normalized, "accesstoken") ||
+		strings.Contains(normalized, "sourceprofileid") ||
+		strings.Contains(normalized, "internaloptions") ||
+		strings.Contains(normalized, "onprogress") ||
+		strings.Contains(normalized, "onsubmitted") ||
+		strings.Contains(normalized, "idempotency") {
 		return true
 	}
 	switch normalized {
@@ -1953,6 +1961,8 @@ func creativeForbiddenRelayBodyNormalizedKey(normalized string) bool {
 		"channel", "xchannel", "channelid", "xchannelid", "channeloverride", "xchanneloverride", "channeltype",
 		"group", "xgroup", "groupid", "xgroupid", "model", "xmodel", "modelid", "xmodelid", "modelname", "xmodelname", "modeloverride", "xmodeloverride", "reqkey", "xreqkey", "requestkey", "xrequestkey",
 		"endpoint", "xendpoint", "url", "xurl", "proxy", "xproxy", "headers", "requestheaders",
+		"sourceprofileid", "xsourceprofileid", "profileid", "xprofileid", "internaloptions", "xinternaloptions",
+		"onprogress", "xonprogress", "onsubmitted", "xonsubmitted", "idempotencykey", "xidempotencykey", "idempotency", "xidempotency",
 		"token", "xtoken", "accesstoken", "xaccesstoken", "refreshtoken", "idtoken", "internaltoken",
 		"secret", "secretkey", "sourceurl", "objectkey", "bucketurl", "signedurl",
 		"presignedurl", "accesskeyid", "secretaccesskey", "s3endpoint", "storagebackend", "organization", "openaiorganization",

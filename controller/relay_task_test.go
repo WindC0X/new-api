@@ -11,13 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestShouldDeleteCreativeTaskIdempotencyOnRelayErrorDeletesWhenAcceptedButNotPersisted(t *testing.T) {
+func TestShouldDeleteCreativeTaskIdempotencyOnRelayErrorKeepsGuardWhenAcceptedButNotPersisted(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{IdempotencyKey: "creative-request-id"},
 	}
 	result := &relay.TaskSubmitResult{UpstreamTaskID: "upstream-accepted"}
 
-	require.True(t, shouldDeleteCreativeTaskIdempotencyOnRelayError(info, false, result))
+	require.False(t, shouldDeleteCreativeTaskIdempotencyOnRelayError(info, false, result))
 	require.False(t, shouldDeleteCreativeTaskIdempotencyOnRelayError(info, true, result))
 }
 

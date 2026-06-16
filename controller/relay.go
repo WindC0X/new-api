@@ -661,7 +661,8 @@ func shouldDeleteCreativeTaskIdempotencyOnRelayError(relayInfo *relaycommon.Rela
 	return relayInfo != nil &&
 		relayInfo.TaskRelayInfo != nil &&
 		relayInfo.IdempotencyKey != "" &&
-		!taskPersisted
+		!taskPersisted &&
+		(result == nil || strings.TrimSpace(result.UpstreamTaskID) == "")
 }
 
 func shouldRefundTaskSubmitBilling(taskErr *dto.TaskError, result *relay.TaskSubmitResult, taskPersisted bool) bool {

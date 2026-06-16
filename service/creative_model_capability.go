@@ -606,7 +606,7 @@ func ParseCreativeGrsAIImageFixtureResponse(raw []byte) (CreativeGrsAIImageFixtu
 		Progress int    `json:"progress"`
 		Error    string `json:"error"`
 	}
-	if err := json.Unmarshal(raw, &response); err != nil {
+	if err := common.Unmarshal(raw, &response); err != nil {
 		return CreativeGrsAIImageFixtureSummary{}, err
 	}
 	id := strings.TrimSpace(response.Id)
@@ -754,6 +754,44 @@ func RedactCreativeDryRunValue(value any) any {
 	}
 }
 
+func creativeChannelSupportsProviderModel(channel *model.Channel, providerModelID string) bool {
+	if channel == nil {
+		return false
+	}
+	providerModelID = strings.TrimSpace(providerModelID)
+	if providerModelID == "" {
+		return false
+	}
+	models := make(map[string]struct{})
+	for _, modelID := range channel.GetModels() {
+		trimmedModelID := strings.TrimSpace(modelID)
+		if trimmedModelID == "" {
+			continue
+		}
+		models[trimmedModelID] = struct{}{}
+	}
+	modelMapping := strings.TrimSpace(channel.GetModelMapping())
+	mapped := make(map[string]string)
+	if modelMapping != "" && modelMapping != "{}" {
+		if err := common.Unmarshal([]byte(modelMapping), &mapped); err != nil {
+			return false
+		}
+	}
+	if _, ok := models[providerModelID]; ok {
+		if mappedTo, hasMapping := mapped[providerModelID]; hasMapping {
+			return strings.TrimSpace(mappedTo) == providerModelID
+		}
+		return true
+	}
+	for from, to := range mapped {
+		trimmedFrom := strings.TrimSpace(from)
+		if _, ok := models[trimmedFrom]; ok && strings.TrimSpace(to) == providerModelID {
+			return true
+		}
+	}
+	return false
+}
+
 func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) error {
 	if config.Version != 1 {
 		return fmt.Errorf("unsupported creative model bindings version %d", config.Version)
@@ -824,6 +862,9 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 			}
 			if channel.Status != common.ChannelStatusEnabled {
 				return fmt.Errorf("binding %q channelId %d is disabled", id, *binding.ChannelId)
+			}
+			if !creativeChannelSupportsProviderModel(channel, binding.ProviderModelId) {
+				return fmt.Errorf("binding %q channelId %d does not support providerModelId %q", id, *binding.ChannelId, binding.ProviderModelId)
 			}
 		}
 		for _, group := range binding.CanaryGroups {

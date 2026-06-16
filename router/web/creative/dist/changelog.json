@@ -2,7 +2,7 @@
   "versions": [
     {
       "version": "0.9.6",
-      "date": "2026-06-15",
+      "date": "2026-06-16",
       "changes": {
         "features": [
           "New API managed Creative embedded build"

@@ -19,15 +19,19 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
+  CreativeModelBindingsDryRunResponse,
+  CreativeModelBindingsResponse,
   CreativeModelPolicyResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
   SystemOptionsResponse,
+  UpdateCreativeModelBindingsRequest,
   UpdateCreativeModelPolicyRequest,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
+  ValidateCreativeModelBindingsResponse,
 } from './types'
 
 export async function getSystemOptions() {
@@ -73,6 +77,49 @@ export async function updateCreativeModelPolicy(
   const creativeHeaders = await getCreativeNonceHeaders()
   const res = await api.put<CreativeModelPolicyResponse>(
     '/api/creative/model-policy',
+    request,
+    { headers: creativeHeaders }
+  )
+  return res.data
+}
+
+export async function getCreativeModelBindings() {
+  const res = await api.get<CreativeModelBindingsResponse>(
+    '/api/creative/model-bindings'
+  )
+  return res.data
+}
+
+export async function validateCreativeModelBindings(
+  request: UpdateCreativeModelBindingsRequest
+) {
+  const creativeHeaders = await getCreativeNonceHeaders()
+  const res = await api.post<ValidateCreativeModelBindingsResponse>(
+    '/api/creative/model-bindings/validate',
+    request,
+    { headers: creativeHeaders }
+  )
+  return res.data
+}
+
+export async function dryRunCreativeModelBindings(
+  request: UpdateCreativeModelBindingsRequest
+) {
+  const creativeHeaders = await getCreativeNonceHeaders()
+  const res = await api.post<CreativeModelBindingsDryRunResponse>(
+    '/api/creative/model-bindings/dry-run',
+    request,
+    { headers: creativeHeaders }
+  )
+  return res.data
+}
+
+export async function updateCreativeModelBindings(
+  request: UpdateCreativeModelBindingsRequest
+) {
+  const creativeHeaders = await getCreativeNonceHeaders()
+  const res = await api.put<CreativeModelBindingsResponse>(
+    '/api/creative/model-bindings',
     request,
     { headers: creativeHeaders }
   )

@@ -91,6 +91,96 @@ export type UpdateCreativeModelPolicyRequest = {
   policy: CreativeModelPolicy | string | Record<string, unknown>
 }
 
+export type CreativeParameterValue = string | number | boolean
+
+export type CreativeParameterOption = {
+  value: CreativeParameterValue
+  label: string
+}
+
+export type CreativeParameterSchemaItem = {
+  id: string
+  label: string
+  shortLabel?: string
+  description?: string
+  type: 'enum' | 'string' | 'number' | 'integer' | 'boolean'
+  defaultValue?: CreativeParameterValue
+  options?: CreativeParameterOption[]
+  min?: number
+  max?: number
+  step?: number
+  required?: boolean
+  order?: number
+  hidden?: boolean
+}
+
+export type CreativeModelBindingConfig = {
+  id: string
+  providerModelId: string
+  priceModelId: string
+  displayName?: string
+  modality: string
+  enabled: boolean
+  canaryGroups?: string[]
+  channelId?: number | null
+  adapterPreset: string
+  parameterTemplate: string
+  recommendedScore?: number
+  sortOrder?: number
+  parameterSchema?: CreativeParameterSchemaItem[]
+}
+
+export type CreativeModelBindingsConfig = {
+  version: number
+  bindings: CreativeModelBindingConfig[]
+}
+
+export type CreativeModelBindingsState = {
+  config: CreativeModelBindingsConfig
+  configJSON: string
+}
+
+export type CreativeModelBindingsResponse = {
+  success: boolean
+  message: string
+  data: CreativeModelBindingsState
+}
+
+export type UpdateCreativeModelBindingsRequest = {
+  config: CreativeModelBindingsConfig | string | Record<string, unknown>
+}
+
+export type ValidateCreativeModelBindingsResponse = {
+  success: boolean
+  message: string
+  data: {
+    valid: boolean
+    state: CreativeModelBindingsState
+  }
+}
+
+export type CreativeModelBindingDryRunItem = {
+  id: string
+  providerModelId: string
+  priceModelId: string
+  modality: string
+  enabled: boolean
+  adapterPreset: string
+  parameterTemplate: string
+  requestPreview: Record<string, unknown>
+}
+
+export type CreativeModelBindingsDryRunResult = {
+  noProviderCall: boolean
+  bindings: CreativeModelBindingDryRunItem[]
+}
+
+export type CreativeModelBindingsDryRunResponse = {
+  success: boolean
+  message: string
+  data: CreativeModelBindingsDryRunResult
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string

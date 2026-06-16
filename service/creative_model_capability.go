@@ -120,14 +120,16 @@ type CreativeModelBindingsDryRunResult struct {
 }
 
 type CreativeModelBindingDryRunItem struct {
-	Id                string         `json:"id"`
-	ProviderModelId   string         `json:"providerModelId"`
-	PriceModelId      string         `json:"priceModelId"`
-	Modality          string         `json:"modality"`
-	Enabled           bool           `json:"enabled"`
-	AdapterPreset     string         `json:"adapterPreset"`
-	ParameterTemplate string         `json:"parameterTemplate"`
-	RequestPreview    map[string]any `json:"requestPreview"`
+	Id                   string         `json:"id"`
+	ProviderModelId      string         `json:"providerModelId"`
+	PriceModelId         string         `json:"priceModelId"`
+	LockedChannelId      *int           `json:"lockedChannelId,omitempty"`
+	FinalProviderModelId string         `json:"finalProviderModelId,omitempty"`
+	Modality             string         `json:"modality"`
+	Enabled              bool           `json:"enabled"`
+	AdapterPreset        string         `json:"adapterPreset"`
+	ParameterTemplate    string         `json:"parameterTemplate"`
+	RequestPreview       map[string]any `json:"requestPreview"`
 }
 
 type CreativeGrsAIImageFixtureSummary struct {
@@ -527,15 +529,25 @@ func BuildCreativeModelBindingsDryRun(config CreativeModelBindingsConfig) (Creat
 	}
 	for _, binding := range config.Bindings {
 		preview := creativeModelBindingDryRunRequestPreview(binding)
+		lockedChannelID, finalProviderModelID, channelModelID := creativeModelBindingDryRunChannelPreview(binding)
+		if lockedChannelID != nil {
+			preview["lockedChannelId"] = *lockedChannelID
+			preview["finalProviderModelId"] = finalProviderModelID
+			if channelModelID != "" && channelModelID != finalProviderModelID {
+				preview["channelModelId"] = channelModelID
+			}
+		}
 		result.Bindings = append(result.Bindings, CreativeModelBindingDryRunItem{
-			Id:                binding.Id,
-			ProviderModelId:   binding.ProviderModelId,
-			PriceModelId:      binding.PriceModelId,
-			Modality:          binding.Modality,
-			Enabled:           binding.Enabled,
-			AdapterPreset:     binding.AdapterPreset,
-			ParameterTemplate: binding.ParameterTemplate,
-			RequestPreview:    RedactCreativeDryRunValue(preview).(map[string]any),
+			Id:                   binding.Id,
+			ProviderModelId:      binding.ProviderModelId,
+			PriceModelId:         binding.PriceModelId,
+			LockedChannelId:      lockedChannelID,
+			FinalProviderModelId: finalProviderModelID,
+			Modality:             binding.Modality,
+			Enabled:              binding.Enabled,
+			AdapterPreset:        binding.AdapterPreset,
+			ParameterTemplate:    binding.ParameterTemplate,
+			RequestPreview:       RedactCreativeDryRunValue(preview).(map[string]any),
 		})
 	}
 	return result, nil
@@ -574,6 +586,46 @@ func creativeModelBindingDryRunRequestPreview(binding CreativeModelBindingConfig
 		"priceModel":        binding.PriceModelId,
 		"parameterTemplate": binding.ParameterTemplate,
 	}
+}
+
+func creativeModelBindingDryRunChannelPreview(binding CreativeModelBindingConfig) (*int, string, string) {
+	finalProviderModelID := strings.TrimSpace(binding.ProviderModelId)
+	if binding.ChannelId == nil {
+		return nil, finalProviderModelID, ""
+	}
+	lockedChannelID := *binding.ChannelId
+	channelModelID := finalProviderModelID
+	channel, err := model.GetChannelById(lockedChannelID, false)
+	if err == nil && channel != nil {
+		if resolved := creativeDryRunSourceModelForFinalProviderModel(channel, finalProviderModelID); resolved != "" {
+			channelModelID = resolved
+		}
+	}
+	return &lockedChannelID, finalProviderModelID, channelModelID
+}
+
+func creativeDryRunSourceModelForFinalProviderModel(channel *model.Channel, finalProviderModelID string) string {
+	finalProviderModelID = strings.TrimSpace(finalProviderModelID)
+	if finalProviderModelID == "" || channel == nil {
+		return ""
+	}
+	modelMapping := strings.TrimSpace(channel.GetModelMapping())
+	mapped := make(map[string]string)
+	if modelMapping != "" && modelMapping != "{}" {
+		if err := common.Unmarshal([]byte(modelMapping), &mapped); err != nil {
+			return ""
+		}
+	}
+	for _, modelID := range channel.GetModels() {
+		trimmedModelID := strings.TrimSpace(modelID)
+		if trimmedModelID == "" {
+			continue
+		}
+		if creativeChannelModelMappingResolvesTo(trimmedModelID, mapped, finalProviderModelID) {
+			return trimmedModelID
+		}
+	}
+	return ""
 }
 
 func creativeDryRunSchemaDefault(schema []dto.CreativeParameterSchemaItem, id string, fallback any) any {
@@ -727,7 +779,7 @@ func RedactCreativeDryRunValue(value any) any {
 	case map[string]any:
 		redacted := make(map[string]any, len(typed))
 		for key, item := range typed {
-			if CreativeForbiddenKey(key) {
+			if CreativeForbiddenKey(key) && !creativeDryRunSafeDiagnosticKey(key) {
 				redacted[key] = "[REDACTED]"
 				continue
 			}
@@ -751,6 +803,15 @@ func RedactCreativeDryRunValue(value any) any {
 			return "[REDACTED]"
 		}
 		return value
+	}
+}
+
+func creativeDryRunSafeDiagnosticKey(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "lockedChannelId", "finalProviderModelId", "channelModelId":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -886,16 +947,16 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 				return fmt.Errorf("binding %q channelId %d does not support providerModelId %q", id, *binding.ChannelId, binding.ProviderModelId)
 			}
 		}
-		for _, group := range binding.CanaryGroups {
+		for groupIndex, group := range binding.CanaryGroups {
 			trimmedGroup := strings.TrimSpace(group)
 			if trimmedGroup == "" {
 				return fmt.Errorf("binding %q canaryGroups contains an empty group", id)
 			}
 			if CreativeSensitiveStringValue(trimmedGroup) {
-				return fmt.Errorf("binding %q canary group %q contains sensitive material", id, group)
+				return fmt.Errorf("binding %q canaryGroups[%d] contains sensitive material", id, groupIndex)
 			}
 			if trimmedGroup != "*" && CreativeForbiddenKey(trimmedGroup) {
-				return fmt.Errorf("binding %q canary group %q is forbidden", id, group)
+				return fmt.Errorf("binding %q canaryGroups[%d] is forbidden", id, groupIndex)
 			}
 		}
 		if err := ValidateCreativeParameterSchema(binding.ParameterSchema); err != nil {

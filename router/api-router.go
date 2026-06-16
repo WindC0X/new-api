@@ -199,6 +199,7 @@ func SetApiRouter(router *gin.Engine) {
 		}
 
 		creativeAdminRoute := apiRouter.Group("/creative")
+		creativeAdminRoute.Use(middleware.DisableCache())
 		creativeAdminRoute.Use(middleware.RootAuth())
 		{
 			creativeAdminRoute.GET("/model-policy", controller.GetCreativeModelPolicy)

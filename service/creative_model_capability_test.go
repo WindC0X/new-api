@@ -720,6 +720,19 @@ func TestValidateCreativeModelBindingsConfigRejectsUnsupportedRoutingFields(t *t
 	}
 }
 
+func TestValidateCreativeModelBindingsConfigRedactsSensitiveCanaryGroupErrors(t *testing.T) {
+	config := validCreativeModelBindingsConfigForTest()
+	rawGroup := "https://provider.example/private/group?token=secret"
+	config.Bindings[0].CanaryGroups = []string{rawGroup}
+
+	err := ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "canaryGroups[0]")
+	require.NotContains(t, err.Error(), rawGroup)
+	require.NotContains(t, err.Error(), "provider.example")
+	require.NotContains(t, err.Error(), "token=secret")
+}
+
 func TestValidateCreativeModelBindingsConfigRejectsMissingOrDisabledChannel(t *testing.T) {
 	setupCreativeCapabilityServiceTestDB(t)
 	config := validCreativeModelBindingsConfigForTest()
@@ -796,6 +809,35 @@ func TestValidateCreativeModelBindingsConfigRequiresChannelProviderModelSupport(
 		"model_mapping": &mappingDirectIdentity,
 	}).Error)
 	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+}
+
+func TestBuildCreativeModelBindingsDryRunExposesLockedChannelPreview(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	mapping := `{"logical-image":"gpt-image-2"}`
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:           41,
+		Type:         1,
+		Key:          "redacted",
+		Status:       common.ChannelStatusEnabled,
+		Name:         "mapped creative channel",
+		Models:       "logical-image",
+		ModelMapping: &mapping,
+	}).Error)
+
+	config := validCreativeModelBindingsConfigForTest()
+	channelID := 41
+	config.Bindings[0].ChannelId = &channelID
+
+	result, err := BuildCreativeModelBindingsDryRun(config)
+	require.NoError(t, err)
+	require.True(t, result.NoProviderCall)
+	require.Len(t, result.Bindings, 1)
+	require.Equal(t, &channelID, result.Bindings[0].LockedChannelId)
+	require.Equal(t, "gpt-image-2", result.Bindings[0].FinalProviderModelId)
+	require.Equal(t, channelID, result.Bindings[0].RequestPreview["lockedChannelId"])
+	require.Equal(t, "gpt-image-2", result.Bindings[0].RequestPreview["finalProviderModelId"])
+	require.Equal(t, "logical-image", result.Bindings[0].RequestPreview["channelModelId"])
+	require.NotContains(t, fmtAnyForTest(result), "redacted")
 }
 
 func TestValidateCreativeModelBindingsConfigRejectsEnabledBindingIDCollidingWithChannelModel(t *testing.T) {

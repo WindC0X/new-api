@@ -216,8 +216,33 @@ export function CreativeModelBindingsSection() {
     )
   }
 
-  const bindingsData = bindingsQuery.data?.data
-  if (!bindingsData) return null
+  const bindingsResponse = bindingsQuery.data
+  const bindingsData = bindingsResponse?.data
+  if (!bindingsResponse?.success || !bindingsData) {
+    return (
+      <SettingsSection title={t('Creative Model Bindings')}>
+        <Alert variant='destructive'>
+          <AlertTriangle />
+          <AlertTitle>{t('Failed to load settings')}</AlertTitle>
+          <AlertDescription className='space-y-3'>
+            <p>
+              {bindingsResponse?.message ||
+                t('Server returned an invalid Creative model bindings payload')}
+            </p>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={() => bindingsQuery.refetch()}
+              disabled={bindingsQuery.isFetching}
+            >
+              {bindingsQuery.isFetching ? t('Retrying...') : t('Retry')}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </SettingsSection>
+    )
+  }
 
   return (
     <CreativeModelBindingsLoaded
@@ -313,7 +338,14 @@ function CreativeModelBindingsLoaded(props: {
         return
       }
       setDryRunResult(response.data)
-      setDryRunDraft(response.data.noProviderCall ? variables.draft : null)
+      if (!response.data.noProviderCall) {
+        setDryRunDraft(null)
+        toast.error(
+          t('Dry run reported provider-call risk; save remains disabled')
+        )
+        return
+      }
+      setDryRunDraft(variables.draft)
       toast.success(t('Dry run completed without provider calls'))
     },
     onError: (error: Error) => {

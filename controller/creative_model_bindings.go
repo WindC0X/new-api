@@ -9,6 +9,7 @@ import (
 )
 
 func GetCreativeModelBindings(c *gin.Context) {
+	creativeModelBindingsNoStore(c)
 	if !creativeModelBindingsRequireDashboardSession(c) {
 		return
 	}
@@ -21,6 +22,7 @@ func GetCreativeModelBindings(c *gin.Context) {
 }
 
 func ValidateCreativeModelBindings(c *gin.Context) {
+	creativeModelBindingsNoStore(c)
 	if !creativeModelBindingsRequireDashboardSession(c) {
 		return
 	}
@@ -37,6 +39,7 @@ func ValidateCreativeModelBindings(c *gin.Context) {
 }
 
 func DryRunCreativeModelBindings(c *gin.Context) {
+	creativeModelBindingsNoStore(c)
 	if !creativeModelBindingsRequireDashboardSession(c) {
 		return
 	}
@@ -53,6 +56,7 @@ func DryRunCreativeModelBindings(c *gin.Context) {
 }
 
 func UpdateCreativeModelBindings(c *gin.Context) {
+	creativeModelBindingsNoStore(c)
 	if !creativeModelBindingsRequireDashboardSession(c) {
 		return
 	}
@@ -60,7 +64,16 @@ func UpdateCreativeModelBindings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	config, _, err := service.UpdateStoredCreativeModelBindingsConfig(config)
+	dryRun, err := service.BuildCreativeModelBindingsDryRun(config)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	if !dryRun.NoProviderCall {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "creative model bindings dry-run did not prove noProviderCall=true"})
+		return
+	}
+	config, _, err = service.UpdateStoredCreativeModelBindingsConfig(config)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
@@ -72,6 +85,11 @@ func UpdateCreativeModelBindings(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, state)
+}
+
+func creativeModelBindingsNoStore(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("Pragma", "no-cache")
 }
 
 func creativeModelBindingsRequireDashboardSession(c *gin.Context) bool {

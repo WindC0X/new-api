@@ -57,6 +57,7 @@ func TestCreativeModelBindingsAdminValidateDryRunAndPut(t *testing.T) {
 
 	validate := performJSONRequest(t, router, http.MethodPost, "/api/creative/model-bindings/validate", validCreativeModelBindingsPayload())
 	require.Equal(t, http.StatusOK, validate.Code)
+	requireCreativeModelBindingsNoStore(t, validate)
 	validateData := creativeResponseData(t, decodeCreativeResponse(t, validate))
 	require.Equal(t, true, validateData["valid"])
 	require.NotContains(t, validate.Body.String(), "apiKey")
@@ -64,6 +65,7 @@ func TestCreativeModelBindingsAdminValidateDryRunAndPut(t *testing.T) {
 
 	dryRun := performJSONRequest(t, router, http.MethodPost, "/api/creative/model-bindings/dry-run", validCreativeModelBindingsPayload())
 	require.Equal(t, http.StatusOK, dryRun.Code)
+	requireCreativeModelBindingsNoStore(t, dryRun)
 	dryRunData := creativeResponseData(t, decodeCreativeResponse(t, dryRun))
 	require.Equal(t, true, dryRunData["noProviderCall"])
 	bindings := creativeResponseArray(t, dryRunData, "bindings")
@@ -87,6 +89,7 @@ func TestCreativeModelBindingsAdminValidateDryRunAndPut(t *testing.T) {
 
 	put := performJSONRequest(t, router, http.MethodPut, "/api/creative/model-bindings", validCreativeModelBindingsPayload())
 	require.Equal(t, http.StatusOK, put.Code)
+	requireCreativeModelBindingsNoStore(t, put)
 	putData := creativeResponseData(t, decodeCreativeResponse(t, put))
 	require.NotEmpty(t, putData["configJSON"])
 	require.Contains(t, logBuffer.String(), "creative model bindings updated")
@@ -97,6 +100,7 @@ func TestCreativeModelBindingsAdminValidateDryRunAndPut(t *testing.T) {
 
 	get := performJSONRequest(t, router, http.MethodGet, "/api/creative/model-bindings", nil)
 	require.Equal(t, http.StatusOK, get.Code)
+	requireCreativeModelBindingsNoStore(t, get)
 	getData := creativeResponseData(t, decodeCreativeResponse(t, get))
 	config := creativeResponseObject(t, getData, "config")
 	require.Equal(t, float64(1), config["version"])
@@ -118,6 +122,7 @@ func TestCreativeModelBindingsAdminRejectsUnsafeAndAccessToken(t *testing.T) {
 	accessTokenRouter := newCreativeModelBindingsAdminTestRouter(true)
 	accessToken := performJSONRequest(t, accessTokenRouter, http.MethodPost, "/api/creative/model-bindings/validate", validCreativeModelBindingsPayload())
 	require.Equal(t, http.StatusForbidden, accessToken.Code)
+	requireCreativeModelBindingsNoStore(t, accessToken)
 	require.Contains(t, decodeCreativeResponse(t, accessToken)["message"], "dashboard session")
 }
 
@@ -180,12 +185,14 @@ func TestCreativeModelBindingsAdminRouteRequiresNonce(t *testing.T) {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			missingNonce := performCreativeModelBindingsRouteRequest(t, router, route.method, route.path, encoded, nil)
 			require.Equal(t, http.StatusForbidden, missingNonce.Code)
+			requireCreativeModelBindingsNoStore(t, missingNonce)
 
 			badNonce := performCreativeModelBindingsRouteRequest(t, router, route.method, route.path, encoded, map[string]string{
 				"X-Creative-CSRF":  "csrf-test",
 				"X-Creative-Nonce": "wrong",
 			})
 			require.Equal(t, http.StatusForbidden, badNonce.Code)
+			requireCreativeModelBindingsNoStore(t, badNonce)
 		})
 	}
 
@@ -206,6 +213,7 @@ func TestCreativeModelBindingsAdminRouteRejectsNonRoot(t *testing.T) {
 		"X-Creative-Nonce": "nonce-test",
 	})
 	require.Equal(t, false, decodeCreativeResponse(t, recorder)["success"])
+	requireCreativeModelBindingsNoStore(t, recorder)
 }
 
 func newCreativeModelBindingsRouteTestRouter(t *testing.T, role int) *gin.Engine {
@@ -226,6 +234,7 @@ func newCreativeModelBindingsRouteTestRouter(t *testing.T, role int) *gin.Engine
 		c.Next()
 	})
 	group := router.Group("/api/creative")
+	group.Use(middleware.DisableCache())
 	group.Use(middleware.RootAuth())
 	group.PUT("/model-bindings", middleware.CreativeRequireNonce(), UpdateCreativeModelBindings)
 	group.POST("/model-bindings/validate", middleware.CreativeRequireNonce(), ValidateCreativeModelBindings)
@@ -284,6 +293,14 @@ func setCreativeModelBindingsOptionForTest(t *testing.T, value string) {
 			delete(common.OptionMap, service.CreativeModelBindingsOptionKey)
 		}
 	})
+}
+
+func requireCreativeModelBindingsNoStore(t *testing.T, recorder *httptest.ResponseRecorder) {
+	t.Helper()
+	cacheControl := recorder.Header().Get("Cache-Control")
+	require.Contains(t, cacheControl, "private")
+	require.Contains(t, cacheControl, "no-store")
+	require.Equal(t, "no-cache", recorder.Header().Get("Pragma"))
 }
 
 func bytesReader(data []byte) *strings.Reader {

@@ -163,6 +163,8 @@ export type CreativeModelBindingDryRunItem = {
   id: string
   providerModelId: string
   priceModelId: string
+  lockedChannelId?: number
+  finalProviderModelId?: string
   modality: string
   enabled: boolean
   adapterPreset: string

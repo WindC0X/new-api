@@ -778,18 +778,34 @@ func creativeChannelSupportsProviderModel(channel *model.Channel, providerModelI
 		}
 	}
 	if _, ok := models[providerModelID]; ok {
-		if mappedTo, hasMapping := mapped[providerModelID]; hasMapping {
-			return strings.TrimSpace(mappedTo) == providerModelID
-		}
-		return true
+		return creativeChannelModelMappingResolvesTo(providerModelID, mapped, providerModelID)
 	}
-	for from, to := range mapped {
+	for from := range mapped {
 		trimmedFrom := strings.TrimSpace(from)
-		if _, ok := models[trimmedFrom]; ok && strings.TrimSpace(to) == providerModelID {
+		if _, ok := models[trimmedFrom]; ok && creativeChannelModelMappingResolvesTo(trimmedFrom, mapped, providerModelID) {
 			return true
 		}
 	}
 	return false
+}
+
+func creativeChannelModelMappingResolvesTo(modelID string, mapped map[string]string, providerModelID string) bool {
+	current := strings.TrimSpace(modelID)
+	if current == "" {
+		return false
+	}
+	visited := map[string]struct{}{current: {}}
+	for {
+		next := strings.TrimSpace(mapped[current])
+		if next == "" {
+			return current == providerModelID
+		}
+		if _, ok := visited[next]; ok {
+			return next == current && current == providerModelID
+		}
+		visited[next] = struct{}{}
+		current = next
+	}
 }
 
 func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) error {
@@ -816,6 +832,9 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 			return fmt.Errorf("binding %q is duplicated", id)
 		}
 		seen[key] = struct{}{}
+		if binding.Enabled && creativeBindingIDCollidesWithEnabledChannelModel(id) {
+			return fmt.Errorf("binding %q conflicts with an enabled channel model id", id)
+		}
 		if strings.TrimSpace(binding.ProviderModelId) == "" {
 			return fmt.Errorf("binding %q providerModelId is required", id)
 		}
@@ -884,6 +903,19 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 		}
 	}
 	return nil
+}
+
+func creativeBindingIDCollidesWithEnabledChannelModel(bindingID string) bool {
+	normalizedBindingID := strings.ToLower(strings.TrimSpace(bindingID))
+	if normalizedBindingID == "" {
+		return false
+	}
+	for _, ability := range model.GetAllEnableAbilities() {
+		if strings.ToLower(strings.TrimSpace(ability.Model)) == normalizedBindingID {
+			return true
+		}
+	}
+	return false
 }
 
 func ValidateCreativeParameterSchema(schema []dto.CreativeParameterSchemaItem) error {

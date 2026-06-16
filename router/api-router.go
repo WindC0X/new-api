@@ -202,7 +202,7 @@ func SetApiRouter(router *gin.Engine) {
 		creativeAdminRoute.Use(middleware.RootAuth())
 		{
 			creativeAdminRoute.GET("/model-policy", controller.GetCreativeModelPolicy)
-			creativeAdminRoute.PUT("/model-policy", controller.UpdateCreativeModelPolicy)
+			creativeAdminRoute.PUT("/model-policy", middleware.CreativeRequireNonce(), controller.UpdateCreativeModelPolicy)
 			creativeAdminRoute.GET("/model-bindings", controller.GetCreativeModelBindings)
 			creativeAdminRoute.PUT("/model-bindings", middleware.CreativeRequireNonce(), controller.UpdateCreativeModelBindings)
 			creativeAdminRoute.POST("/model-bindings/validate", middleware.CreativeRequireNonce(), controller.ValidateCreativeModelBindings)

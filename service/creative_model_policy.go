@@ -573,9 +573,10 @@ func buildCreativeModelPolicyGroupPools(policy CreativeModelPolicy) ([]CreativeM
 	poolsByGroup := make(map[string][]string, len(groups))
 	diagnostics := CreativeModelPolicyDiagnostics{}
 	for _, group := range groups {
-		models, _ := GetUserCreativeModelPool(group)
+		availableModels := getUserCreativeModelPolicyAvailableModels(group)
+		models := creativeModelPolicyAvailableModelIDs(availableModels)
 		poolsByGroup[group] = models
-		effective, _ := BuildEffectiveCreativeModelPolicy(policy, group, models)
+		effective, _ := BuildEffectiveCreativeModelPolicyForModels(policy, group, availableModels)
 		if effective.Stale != nil {
 			if diagnostics.StaleByGroup == nil {
 				diagnostics.StaleByGroup = make(map[string]CreativeModelPolicyStale)
@@ -586,7 +587,7 @@ func buildCreativeModelPolicyGroupPools(policy CreativeModelPolicy) ([]CreativeM
 			Group:            group,
 			Description:      usableGroupDescriptions[group],
 			Models:           models,
-			ModelsByModality: creativeModelPolicyModelsByModality(models),
+			ModelsByModality: creativeModelPolicyAvailableModelsByModality(availableModels),
 			ModelCount:       len(models),
 			EffectivePolicy:  effective,
 		})
@@ -594,8 +595,46 @@ func buildCreativeModelPolicyGroupPools(policy CreativeModelPolicy) ([]CreativeM
 	return modelPools, poolsByGroup, diagnostics
 }
 
+func getUserCreativeModelPolicyAvailableModels(group string) []CreativeModelPolicyAvailableModel {
+	channelModels, _ := GetUserCreativeModelPool(group)
+	available := creativeModelPolicyAvailableModelsFromIDs(channelModels)
+	seen := make(map[string]struct{}, len(available))
+	for _, item := range available {
+		seen[item.ID] = struct{}{}
+	}
+	for _, item := range GetStoredCreativeModelBindingsCatalogForGroup(group) {
+		modelID := strings.TrimSpace(item.Id)
+		if modelID == "" {
+			continue
+		}
+		if _, ok := seen[modelID]; ok {
+			continue
+		}
+		seen[modelID] = struct{}{}
+		available = append(available, CreativeModelPolicyAvailableModel{
+			ID:                     modelID,
+			SupportedEndpointTypes: item.SupportedEndpointTypes,
+		})
+	}
+	return available
+}
+
+func creativeModelPolicyAvailableModelIDs(available []CreativeModelPolicyAvailableModel) []string {
+	models := make([]string, 0, len(available))
+	for _, item := range available {
+		modelID := strings.TrimSpace(item.ID)
+		if modelID != "" {
+			models = append(models, modelID)
+		}
+	}
+	return models
+}
+
 func creativeModelPolicyModelsByModality(modelIDs []string) map[string][]string {
-	availableModels := creativeModelPolicyAvailableModelsFromIDs(modelIDs)
+	return creativeModelPolicyAvailableModelsByModality(creativeModelPolicyAvailableModelsFromIDs(modelIDs))
+}
+
+func creativeModelPolicyAvailableModelsByModality(availableModels []CreativeModelPolicyAvailableModel) map[string][]string {
 	modelsByModality := make(map[string][]string, len(creativeModelPolicyModalities))
 	for _, modality := range creativeModelPolicyModalities {
 		modelsByModality[modality] = make([]string, 0)

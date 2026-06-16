@@ -2717,6 +2717,19 @@ func TestCreativeRelayRejectsForbiddenAliasesInHeaderQueryFormAndFileNames(t *te
 	require.Equal(t, http.StatusBadRequest, queryCase.Code)
 	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, queryCase), "error")["message"], "forbidden field ownerId")
 
+	textJSONRequest := httptest.NewRequest(http.MethodPost, "/creative/relay/v1/images/generations", bytes.NewBufferString(`{"model":"creative-model-05","prompt":"safe image prompt","callback":"https://evil.example/cb"}`))
+	textJSONRequest.Header.Set("Content-Type", "text/plain")
+	for _, cookie := range auth.cookies {
+		textJSONRequest.AddCookie(cookie)
+	}
+	for key, value := range creativeSameOriginNonceHeaders(auth) {
+		textJSONRequest.Header.Set(key, value)
+	}
+	textJSONCase := httptest.NewRecorder()
+	router.ServeHTTP(textJSONCase, textJSONRequest)
+	require.Equal(t, http.StatusBadRequest, textJSONCase.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, textJSONCase), "error")["message"], "forbidden field callback")
+
 	formCase := performCreativeSessionMultipart(t, router, http.MethodPost, "/creative/relay/v1/images/generations", auth.cookies, creativeSameOriginNonceHeaders(auth), map[string]string{
 		"model":         "creative-model-05",
 		"prompt":        "safe image prompt",

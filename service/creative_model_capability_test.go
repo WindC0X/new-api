@@ -772,6 +772,18 @@ func TestValidateCreativeModelBindingsConfigRequiresChannelProviderModelSupport(
 	}).Error)
 	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
 
+	chainMapping := `{"logical-image":"provider-alias","provider-alias":"gpt-image-2"}`
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 21).Updates(map[string]any{
+		"model_mapping": &chainMapping,
+	}).Error)
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+
+	cyclicMapping := `{"logical-image":"provider-alias","provider-alias":"logical-image"}`
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 21).Updates(map[string]any{
+		"model_mapping": &cyclicMapping,
+	}).Error)
+	require.Error(t, ValidateCreativeModelBindingsConfig(config))
+
 	mappingDirectToOther := `{"gpt-image-2":"other-upstream-model"}`
 	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 21).Updates(map[string]any{
 		"models":        "gpt-image-2",
@@ -783,6 +795,25 @@ func TestValidateCreativeModelBindingsConfigRequiresChannelProviderModelSupport(
 	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 21).Updates(map[string]any{
 		"model_mapping": &mappingDirectIdentity,
 	}).Error)
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+}
+
+func TestValidateCreativeModelBindingsConfigRejectsEnabledBindingIDCollidingWithChannelModel(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group:     "test",
+		Model:     "mock:gpt-image-2:preview",
+		ChannelId: 31,
+		Enabled:   true,
+	}).Error)
+
+	config := validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = true
+	err := ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "conflicts with an enabled channel model id")
+
+	config.Bindings[0].Enabled = false
 	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
 }
 
@@ -802,7 +833,7 @@ func setupCreativeCapabilityServiceTestDB(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	model.DB = db
-	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()

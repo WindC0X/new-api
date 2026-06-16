@@ -1000,7 +1000,8 @@ func creativeMJForbiddenSubmitField(c *gin.Context) (string, error) {
 			c.Request.Body = io.NopCloser(storage)
 		}
 	}()
-	if len(strings.TrimSpace(string(body))) == 0 {
+	trimmedBody := strings.TrimSpace(string(body))
+	if len(trimmedBody) == 0 {
 		return "", nil
 	}
 
@@ -1287,7 +1288,8 @@ func creativeSunoForbiddenSubmitField(c *gin.Context) (string, error) {
 			c.Request.Body = io.NopCloser(storage)
 		}
 	}()
-	if len(strings.TrimSpace(string(body))) == 0 {
+	trimmedBody := strings.TrimSpace(string(body))
+	if len(trimmedBody) == 0 {
 		return "", nil
 	}
 
@@ -1741,7 +1743,8 @@ func creativeForbiddenRelayBodyField(c *gin.Context) (string, error) {
 			c.Request.Body = io.NopCloser(storage)
 		}
 	}()
-	if len(strings.TrimSpace(string(body))) == 0 {
+	trimmedBody := strings.TrimSpace(string(body))
+	if len(trimmedBody) == 0 {
 		return "", nil
 	}
 
@@ -1785,7 +1788,17 @@ func creativeForbiddenRelayBodyField(c *gin.Context) (string, error) {
 		}
 		return "", nil
 	default:
-		return "", nil
+		if strings.HasPrefix(trimmedBody, "{") || strings.HasPrefix(trimmedBody, "[") {
+			payload, err := creativeReadJSONMap(c)
+			if err != nil {
+				return "", err
+			}
+			if field, forbidden := containsCreativeForbiddenRelayBodyField(payload); forbidden {
+				return field, nil
+			}
+			return "", nil
+		}
+		return "", fmt.Errorf("unsupported creative relay content type %q", contentType)
 	}
 }
 

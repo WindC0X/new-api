@@ -116,3 +116,42 @@ func TestBuildEffectiveCreativeModelPolicyFiltersByModalityEndpoint(t *testing.T
 	require.Equal(t, []string{"text-only"}, effective.Stale.Recommended["video"])
 	require.Equal(t, []string{"text-only"}, effective.Stale.Recommended["audio"])
 }
+
+func TestBuildCreativeModelPolicyAdminStateIncludesStoredManagedBindings(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	config := validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = true
+	config.Bindings[0].CanaryGroups = []string{"default"}
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:  configJSON,
+	})
+
+	policy, err := NormalizeCreativeModelPolicyJSON(`{
+		"version": 1,
+		"global": {
+			"defaults": {"image": "mock:gpt-image-2:preview"},
+			"recommended": {"image": ["mock:gpt-image-2:preview"]}
+		}
+	}`)
+	require.NoError(t, err)
+
+	state, err := BuildCreativeModelPolicyAdminState(policy)
+	require.NoError(t, err)
+	require.NotEmpty(t, state.ModelPools)
+	defaultPool := state.ModelPools[0]
+	for _, pool := range state.ModelPools {
+		if pool.Group == "default" {
+			defaultPool = pool
+			break
+		}
+	}
+	require.Contains(t, defaultPool.Models, "mock:gpt-image-2:preview")
+	require.Contains(t, defaultPool.ModelsByModality["image"], "mock:gpt-image-2:preview")
+	require.Equal(t, "mock:gpt-image-2:preview", defaultPool.EffectivePolicy.Defaults["image"])
+	require.Equal(t, []string{"mock:gpt-image-2:preview"}, defaultPool.EffectivePolicy.Recommended["image"])
+	require.Nil(t, defaultPool.EffectivePolicy.Stale)
+	require.Equal(t, "mock:gpt-image-2:preview", state.CleanedPolicy.Global.Defaults["image"])
+}

@@ -11,6 +11,9 @@ import (
 )
 
 func GetCreativeModelPolicy(c *gin.Context) {
+	if !creativeModelBindingsRequireDashboardSession(c) {
+		return
+	}
 	state, err := service.GetCreativeModelPolicyAdminState()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
@@ -20,6 +23,9 @@ func GetCreativeModelPolicy(c *gin.Context) {
 }
 
 func UpdateCreativeModelPolicy(c *gin.Context) {
+	if !creativeModelBindingsRequireDashboardSession(c) {
+		return
+	}
 	var payload any
 	if err := common.DecodeJson(c.Request.Body, &payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid JSON"})

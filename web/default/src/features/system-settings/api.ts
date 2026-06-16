@@ -47,12 +47,34 @@ export async function getCreativeModelPolicy() {
   return res.data
 }
 
+async function getCreativeNonceHeaders(): Promise<Record<string, string>> {
+  const res = await api.get<{
+    success: boolean
+    data?: {
+      auth?: {
+        csrfToken?: string
+        nonce?: string
+      }
+    }
+  }>('/creative/api/bootstrap', { skipErrorHandler: true })
+  const auth = res.data.data?.auth
+  if (!auth?.csrfToken || !auth?.nonce) {
+    throw new Error('Creative session nonce is unavailable')
+  }
+  return {
+    'X-Creative-CSRF': auth.csrfToken,
+    'X-Creative-Nonce': auth.nonce,
+  }
+}
+
 export async function updateCreativeModelPolicy(
   request: UpdateCreativeModelPolicyRequest
 ) {
+  const creativeHeaders = await getCreativeNonceHeaders()
   const res = await api.put<CreativeModelPolicyResponse>(
     '/api/creative/model-policy',
-    request
+    request,
+    { headers: creativeHeaders }
   )
   return res.data
 }

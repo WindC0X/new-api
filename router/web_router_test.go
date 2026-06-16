@@ -31,7 +31,7 @@ var testClassicBuildFS embed.FS
 //go:embed web/classic/dist/index.html
 var testClassicIndexPage []byte
 
-//go:embed web/creative/dist
+//go:embed all:web/creative/dist
 var testCreativeBuildFS embed.FS
 
 //go:embed web/creative/dist/index.html

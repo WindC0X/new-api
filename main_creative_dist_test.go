@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//go:embed router/web/creative/dist
+//go:embed all:router/web/creative/dist
 var routerCreativeBuildFS embed.FS
 
 type mainCreativeReferencedAssets struct {

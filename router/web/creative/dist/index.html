@@ -384,7 +384,7 @@
       content="./icons/icon-512x512.svg"
     />
 
-    <script type="module" crossorigin src="/creative/assets/index-DNVo0rPB.js"></script>
+    <script type="module" crossorigin src="/creative/assets/index-C4Z0RpdL.js"></script>
     <link rel="stylesheet" crossorigin href="/creative/assets/index-Bhsy9ZA3.css">
   </head>
   <body>
@@ -444,7 +444,11 @@
         var BOOT_CDN_BASE_URL = '';
         var BOOT_LOCAL_RETRY_STORAGE_KEY = '__OPENTU_BOOT_LOCAL_RETRY_AT__';
         var BOOT_IMPORT_RETRY_STORAGE_KEY = '__OPENTU_BOOT_IMPORT_RETRY_AT__';
+        var BOOT_SW_DISABLED_RELOAD_STORAGE_KEY =
+          '__OPENTU_BOOT_SW_DISABLED_RELOAD_AT__';
         var BOOT_LOCAL_RETRY_TTL_MS = 2 * 60 * 1000;
+        var BOOT_SW_DISABLED_RELOAD_TTL_MS = 60 * 1000;
+        var BOOT_MANAGED_SCRIPT_TIMEOUT_MS = 3500;
         var forceLocalBootAssets = true;
         window.__OPENTU_START_MAIN_ENTRY__ = new Promise(function (resolve) {
           resolveMainEntryReady = resolve;
@@ -783,31 +787,66 @@
           script.async = true;
           script.setAttribute('data-cdn-fallback-managed', '1');
           script.setAttribute('data-local-src', localPath);
+          var settled = false;
+          var timeoutId = window.setTimeout(function () {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            console.warn(
+              '[Boot] Managed boot script timed out, continuing with local bootstrap:',
+              localPath
+            );
+            handleFinalFailure();
+          }, BOOT_MANAGED_SCRIPT_TIMEOUT_MS);
 
           var handleFinalFailure = function () {
             if (typeof onfinalerror === 'function') {
               onfinalerror();
             }
           };
+          var settle = function (callback) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            window.clearTimeout(timeoutId);
+            if (typeof callback === 'function') {
+              callback();
+            }
+          };
 
           if (!preferredUrl || preferredUrl === localPath) {
             script.src = localPath;
-            script.onload = onload;
-            script.onerror = handleFinalFailure;
+            script.onload = function () {
+              settle(onload);
+            };
+            script.onerror = function () {
+              settle(handleFinalFailure);
+            };
             document.head.appendChild(script);
             return;
           }
 
           script.src = preferredUrl;
-          script.onload = onload;
+          script.onload = function () {
+            settle(onload);
+          };
           script.onerror = function () {
+            if (settled) {
+              return;
+            }
             var localScript = document.createElement('script');
             localScript.async = true;
             localScript.src = localPath;
             localScript.setAttribute('data-cdn-fallback-managed', '1');
             localScript.setAttribute('data-fallback-attempted', '1');
-            localScript.onload = onload;
-            localScript.onerror = handleFinalFailure;
+            localScript.onload = function () {
+              settle(onload);
+            };
+            localScript.onerror = function () {
+              settle(handleFinalFailure);
+            };
             if (script.parentNode) {
               script.parentNode.removeChild(script);
             }
@@ -1057,15 +1096,63 @@
         function shouldEnableEarlyServiceWorkerBootstrap() {
           try {
             var swParam = new URLSearchParams(window.location.search).get('sw');
+            if (swParam === '1') {
+              return true;
+            }
             if (swParam === '0') {
+              return false;
+            }
+            if (isEmbeddedCreativeBoot()) {
               return false;
             }
             return true;
           } catch {
+            if (window.location.search.indexOf('sw=1') !== -1) {
+              return true;
+            }
             if (window.location.search.indexOf('sw=0') !== -1) {
               return false;
             }
+            if (isEmbeddedCreativeBoot()) {
+              return false;
+            }
             return true;
+          }
+        }
+
+        function isEmbeddedCreativeBoot() {
+          try {
+            var pathname = window.location.pathname || '';
+            return pathname === '/creative' || pathname.indexOf('/creative/') === 0;
+          } catch {
+            return false;
+          }
+        }
+
+        function shouldReloadAfterDisabledServiceWorkerCleanup() {
+          if (!navigator.serviceWorker.controller) {
+            return false;
+          }
+
+          try {
+            var reloadedAtRaw = window.sessionStorage.getItem(
+              BOOT_SW_DISABLED_RELOAD_STORAGE_KEY
+            );
+            var reloadedAt = reloadedAtRaw ? Number(reloadedAtRaw) : 0;
+            if (
+              isFinite(reloadedAt) &&
+              reloadedAt > 0 &&
+              Date.now() - reloadedAt < BOOT_SW_DISABLED_RELOAD_TTL_MS
+            ) {
+              return false;
+            }
+            window.sessionStorage.setItem(
+              BOOT_SW_DISABLED_RELOAD_STORAGE_KEY,
+              String(Date.now())
+            );
+            return true;
+          } catch {
+            return false;
           }
         }
 
@@ -1078,7 +1165,12 @@
             .getRegistration()
             .then(function (registration) {
               if (registration) {
-                return registration.unregister();
+                return registration.unregister().then(function () {
+                  if (shouldReloadAfterDisabledServiceWorkerCleanup()) {
+                    window.location.reload();
+                  }
+                  return true;
+                });
               }
               return false;
             })

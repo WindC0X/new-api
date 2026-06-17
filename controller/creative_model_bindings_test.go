@@ -107,6 +107,69 @@ func TestCreativeModelBindingsAdminValidateDryRunAndPut(t *testing.T) {
 	require.Contains(t, get.Body.String(), "mock:gpt-image-2:preview")
 }
 
+func TestCreativeChannelSummariesOmitSensitiveChannelFields(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}))
+	router := newCreativeModelBindingsAdminTestRouter(false)
+
+	baseURL := "https://provider-secret.example/v1"
+	headerOverride := `{"Authorization":"Bearer sk-test-secret"}`
+	paramOverride := `{"apiKey":"sk-param-secret"}`
+	setting := `{"proxy":"http://proxy-secret.example"}`
+	remark := "private remark"
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:                 42,
+		Type:               1,
+		Key:                "sk-live-secret",
+		Status:             common.ChannelStatusEnabled,
+		Name:               "Fixture Channel",
+		Group:              "test",
+		Models:             "gpt-image-2,grs-image",
+		BaseURL:            &baseURL,
+		HeaderOverride:     &headerOverride,
+		ParamOverride:      &paramOverride,
+		Setting:            &setting,
+		Other:              `{"credential":"hidden"}`,
+		OtherSettings:      `{"token":"hidden"}`,
+		OtherInfo:          "private other info",
+		ModelMapping:       common.GetPointer(`{"gpt-image-2":"upstream-secret-model"}`),
+		Remark:             &remark,
+		OpenAIOrganization: common.GetPointer("org-secret"),
+	}).Error)
+
+	recorder := performJSONRequest(t, router, http.MethodGet, "/api/creative/channel-summaries?channel_id=42", nil)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	requireCreativeModelBindingsNoStore(t, recorder)
+	raw := recorder.Body.String()
+	for _, forbidden := range []string{
+		"sk-live-secret",
+		"provider-secret",
+		"header_override",
+		"param_override",
+		"base_url",
+		"settings",
+		"other_info",
+		"model_mapping",
+		"remark",
+		"openai_organization",
+		"Authorization",
+		"credential",
+		"proxy-secret",
+		"org-secret",
+	} {
+		require.NotContains(t, raw, forbidden)
+	}
+	data := creativeResponseData(t, decodeCreativeResponse(t, recorder))
+	items := creativeResponseArray(t, data, "items")
+	require.Len(t, items, 1)
+	item := items[0].(map[string]any)
+	require.Equal(t, float64(42), item["id"])
+	require.Equal(t, "Fixture Channel", item["name"])
+	require.Equal(t, "test", item["group"])
+	require.Equal(t, float64(common.ChannelStatusEnabled), item["status"])
+	require.Equal(t, []any{"gpt-image-2", "grs-image"}, item["models"])
+}
+
 func TestCreativeModelBindingsAdminRejectsUnsafeAndAccessToken(t *testing.T) {
 	router := newCreativeModelBindingsAdminTestRouter(false)
 	unsafePayload := validCreativeModelBindingsPayload()
@@ -271,6 +334,7 @@ func newCreativeModelBindingsAdminTestRouter(useAccessToken bool) *gin.Engine {
 	router.PUT("/api/creative/model-bindings", UpdateCreativeModelBindings)
 	router.POST("/api/creative/model-bindings/validate", ValidateCreativeModelBindings)
 	router.POST("/api/creative/model-bindings/dry-run", DryRunCreativeModelBindings)
+	router.GET("/api/creative/channel-summaries", GetCreativeChannelSummaries)
 	return router
 }
 

@@ -183,6 +183,33 @@ export type CreativeModelBindingsDryRunResponse = {
   data: CreativeModelBindingsDryRunResult
 }
 
+export type CreativeChannelSummary = {
+  id: number
+  name: string
+  group: string
+  status: number
+  models: string[]
+}
+
+export type GetCreativeChannelSummariesParams = {
+  p?: number
+  page_size?: number
+  keyword?: string
+  channel_id?: number
+  group?: string
+}
+
+export type CreativeChannelSummariesResponse = {
+  success: boolean
+  message: string
+  data: {
+    items: CreativeChannelSummary[]
+    total: number
+    page: number
+    page_size: number
+  }
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string

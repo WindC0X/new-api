@@ -21,7 +21,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   CheckCircle2,
+  DatabaseZap,
   FlaskConical,
+  PlusCircle,
   ShieldCheck,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -29,9 +31,16 @@ import { toast } from 'sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import {
   dryRunCreativeModelBindings,
+  getCreativeChannelSummaries,
   getCreativeModelBindings,
   updateCreativeModelBindings,
   validateCreativeModelBindings,
@@ -40,12 +49,15 @@ import { SettingsCard } from '../components/settings-card'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import type {
+  CreativeChannelSummary,
+  CreativeModelBindingConfig,
   CreativeModelBindingsConfig,
   CreativeModelBindingsDryRunResult,
   CreativeModelBindingsState,
 } from '../types'
 
 const queryKey = ['creative-model-bindings']
+const channelsQueryKey = ['creative-model-bindings', 'channels']
 
 const emptyConfig: CreativeModelBindingsConfig = {
   version: 1,
@@ -134,6 +146,83 @@ const grsaiDryRunTemplate: CreativeModelBindingsConfig = {
   ],
 }
 
+type AdapterPresetDraft = {
+  id: SupportedAdapterPreset
+  bindingIdPrefix: 'mock' | 'grsai'
+  bindingIdSuffix: 'preview' | 'dryrun'
+  labelKey: string
+  descriptionKey: string
+  parameterTemplate: CreativeModelBindingConfig['parameterTemplate']
+  disabled?: boolean
+}
+
+type SupportedAdapterPreset = 'mock_image_task' | 'grsai_gpt_image_dryrun'
+
+const adapterPresetDraftMap = {
+  mock_image_task: {
+    id: 'mock_image_task',
+    bindingIdPrefix: 'mock',
+    bindingIdSuffix: 'preview',
+    disabled: false,
+    labelKey: 'Mock image task (enabled path)',
+    descriptionKey:
+      'Uses local mock task execution. This is the only binding family that can be exposed after validation; it still starts enabled=false.',
+    parameterTemplate: 'mock_gpt_image',
+  },
+  grsai_gpt_image_dryrun: {
+    id: 'grsai_gpt_image_dryrun',
+    bindingIdPrefix: 'grsai',
+    bindingIdSuffix: 'dryrun',
+    disabled: false,
+    labelKey: 'GrsAI GPT image dry-run',
+    descriptionKey:
+      'Prepares an offline GrsAI fixture request preview only. It is future adapter preparation, not a live provider call.',
+    parameterTemplate: 'grsai_gpt_image',
+  },
+} as const satisfies Record<SupportedAdapterPreset, AdapterPresetDraft>
+
+const adapterPresetDrafts = Object.values(adapterPresetDraftMap)
+
+function createSchemaForPreset(
+  preset: SupportedAdapterPreset
+): CreativeModelBindingConfig['parameterSchema'] {
+  switch (preset) {
+    case 'mock_image_task':
+      return mockTemplate.bindings[0]?.parameterSchema ?? []
+    case 'grsai_gpt_image_dryrun':
+      return grsaiDryRunTemplate.bindings[0]?.parameterSchema ?? []
+  }
+}
+
+function safeModelSlug(modelId: string): string {
+  const slug = modelId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+  return slug && /^[a-z]/.test(slug) ? slug : `model-${slug || 'unknown'}`
+}
+
+function generatedBindingId(
+  preset: AdapterPresetDraft,
+  providerModelId: string,
+  channelId: number
+): string {
+  return `${preset.bindingIdPrefix}:${safeModelSlug(providerModelId)}:ch${channelId}:${preset.bindingIdSuffix}`
+}
+
+function parseChannelModels(models: string[] | null | undefined): string[] {
+  const list = Array.isArray(models) ? models : []
+  return Array.from(
+    new Set(
+      list
+        .map((model) => model.trim())
+        .filter(Boolean)
+    )
+  )
+}
+
 function parseEditorValue(value: string): CreativeModelBindingsConfig {
   const trimmed = value.trim()
   if (!trimmed) return emptyConfig
@@ -170,6 +259,24 @@ function createSummary(config: CreativeModelBindingsConfig) {
       (binding) => binding.adapterPreset === 'grsai_gpt_image_dryrun'
     ).length,
   }
+}
+
+function upsertBinding(
+  config: CreativeModelBindingsConfig,
+  binding: CreativeModelBindingConfig
+): CreativeModelBindingsConfig {
+  const bindings = Array.isArray(config.bindings) ? config.bindings : []
+  const next = bindings.filter((item) => item.id !== binding.id)
+  next.push(binding)
+  return {
+    version: config.version || 1,
+    bindings: next,
+  }
+}
+
+function bindingExists(config: CreativeModelBindingsConfig, id: string): boolean {
+  const bindings = Array.isArray(config.bindings) ? config.bindings : []
+  return bindings.some((item) => item.id === id)
 }
 
 function PreviewBlock(props: { value: unknown }) {
@@ -270,6 +377,68 @@ function CreativeModelBindingsLoaded(props: {
   const [dryRunResult, setDryRunResult] =
     useState<CreativeModelBindingsDryRunResult | null>(null)
   const [dryRunDraft, setDryRunDraft] = useState<string | null>(null)
+  const [draftChannelSearch, setDraftChannelSearch] = useState('')
+  const [draftChannelId, setDraftChannelId] = useState('')
+  const manualChannelId = useMemo(() => {
+    const numeric = Number(draftChannelId)
+    return Number.isInteger(numeric) && numeric > 0 ? numeric : null
+  }, [draftChannelId])
+  const channelsQuery = useQuery({
+    queryKey: [...channelsQueryKey, draftChannelSearch],
+    queryFn: () =>
+      getCreativeChannelSummaries({
+        p: 1,
+        page_size: 50,
+        keyword: draftChannelSearch.trim() || undefined,
+      }),
+  })
+  const channels = useMemo(
+    () => channelsQuery.data?.data?.items ?? [],
+    [channelsQuery.data]
+  )
+  const selectedListedChannel = useMemo(
+    () =>
+      channels.find((channel) => String(channel.id) === draftChannelId) ?? null,
+    [channels, draftChannelId]
+  )
+  const selectedChannelLookupQuery = useQuery({
+    queryKey: [...channelsQueryKey, 'lookup', manualChannelId],
+    queryFn: () =>
+      getCreativeChannelSummaries({
+        channel_id: manualChannelId ?? undefined,
+        page_size: 1,
+      }),
+    enabled: manualChannelId !== null && !selectedListedChannel,
+  })
+  const selectedChannel = useMemo(
+    () =>
+      selectedListedChannel ??
+      selectedChannelLookupQuery.data?.data?.items?.[0] ??
+      null,
+    [selectedListedChannel, selectedChannelLookupQuery.data]
+  )
+  const selectedChannelModels = useMemo(
+    () => parseChannelModels(selectedChannel?.models),
+    [selectedChannel]
+  )
+  const [draftProviderModelId, setDraftProviderModelId] = useState('')
+  const [draftBindingId, setDraftBindingId] = useState('')
+  const [draftDisplayName, setDraftDisplayName] = useState('')
+  const [draftPriceModelId, setDraftPriceModelId] = useState('')
+  const [draftCanaryGroups, setDraftCanaryGroups] = useState('test')
+  const [draftAdapterPreset, setDraftAdapterPreset] =
+    useState<SupportedAdapterPreset>('mock_image_task')
+  const selectedAdapterPreset = useMemo(
+    () => adapterPresetDraftMap[draftAdapterPreset],
+    [draftAdapterPreset]
+  )
+  const formatChannelLabel = (channel: CreativeChannelSummary) => {
+    const status =
+      channel.status === 1
+        ? t('Enabled')
+        : t('Channel status {{status}}', { status: channel.status })
+    return `#${channel.id} · ${channel.name || t('Unnamed channel')} · ${channel.group || t('Default group')} · ${status}`
+  }
 
   const parsedSummary = useMemo(() => {
     try {
@@ -427,6 +596,92 @@ function CreativeModelBindingsLoaded(props: {
     setDryRunDraft(null)
   }
 
+  const resetDraftGates = () => {
+    setValidatedState(null)
+    setValidatedDraft(null)
+    setDryRunResult(null)
+    setDryRunDraft(null)
+  }
+
+  const handleUpsertDraftBinding = () => {
+    const channelId = Number(draftChannelId)
+    const providerModelId = draftProviderModelId.trim()
+    const bindingId =
+      draftBindingId.trim() ||
+      generatedBindingId(selectedAdapterPreset, providerModelId, channelId)
+    const priceModelId = draftPriceModelId.trim() || providerModelId
+    if (!Number.isInteger(channelId) || channelId <= 0) {
+      toast.error(t('Select a channel before adding a binding'))
+      return
+    }
+    if (!providerModelId) {
+      toast.error(t('Select a provider model from the channel models list'))
+      return
+    }
+    if (selectedChannel?.status !== undefined && selectedChannel.status !== 1) {
+      toast.error(
+        t('Selected channel is disabled. Enable it before adding a binding draft.')
+      )
+      return
+    }
+    if (selectedChannel && selectedChannelModels.length === 0) {
+      toast.error(
+        t('This channel has no models configured. Add models in the channel first.')
+      )
+      return
+    }
+    if (
+      selectedChannel &&
+      selectedChannelModels.length > 0 &&
+      !selectedChannelModels.includes(providerModelId)
+    ) {
+      toast.error(
+        t(
+          'Provider model is not in the selected channel model list. Add it to the channel first.'
+        )
+      )
+      return
+    }
+    const canaryGroups = draftCanaryGroups
+      .split(',')
+      .map((group) => group.trim())
+      .filter(Boolean)
+    const binding: CreativeModelBindingConfig = {
+      id: bindingId,
+      providerModelId,
+      priceModelId,
+      displayName: draftDisplayName.trim() || providerModelId,
+      modality: 'image',
+      enabled: false,
+      canaryGroups,
+      channelId,
+      adapterPreset: draftAdapterPreset,
+      parameterTemplate: selectedAdapterPreset.parameterTemplate,
+      recommendedScore: 0,
+      sortOrder: 1000,
+      parameterSchema: createSchemaForPreset(draftAdapterPreset),
+    }
+    try {
+      const currentConfig = parseEditorValue(editorValue)
+      if (
+        bindingExists(currentConfig, binding.id) &&
+        !window.confirm(
+          t(
+            'A binding with this ID already exists. Replace that existing draft?'
+          )
+        )
+      ) {
+        return
+      }
+      const config = upsertBinding(currentConfig, binding)
+      setEditorValue(formatConfig(config))
+      resetDraftGates()
+      toast.success(t('Binding draft added to JSON editor'))
+    } catch {
+      toast.error(t('Fix JSON syntax before using the binding builder'))
+    }
+  }
+
   const isBusy =
     updateMutation.isPending ||
     validateMutation.isPending ||
@@ -451,10 +706,12 @@ function CreativeModelBindingsLoaded(props: {
 
       <Alert>
         <ShieldCheck />
-        <AlertTitle>{t('Backend-owned Creative adapter bindings')}</AlertTitle>
+        <AlertTitle>
+          {t('Creative model bindings map channels to Creative models')}
+        </AlertTitle>
         <AlertDescription>
           {t(
-            'This page writes only through the dedicated Creative model-bindings API. It cannot configure provider keys, base URLs, callbacks, headers, or channel authority through generic system options.'
+            'Provider keys, Base URLs, and upstream credentials are configured in Channels. This page only binds a Creative-visible model ID to a channel, provider model, adapter preset, and safe parameter schema.'
           )}
         </AlertDescription>
       </Alert>
@@ -464,10 +721,284 @@ function CreativeModelBindingsLoaded(props: {
         <AlertTitle>{t('Mock-first provider safety')}</AlertTitle>
         <AlertDescription>
           {t(
-            'Duomi live adapters are unavailable. GrsAI is dry-run/fixture only here. Validate and dry-run are nonce-protected and must report noProviderCall before any save is considered safe.'
+            'Duomi and GrsAI live adapters are future adapter preparation, not implemented here. GrsAI is dry-run/fixture only. Validate and dry-run are nonce-protected and must report noProviderCall=true before any save is considered safe.'
           )}
         </AlertDescription>
       </Alert>
+
+      <SettingsCard
+        title={t('How to configure image provider channels')}
+        description={t(
+          'Use this flow to prepare Duomi, GrsAI, and future image provider bindings without exposing provider credentials to OpenTU users.'
+        )}
+      >
+        <div className='grid gap-3 text-sm md:grid-cols-3'>
+          <div className='rounded-xl border p-3'>
+            <div className='mb-1 flex items-center gap-2 font-medium'>
+              <DatabaseZap className='size-4' aria-hidden='true' />
+              {t('1. Configure channel')}
+            </div>
+            <p className='text-muted-foreground'>
+              {t(
+                'Create or edit a new-api channel with provider Base URL, API key, group, and channel model list. Channel secrets stay in the channel subsystem.'
+              )}
+            </p>
+          </div>
+          <div className='rounded-xl border p-3'>
+            <div className='mb-1 font-medium'>
+              {t('2. Bind Creative model')}
+            </div>
+            <p className='text-muted-foreground'>
+              {t(
+                'Choose a sanitized channel summary below, create a binding ID, and attach an adapter preset plus parameter schema.'
+              )}
+            </p>
+          </div>
+          <div className='rounded-xl border p-3'>
+            <div className='mb-1 font-medium'>{t('3. Validate and save')}</div>
+            <p className='text-muted-foreground'>
+              {t(
+                'Run backend validation and offline dry-run for the exact JSON draft before saving. Live Duomi/GrsAI calls remain blocked until the real adapter phase.'
+              )}
+            </p>
+          </div>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title={t('Guided binding builder')}
+        description={t(
+          'This helper uses a sanitized channel summary endpoint and writes a validation-gated draft into the JSON editor. It does not save until validation and offline dry-run pass.'
+        )}
+      >
+        <div className='grid gap-4 lg:grid-cols-2'>
+          <div className='space-y-2'>
+            <Label htmlFor='creative-binding-channel-search'>
+              {t('Search channel summaries')}
+            </Label>
+            <Input
+              id='creative-binding-channel-search'
+              value={draftChannelSearch}
+              disabled={isBusy}
+              onChange={(event) => setDraftChannelSearch(event.target.value)}
+              placeholder={t('Search by channel name, ID, or model')}
+            />
+            <Label htmlFor='creative-binding-channel'>{t('Channel')}</Label>
+            <NativeSelect
+              id='creative-binding-channel'
+              className='w-full'
+              value={draftChannelId}
+              disabled={channelsQuery.isLoading || isBusy}
+              onChange={(event) => {
+                setDraftChannelId(event.target.value)
+                setDraftProviderModelId('')
+              }}
+            >
+              <NativeSelectOption value=''>
+                {channelsQuery.isLoading
+                  ? t('Loading channels...')
+                  : t('Select channel')}
+              </NativeSelectOption>
+              {channels.map((channel) => (
+                <NativeSelectOption key={channel.id} value={channel.id}>
+                  {formatChannelLabel(channel)}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <Input
+              value={draftChannelId}
+              disabled={isBusy}
+              onChange={(event) => setDraftChannelId(event.target.value)}
+              placeholder={t('Or enter channel ID manually')}
+            />
+            {channelsQuery.isError && (
+              <p className='text-destructive text-xs'>
+                {t('Failed to load channels; you can still edit JSON manually.')}
+              </p>
+            )}
+            {manualChannelId &&
+              !selectedChannel &&
+              !selectedChannelLookupQuery.isFetching && (
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'Manual channel ID is not loaded in summaries. The draft is validation-gated; backend validation will reject missing, disabled, or unsupported channels.'
+                  )}
+                </p>
+              )}
+            {selectedChannel && selectedChannel.status !== 1 && (
+              <p className='text-destructive text-xs'>
+                {t(
+                  'Selected channel is disabled. Enable it before adding a binding draft.'
+                )}
+              </p>
+            )}
+          </div>
+
+          <div className='space-y-2'>
+            <Label htmlFor='creative-binding-provider-model'>
+              {t('Provider model from channel')}
+            </Label>
+            <NativeSelect
+              id='creative-binding-provider-model'
+              className='w-full'
+              value={draftProviderModelId}
+              disabled={
+                !selectedChannel || selectedChannelModels.length === 0 || isBusy
+              }
+              onChange={(event) => {
+                setDraftProviderModelId(event.target.value)
+                setDraftBindingId('')
+                setDraftDisplayName('')
+                setDraftPriceModelId('')
+              }}
+            >
+              <NativeSelectOption value=''>
+                {selectedChannel
+                  ? t('Select provider model')
+                  : t('Select channel first')}
+              </NativeSelectOption>
+              {selectedChannelModels.map((modelId) => (
+                <NativeSelectOption key={modelId} value={modelId}>
+                  {modelId}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <Input
+              value={draftProviderModelId}
+              disabled={isBusy}
+              onChange={(event) => {
+                setDraftProviderModelId(event.target.value)
+                setDraftBindingId('')
+                setDraftDisplayName('')
+                setDraftPriceModelId('')
+              }}
+              placeholder={t('Or enter provider model manually')}
+            />
+            {selectedChannel && selectedChannelModels.length === 0 && (
+              <p className='text-destructive text-xs'>
+                {t(
+                  'This channel has no models configured. Add models in the channel first.'
+                )}
+              </p>
+            )}
+            {selectedChannel &&
+              selectedChannelModels.length > 0 &&
+              draftProviderModelId.trim() !== '' &&
+              !selectedChannelModels.includes(draftProviderModelId.trim()) && (
+                <p className='text-destructive text-xs'>
+                  {t(
+                    'Provider model is not in the selected channel model list. Add it to the channel first.'
+                  )}
+                </p>
+              )}
+          </div>
+
+          <div className='space-y-2'>
+            <Label htmlFor='creative-binding-adapter'>
+              {t('Adapter preset')}
+            </Label>
+            <NativeSelect
+              id='creative-binding-adapter'
+              className='w-full'
+              value={draftAdapterPreset}
+              disabled={isBusy}
+              onChange={(event) => {
+                setDraftAdapterPreset(
+                  event.target.value as SupportedAdapterPreset
+                )
+                setDraftBindingId('')
+              }}
+            >
+              {adapterPresetDrafts.map((preset) => (
+                <NativeSelectOption
+                  key={preset.id}
+                  value={preset.id}
+                  disabled={preset.disabled}
+                >
+                  {t(preset.labelKey)}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <p className='text-muted-foreground text-xs'>
+              {t(selectedAdapterPreset.descriptionKey)}
+            </p>
+          </div>
+
+          <div className='space-y-2'>
+            <Label htmlFor='creative-binding-id'>{t('Binding ID')}</Label>
+            <Input
+              id='creative-binding-id'
+              value={draftBindingId}
+              disabled={isBusy}
+              onChange={(event) => setDraftBindingId(event.target.value)}
+              placeholder='mock-image:gpt-image-2:preview'
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'OpenTU submits this logical ID as model. Leave blank to generate mock:<model>:ch<id>:preview or grsai:<model>:ch<id>:dryrun.'
+              )}
+            </p>
+          </div>
+
+          <div className='space-y-2'>
+            <Label htmlFor='creative-binding-display'>
+              {t('Display name')}
+            </Label>
+            <Input
+              id='creative-binding-display'
+              value={draftDisplayName}
+              disabled={isBusy}
+              onChange={(event) => setDraftDisplayName(event.target.value)}
+              placeholder='GPT Image 2 · Preview'
+            />
+          </div>
+
+          <div className='space-y-2'>
+            <Label htmlFor='creative-binding-price-model'>
+              {t('Billing model ID')}
+            </Label>
+            <Input
+              id='creative-binding-price-model'
+              value={draftPriceModelId}
+              disabled={isBusy}
+              onChange={(event) => setDraftPriceModelId(event.target.value)}
+              placeholder='gpt-image-2'
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t('Pricing uses this ID; channel routing still uses provider model.')}
+            </p>
+          </div>
+
+          <div className='space-y-2 lg:col-span-2'>
+            <Label htmlFor='creative-binding-canary'>
+              {t('Canary groups')}
+            </Label>
+            <Input
+              id='creative-binding-canary'
+              value={draftCanaryGroups}
+              disabled={isBusy}
+              onChange={(event) => setDraftCanaryGroups(event.target.value)}
+              placeholder='test,vip'
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Generated drafts always use enabled=false. Expose to users only after canary and rollback gates are complete.'
+              )}
+            </p>
+          </div>
+        </div>
+        <div className='mt-4 flex flex-wrap gap-2'>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={handleUpsertDraftBinding}
+            disabled={isBusy}
+          >
+            <PlusCircle data-icon='inline-start' />
+            {t('Add or replace binding draft')}
+          </Button>
+        </div>
+      </SettingsCard>
 
       <SettingsCard
         title={t('Current draft summary')}
@@ -507,7 +1038,7 @@ function CreativeModelBindingsLoaded(props: {
       <SettingsCard
         title={t('Bindings JSON')}
         description={t(
-          'Use backend validation for every change. Keep enabled=false until canary, fixture, and rollback gates are complete.'
+          'Use backend validation for every change. Keep enabled=false until canary, fixture, and rollback gates are complete; dry-run must stay offline.'
         )}
       >
         <div className='space-y-3'>
@@ -613,7 +1144,7 @@ function CreativeModelBindingsLoaded(props: {
                 variant={dryRunResult.noProviderCall ? 'default' : 'destructive'}
               >
                 {dryRunResult.noProviderCall
-                  ? t('noProviderCall=true')
+                  ? t('noProviderCall=true (offline dry-run only)')
                   : t('Provider call risk')}
               </Badge>
               <Badge variant='secondary'>

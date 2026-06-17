@@ -19,11 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
+  CreativeChannelSummariesResponse,
   CreativeModelBindingsDryRunResponse,
   CreativeModelBindingsResponse,
   CreativeModelPolicyResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  GetCreativeChannelSummariesParams,
   SystemOptionsResponse,
   UpdateCreativeModelBindingsRequest,
   UpdateCreativeModelPolicyRequest,
@@ -86,6 +88,16 @@ export async function updateCreativeModelPolicy(
 export async function getCreativeModelBindings() {
   const res = await api.get<CreativeModelBindingsResponse>(
     '/api/creative/model-bindings'
+  )
+  return res.data
+}
+
+export async function getCreativeChannelSummaries(
+  params: GetCreativeChannelSummariesParams = {}
+) {
+  const res = await api.get<CreativeChannelSummariesResponse>(
+    '/api/creative/channel-summaries',
+    { params }
   )
   return res.data
 }

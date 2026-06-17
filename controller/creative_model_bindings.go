@@ -2,6 +2,8 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/service"
@@ -19,6 +21,42 @@ func GetCreativeModelBindings(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, state)
+}
+
+func GetCreativeChannelSummaries(c *gin.Context) {
+	creativeModelBindingsNoStore(c)
+	if !creativeModelBindingsRequireDashboardSession(c) {
+		return
+	}
+
+	pageInfo := common.GetPageQuery(c)
+	channelID, ok := creativeOptionalPositiveIntQuery(c, "channel_id")
+	if !ok {
+		return
+	}
+	if channelID == 0 {
+		var idOK bool
+		channelID, idOK = creativeOptionalPositiveIntQuery(c, "id")
+		if !idOK {
+			return
+		}
+	}
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	if keyword == "" {
+		keyword = strings.TrimSpace(c.Query("q"))
+	}
+	result, err := service.ListCreativeChannelSummaries(
+		pageInfo.GetPage(),
+		pageInfo.GetPageSize(),
+		keyword,
+		channelID,
+		c.Query("group"),
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "failed to load creative channel summaries"})
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 func ValidateCreativeModelBindings(c *gin.Context) {
@@ -143,4 +181,17 @@ func creativeModelBindingsConfigFromValue(value any) (service.CreativeModelBindi
 		return service.CreativeModelBindingsConfig{}, err
 	}
 	return service.ParseCreativeModelBindingsConfig(string(encoded))
+}
+
+func creativeOptionalPositiveIntQuery(c *gin.Context, key string) (int, bool) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return 0, true
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": key + " must be a positive integer"})
+		return 0, false
+	}
+	return value, true
 }

@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -117,6 +118,21 @@ type CreativeModelBindingsAdminState struct {
 type CreativeModelBindingsDryRunResult struct {
 	NoProviderCall bool                             `json:"noProviderCall"`
 	Bindings       []CreativeModelBindingDryRunItem `json:"bindings"`
+}
+
+type CreativeChannelSummary struct {
+	Id     int      `json:"id"`
+	Name   string   `json:"name"`
+	Group  string   `json:"group"`
+	Status int      `json:"status"`
+	Models []string `json:"models"`
+}
+
+type CreativeChannelSummaryList struct {
+	Items    []CreativeChannelSummary `json:"items"`
+	Total    int64                    `json:"total"`
+	Page     int                      `json:"page"`
+	PageSize int                      `json:"page_size"`
 }
 
 type CreativeModelBindingDryRunItem struct {
@@ -291,6 +307,92 @@ func GetCreativeModelBindingsAdminState() (CreativeModelBindingsAdminState, erro
 		return CreativeModelBindingsAdminState{}, err
 	}
 	return BuildCreativeModelBindingsAdminState(config)
+}
+
+func ListCreativeChannelSummaries(page int, pageSize int, keyword string, channelID int, group string) (CreativeChannelSummaryList, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = common.ItemsPerPage
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	keyword = strings.TrimSpace(keyword)
+	group = model.NormalizeChannelGroupFilter(group)
+
+	type channelSummaryRow struct {
+		Id     int    `gorm:"column:id"`
+		Name   string `gorm:"column:name"`
+		Group  string `gorm:"column:group"`
+		Status int    `gorm:"column:status"`
+		Models string `gorm:"column:models"`
+	}
+
+	query := model.DB.Model(&model.Channel{}).
+		Select([]string{"id", "name", "group", "status", "models"})
+	if channelID > 0 {
+		query = query.Where("id = ?", channelID)
+	} else {
+		query = model.ApplyChannelGroupFilter(query, group)
+		if keyword != "" {
+			like := "%" + keyword + "%"
+			if parsedID, err := strconv.Atoi(keyword); err == nil && parsedID > 0 {
+				query = query.Where("id = ? OR name LIKE ? OR models LIKE ?", parsedID, like, like)
+			} else {
+				query = query.Where("name LIKE ? OR models LIKE ?", like, like)
+			}
+		}
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return CreativeChannelSummaryList{}, err
+	}
+
+	var rows []channelSummaryRow
+	if err := query.Order("id desc").
+		Limit(pageSize).
+		Offset((page - 1) * pageSize).
+		Find(&rows).Error; err != nil {
+		return CreativeChannelSummaryList{}, err
+	}
+
+	items := make([]CreativeChannelSummary, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, CreativeChannelSummary{
+			Id:     row.Id,
+			Name:   row.Name,
+			Group:  row.Group,
+			Status: row.Status,
+			Models: creativeChannelSummaryModels(row.Models),
+		})
+	}
+	return CreativeChannelSummaryList{
+		Items:    items,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
+}
+
+func creativeChannelSummaryModels(raw string) []string {
+	parts := strings.Split(strings.Trim(raw, ","), ",")
+	models := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		modelID := strings.TrimSpace(part)
+		if modelID == "" {
+			continue
+		}
+		if _, ok := seen[modelID]; ok {
+			continue
+		}
+		seen[modelID] = struct{}{}
+		models = append(models, modelID)
+	}
+	return models
 }
 
 func ResolveCreativeImageModelBindingForGroup(bindingID string, userGroup string, userParams map[string]any) (CreativeResolvedModelBinding, error) {

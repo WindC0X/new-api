@@ -1850,6 +1850,40 @@ func TestCreativeImageTaskSubmitFetchAndReplayAreMockOnlyAndPrivate(t *testing.T
 	require.Equal(t, "private, no-store", content.Header().Get("Cache-Control"))
 }
 
+func TestCreativeImageTaskPersistsConfiguredChannelID(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}))
+	withCreativeImageTaskMockBinding(t, true, []string{"default"}, 12)
+
+	body, err := common.Marshal(map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe mock image",
+		"userParams": map[string]any{
+			"size":    "1024x1024",
+			"quality": "auto",
+		},
+	})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/creative/relay/v1/images/tasks", bytes.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", 811)
+	ctx.Set("group", "default")
+	ctx.Set(creativeTaskPublicTaskIDContextKey, "task_channel_id_metadata")
+
+	CreativeRelayImageTaskSubmit(ctx)
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "channelId")
+
+	var storedTask model.Task
+	require.NoError(t, model.DB.Where("user_id = ? AND task_id = ?", 811, "task_channel_id_metadata").First(&storedTask).Error)
+	require.Equal(t, 12, storedTask.ChannelId)
+	var storedMetadata creativeImageTaskMetadata
+	require.NoError(t, storedTask.GetData(&storedMetadata))
+	require.Equal(t, 12, storedMetadata.ChannelId)
+}
+
 func TestCreativeImageTaskRouteBoundariesAndResolverFailClosed(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
@@ -3402,6 +3436,7 @@ func TestCreativePreferenceAPIContractWrapsRevisionAndPreference(t *testing.T) {
 
 func TestCreativeDocumentAPIContractWrapsDocumentsAndConflictDocument(t *testing.T) {
 	setupCreativeControllerTestDB(t)
+	installCreativeAssetRuntimeForControllerTest(t)
 
 	create := runCreativeHandler(t, CreativeCreateDocument, http.MethodPost, "/creative/api/documents", map[string]any{
 		"id":               "doc-1",
@@ -3554,8 +3589,23 @@ func withCreativeControllerOptions(t *testing.T, values map[string]string) {
 	})
 }
 
-func withCreativeImageTaskMockBinding(t *testing.T, adapterEnabled bool, canaryGroups []string) {
+func withCreativeImageTaskMockBinding(t *testing.T, adapterEnabled bool, canaryGroups []string, channelIDs ...int) {
 	t.Helper()
+	var channelID *int
+	if len(channelIDs) > 0 && channelIDs[0] > 0 {
+		id := channelIDs[0]
+		channelID = &id
+		require.NoError(t, model.DB.AutoMigrate(&model.Channel{}))
+		require.NoError(t, model.DB.Create(&model.Channel{
+			Id:     id,
+			Type:   1,
+			Key:    "test-key",
+			Status: common.ChannelStatusEnabled,
+			Name:   "creative mock channel",
+			Models: ",gpt-image-2,",
+			Group:  "default",
+		}).Error)
+	}
 	config := service.CreativeModelBindingsConfig{
 		Version: 1,
 		Bindings: []service.CreativeModelBindingConfig{{
@@ -3566,6 +3616,7 @@ func withCreativeImageTaskMockBinding(t *testing.T, adapterEnabled bool, canaryG
 			Modality:          "image",
 			Enabled:           true,
 			CanaryGroups:      canaryGroups,
+			ChannelId:         channelID,
 			AdapterPreset:     "mock_image_task",
 			ParameterTemplate: "mock_gpt_image",
 			ParameterSchema: []dto.CreativeParameterSchemaItem{

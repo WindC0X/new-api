@@ -693,8 +693,43 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 		Progress:   task.Progress,
 		Properties: task.Properties,
 		Username:   task.Username,
-		Data:       task.Data,
+		Data:       taskDataForDTO(task),
 	}
+}
+
+func taskDataForDTO(task *model.Task) json.RawMessage {
+	if task == nil {
+		return nil
+	}
+	if task.Platform != constant.TaskPlatformCreativeImage {
+		return task.Data
+	}
+	return redactCreativeImageTaskDataForDTO(task.Data)
+}
+
+func redactCreativeImageTaskDataForDTO(data json.RawMessage) json.RawMessage {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return data
+	}
+	var raw map[string]json.RawMessage
+	if err := common.Unmarshal(data, &raw); err != nil || raw == nil {
+		return data
+	}
+	removed := false
+	for _, key := range []string{"channelId", "channel_id"} {
+		if _, ok := raw[key]; ok {
+			delete(raw, key)
+			removed = true
+		}
+	}
+	if !removed {
+		return data
+	}
+	redacted, err := common.Marshal(raw)
+	if err != nil {
+		return data
+	}
+	return json.RawMessage(redacted)
 }
 
 func taskResultURLForDTO(task *model.Task) string {

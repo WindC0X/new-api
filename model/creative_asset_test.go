@@ -103,3 +103,32 @@ func TestCreativeDocumentAssetRefsRefreshesSanitizedSnapshots(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "creative asset URL origin is invalid")
 }
+
+func TestCreativeDocumentAssetRefsRejectPendingDeleteAssets(t *testing.T) {
+	setupCreativeModelTestDB(t)
+	require.NoError(t, DB.AutoMigrate(&CreativeAsset{}, &CreativeAssetQuota{}, &CreativeDocumentAssetRef{}))
+
+	require.NoError(t, DB.Create(&CreativeAsset{
+		UserId:         302,
+		AssetId:        "asset_pending_delete_123456",
+		ContentHash:    "hash-pending-delete",
+		MediaType:      "image",
+		MimeType:       "image/png",
+		SizeBytes:      3,
+		StorageBackend: CreativeAssetStorageDatabase,
+		Data:           []byte("png"),
+	}).Error)
+
+	asset, exists, err := MarkCreativeAssetPendingDelete(302, "asset_pending_delete_123456")
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.Equal(t, CreativeAssetStatusPendingDelete, asset.Status)
+
+	err = RefreshCreativeDocumentAssetRefs(302, "doc-race", []string{"asset_pending_delete_123456"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "creative asset reference is invalid")
+
+	refs, err := ListCreativeDocumentAssetRefs(302, "doc-race")
+	require.NoError(t, err)
+	require.Empty(t, refs)
+}

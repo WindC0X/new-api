@@ -331,6 +331,9 @@ func CreativeCreateDocument(c *gin.Context) {
 	if !creativeRequireSession(c) {
 		return
 	}
+	if !creativeRequireDocumentMutationEnabled(c) {
+		return
+	}
 	payload, ok := creativeReadSafeJSONBody(c)
 	if !ok {
 		return
@@ -407,6 +410,9 @@ func CreativeUpdateDocument(c *gin.Context) {
 	if !creativeRequireSession(c) {
 		return
 	}
+	if !creativeRequireDocumentMutationEnabled(c) {
+		return
+	}
 	payload, ok := creativeReadSafeJSONBody(c)
 	if !ok {
 		return
@@ -477,6 +483,9 @@ func CreativeUpdateDocument(c *gin.Context) {
 
 func CreativeDeleteDocument(c *gin.Context) {
 	if !creativeRequireSession(c) {
+		return
+	}
+	if !creativeRequireDocumentMutationEnabled(c) {
 		return
 	}
 	baseRevision := creativeDeleteBaseRevision(c)
@@ -1644,6 +1653,17 @@ func creativeModelCatalogShortCode(modelName string, modelType string) string {
 func creativeRequireSession(c *gin.Context) bool {
 	if c.GetBool("use_access_token") {
 		creativeAPIError(c, http.StatusForbidden, "creative API requires a browser session")
+		return false
+	}
+	return true
+}
+
+func creativeRequireDocumentMutationEnabled(c *gin.Context) bool {
+	if ok, reason := service.CurrentCreativeAssetRuntime().Status(); !ok {
+		if strings.TrimSpace(reason) == "" {
+			reason = "creative asset sync is disabled"
+		}
+		creativeAPIError(c, http.StatusServiceUnavailable, reason)
 		return false
 	}
 	return true

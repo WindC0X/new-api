@@ -148,7 +148,7 @@ func CreativeRelayImageTaskSubmit(c *gin.Context) {
 		PriceModelId:      resolved.PriceModelId,
 		AdapterPreset:     resolved.AdapterPreset,
 		ParameterTemplate: resolved.ParameterTemplate,
-		ChannelId:         0,
+		ChannelId:         resolved.ChannelId,
 		UserParams:        resolved.UserParams,
 	}
 	task := &model.Task{
@@ -156,7 +156,7 @@ func CreativeRelayImageTaskSubmit(c *gin.Context) {
 		Platform:   constant.TaskPlatformCreativeImage,
 		UserId:     c.GetInt("id"),
 		Group:      c.GetString("group"),
-		ChannelId:  0,
+		ChannelId:  resolved.ChannelId,
 		Quota:      0,
 		Action:     creativeImageTaskActionGenerate,
 		Status:     model.TaskStatusSuccess,

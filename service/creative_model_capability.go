@@ -163,6 +163,7 @@ type CreativeResolvedModelBinding struct {
 	PriceModelId      string         `json:"priceModelId"`
 	AdapterPreset     string         `json:"adapterPreset"`
 	ParameterTemplate string         `json:"parameterTemplate"`
+	ChannelId         int            `json:"channelId"`
 	UserParams        map[string]any `json:"userParams"`
 }
 
@@ -427,6 +428,10 @@ func ResolveCreativeImageModelBindingForGroup(bindingID string, userGroup string
 		if err != nil {
 			return CreativeResolvedModelBinding{}, err
 		}
+		channelID := 0
+		if binding.ChannelId != nil {
+			channelID = *binding.ChannelId
+		}
 		return CreativeResolvedModelBinding{
 			Binding:           binding,
 			BindingId:         binding.Id,
@@ -434,6 +439,7 @@ func ResolveCreativeImageModelBindingForGroup(bindingID string, userGroup string
 			PriceModelId:      binding.PriceModelId,
 			AdapterPreset:     binding.AdapterPreset,
 			ParameterTemplate: binding.ParameterTemplate,
+			ChannelId:         channelID,
 			UserParams:        normalizedParams,
 		}, nil
 	}

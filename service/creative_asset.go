@@ -200,6 +200,9 @@ func NewCreativeAssetRuntime(cfg CreativeAssetConfig, s3Client S3CompatibleObjec
 	if !cfg.Enabled {
 		return &CreativeAssetRuntime{cfg: cfg, disabled: "creative asset sync disabled"}, nil
 	}
+	if !creativeAssetRolloutModeAllowed(cfg.RolloutMode) {
+		return nil, fmt.Errorf("unsupported creative asset rollout mode: %s", cfg.RolloutMode)
+	}
 	if cfg.RolloutMode == CreativeAssetRolloutProduction && cfg.StorageBackend != model.CreativeAssetStorageS3Compatible {
 		return nil, errors.New("production creative assets require s3-compatible storage")
 	}
@@ -222,6 +225,9 @@ func NewCreativeAssetRuntime(cfg CreativeAssetConfig, s3Client S3CompatibleObjec
 	case model.CreativeAssetStorageS3Compatible:
 		if !creativeS3ConfigComplete(cfg) {
 			return nil, errors.New("s3-compatible storage is not configured")
+		}
+		if cfg.RolloutMode == CreativeAssetRolloutProduction && !creativeS3EndpointHTTPS(cfg.S3Endpoint) {
+			return nil, errors.New("production creative assets require an HTTPS s3-compatible endpoint")
 		}
 		if s3Client == nil {
 			s3Client = NewHTTPS3CompatibleObjectClient(cfg)
@@ -390,6 +396,13 @@ func (runtime *CreativeAssetRuntime) DeleteIfUnreferenced(ctx context.Context, u
 	if !exists {
 		return ErrCreativeAssetNotFound
 	}
+	asset, exists, err = model.ConfirmCreativeAssetPendingDeleteForStorage(userId, assetId)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrCreativeAssetNotFound
+	}
 	if err := runtime.storage.Delete(ctx, asset); err != nil {
 		scrubbed := scrubCreativeAssetError(err)
 		_ = model.MarkCreativeAssetDeleteFailed(userId, assetId, scrubbed)
@@ -459,7 +472,15 @@ func (runtime *CreativeAssetRuntime) ProcessPendingDeletes(ctx context.Context, 
 			_ = model.MarkCreativeAssetDeleteFailed(asset.UserId, asset.AssetId, errors.New("creative asset storage backend is not configured for retry"))
 			continue
 		}
-		if err := runtime.storage.Delete(ctx, &asset); err != nil {
+		confirmed, exists, err := model.ConfirmCreativeAssetPendingDeleteForStorage(asset.UserId, asset.AssetId)
+		if err != nil {
+			common.SysError(fmt.Sprintf("confirm pending creative asset delete failed: %v", scrubCreativeAssetError(err)))
+			continue
+		}
+		if !exists {
+			continue
+		}
+		if err := runtime.storage.Delete(ctx, confirmed); err != nil {
 			scrubbed := scrubCreativeAssetError(err)
 			_ = model.MarkCreativeAssetDeleteFailed(asset.UserId, asset.AssetId, scrubbed)
 			continue
@@ -970,7 +991,7 @@ func (client *FakeS3CompatibleObjectClient) DeleteObject(ctx context.Context, ke
 }
 
 func normalizeCreativeAssetConfig(cfg CreativeAssetConfig) CreativeAssetConfig {
-	cfg.RolloutMode = strings.TrimSpace(cfg.RolloutMode)
+	cfg.RolloutMode = strings.ToLower(strings.TrimSpace(cfg.RolloutMode))
 	if cfg.RolloutMode == "" {
 		cfg.RolloutMode = CreativeAssetRolloutLocal
 	}
@@ -1007,8 +1028,22 @@ func normalizeCreativeAssetConfig(cfg CreativeAssetConfig) CreativeAssetConfig {
 	return cfg
 }
 
+func creativeAssetRolloutModeAllowed(mode string) bool {
+	switch mode {
+	case CreativeAssetRolloutLocal, CreativeAssetRolloutCanary, CreativeAssetRolloutProduction:
+		return true
+	default:
+		return false
+	}
+}
+
 func creativeS3ConfigComplete(cfg CreativeAssetConfig) bool {
 	return cfg.S3Endpoint != "" && cfg.S3Region != "" && cfg.S3Bucket != "" && cfg.S3AccessKeyID != "" && cfg.S3SecretAccessKey != ""
+}
+
+func creativeS3EndpointHTTPS(endpoint string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	return err == nil && parsed.Scheme == "https" && parsed.Host != ""
 }
 
 func readCreativeAssetBytes(reader io.Reader, maxBytes int64) ([]byte, error) {

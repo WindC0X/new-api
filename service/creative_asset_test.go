@@ -72,6 +72,33 @@ func TestCreativeAssetConfigFailsClosedForProductionWithoutS3(t *testing.T) {
 	require.Contains(t, err.Error(), "s3-compatible storage is not configured")
 }
 
+func TestCreativeAssetRolloutModeAndProductionS3EndpointFailClosed(t *testing.T) {
+	cfg := CreativeAssetConfig{
+		Enabled:           true,
+		RolloutMode:       "prodution",
+		StorageBackend:    model.CreativeAssetStorageS3Compatible,
+		S3Endpoint:        "https://s3.example",
+		S3Region:          "auto",
+		S3Bucket:          "private-bucket",
+		S3AccessKeyID:     "test-ak",
+		S3SecretAccessKey: "test-sk",
+	}
+	_, err := NewCreativeAssetRuntime(cfg, NewFakeS3CompatibleObjectClient())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported creative asset rollout mode")
+
+	cfg.RolloutMode = "PRODUCTION"
+	cfg.S3Endpoint = "http://s3.example"
+	_, err = NewCreativeAssetRuntime(cfg, NewFakeS3CompatibleObjectClient())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "HTTPS")
+
+	cfg.S3Endpoint = "https://s3.example"
+	runtime, err := NewCreativeAssetRuntime(cfg, NewFakeS3CompatibleObjectClient())
+	require.NoError(t, err)
+	require.Equal(t, CreativeAssetRolloutProduction, runtime.cfg.RolloutMode)
+}
+
 func TestCreativeAssetS3ClientUsesManagedRedirectPolicy(t *testing.T) {
 	previous := httpClient
 	httpClient = nil
@@ -335,6 +362,50 @@ func TestCreativeAssetDeleteFailureKeepsMetadataRetryable(t *testing.T) {
 	var count int64
 	require.NoError(t, model.DB.Model(&model.CreativeAsset{}).Where("user_id = ? AND asset_id = ?", 801, asset.AssetId).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestCreativeAssetPendingDeleteRechecksRefsBeforeObjectDelete(t *testing.T) {
+	setupCreativeAssetServiceTestDB(t)
+	fakeS3 := NewFakeS3CompatibleObjectClient()
+	runtime := mustCreativeAssetRuntimeForTest(t, CreativeAssetConfig{
+		Enabled:           true,
+		RolloutMode:       CreativeAssetRolloutProduction,
+		StorageBackend:    model.CreativeAssetStorageS3Compatible,
+		S3Endpoint:        "https://s3.example",
+		S3Region:          "auto",
+		S3Bucket:          "private-bucket",
+		S3Prefix:          "creative-test",
+		S3AccessKeyID:     "test-ak",
+		S3SecretAccessKey: "test-sk",
+		UserMaxBytes:      1024,
+		UserMaxAssets:     10,
+	}, fakeS3)
+
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 1, 2, 3}
+	asset, duplicate, err := runtime.CreateOrGet(context.Background(), 802, CreativeAssetCreateRequest{
+		Reader:          bytes.NewReader(png),
+		Size:            int64(len(png)),
+		ClientMimeType:  "image/png",
+		ClientMediaType: "image",
+	})
+	require.NoError(t, err)
+	require.False(t, duplicate)
+	key := asset.ObjectKey
+
+	_, exists, err := model.MarkCreativeAssetPendingDelete(802, asset.AssetId)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NoError(t, model.DB.Create(&model.CreativeDocumentAssetRef{
+		UserId:      802,
+		DocumentId:  "doc-racy-ref",
+		AssetId:     asset.AssetId,
+		CreatedTime: time.Now().Unix(),
+	}).Error)
+
+	processed := runtime.ProcessPendingDeletes(context.Background(), 10)
+	require.Equal(t, 0, processed)
+	_, err = fakeS3.HeadObject(context.Background(), key)
+	require.NoError(t, err)
 }
 
 func TestCreativeAssetLifecycleOutboxDeletesOrphanS3Upload(t *testing.T) {

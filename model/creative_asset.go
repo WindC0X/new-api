@@ -341,6 +341,38 @@ func MarkCreativeAssetDeleteFailed(userId int, assetId string, deleteErr error) 
 		}).Error
 }
 
+func ConfirmCreativeAssetPendingDeleteForStorage(userId int, assetId string) (*CreativeAsset, bool, error) {
+	assetId = strings.TrimSpace(assetId)
+	if !IsValidCreativeAssetId(assetId) {
+		return nil, false, nil
+	}
+	var confirmed *CreativeAsset
+	found := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var asset CreativeAsset
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND asset_id = ? AND status = ?", userId, assetId, CreativeAssetStatusPendingDelete).
+			First(&asset).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var refCount int64
+		if err := tx.Model(&CreativeDocumentAssetRef{}).Where("user_id = ? AND asset_id = ?", userId, assetId).Count(&refCount).Error; err != nil {
+			return err
+		}
+		if refCount > 0 {
+			return ErrCreativeAssetReferenced
+		}
+		found = true
+		confirmed = &asset
+		return nil
+	})
+	return confirmed, found, err
+}
+
 func FinalizeCreativeAssetDelete(userId int, assetId string) error {
 	assetId = strings.TrimSpace(assetId)
 	if !IsValidCreativeAssetId(assetId) {
@@ -847,14 +879,14 @@ func validateCreativeDocumentAssetIdsExistTx(tx *gorm.DB, userId int, assetIds m
 	for assetId := range assetIds {
 		ids = append(ids, assetId)
 	}
-	var count int64
-	err := activeCreativeAssetQuery(tx.Model(&CreativeAsset{})).
+	var assets []CreativeAsset
+	err := activeCreativeAssetQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&CreativeAsset{})).
 		Where("user_id = ? AND asset_id IN ?", userId, ids).
-		Count(&count).Error
+		Find(&assets).Error
 	if err != nil {
 		return err
 	}
-	if count != int64(len(ids)) {
+	if len(assets) != len(ids) {
 		return fmt.Errorf("creative asset reference is invalid")
 	}
 	return nil

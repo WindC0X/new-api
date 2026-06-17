@@ -102,6 +102,7 @@ func TestCreativeAssetAPIsRejectTokenAuthMissingNonceSourceURLAndSVG(t *testing.
 
 func TestCreativeDocumentAssetRefsRefreshAndRejectCredentialedURL(t *testing.T) {
 	setupCreativeControllerTestDB(t)
+	installCreativeAssetRuntimeForControllerTest(t)
 	assetID := "asset_doc_ref_123456"
 	require.NoError(t, model.DB.Create(&model.CreativeAsset{
 		UserId:         703,
@@ -139,6 +140,34 @@ func TestCreativeDocumentAssetRefsRefreshAndRejectCredentialedURL(t *testing.T) 
 	refs, err = model.ListCreativeDocumentAssetRefs(703, "doc-assets")
 	require.NoError(t, err)
 	require.Empty(t, refs)
+}
+
+func TestCreativeDocumentMutationsRejectWhenAssetSyncDisabled(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	disabledRuntime, err := service.NewCreativeAssetRuntime(service.CreativeAssetConfig{Enabled: false}, nil)
+	require.NoError(t, err)
+	service.SetCreativeAssetRuntimeForTest(t, disabledRuntime)
+
+	create := runCreativeHandler(t, CreativeCreateDocument, http.MethodPost, "/creative/api/documents", map[string]any{
+		"id":       "doc-disabled-create",
+		"snapshot": map[string]any{},
+	}, 704, nil)
+	require.Equal(t, http.StatusServiceUnavailable, create.Code)
+
+	update := runCreativeHandler(t, CreativeUpdateDocument, http.MethodPut, "/creative/api/documents/doc-disabled-update", map[string]any{
+		"baseRevision": 1,
+		"snapshot":     map[string]any{},
+	}, 704, gin.Params{{Key: "id", Value: "doc-disabled-update"}})
+	require.Equal(t, http.StatusServiceUnavailable, update.Code)
+
+	deleted := runCreativeHandler(t, CreativeDeleteDocument, http.MethodDelete, "/creative/api/documents/doc-disabled-delete", map[string]any{
+		"baseRevision": 1,
+	}, 704, gin.Params{{Key: "id", Value: "doc-disabled-delete"}})
+	require.Equal(t, http.StatusServiceUnavailable, deleted.Code)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.CreativeDocument{}).Where("user_id = ?", 704).Count(&count).Error)
+	require.Zero(t, count)
 }
 
 func newCreativeAssetSessionRouter(t *testing.T, userId int) *gin.Engine {

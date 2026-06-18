@@ -4686,6 +4686,24 @@
     "{{count}} enabled": "{{count}} 个已启用",
     "{{count}} mock": "{{count}} 个 mock",
     "{{count}} normalized bindings": "{{count}} 个规范化绑定",
-    "{{count}} previews": "{{count}} 个预览"
+    "{{count}} previews": "{{count}} 个预览",
+    "Adapter": "适配器",
+    "Adapter manifests are unavailable. Reload and try again.": "适配器清单不可用。请重新加载后再试。",
+    "Adapter template is unavailable": "适配器参数模板不可用",
+    "Binding builder is disabled because adapter capabilities could not be loaded from the backend. Existing JSON can still be reviewed, but new presets must not be guessed.": "由于无法从后端加载适配器能力，绑定构建器已禁用。仍可检查现有 JSON，但不能猜测新增预设。",
+    "Can be enabled": "可启用",
+    "Disabled by policy": "已按策略禁用",
+    "Failed to load adapter manifests": "加载适配器清单失败",
+    "Future": "未来支持",
+    "Load {{name}} template": "加载 {{name}} 模板",
+    "Load adapter manifests before creating a binding draft.": "创建绑定草稿前请先加载适配器清单。",
+    "Manifest-driven adapter safety": "清单驱动的适配器安全",
+    "Parameter template": "参数模板",
+    "The backend template supplies model-specific controls such as 尺寸、分辨率、质量、比例.": "后端模板会提供模型专属控件，例如尺寸、分辨率、质量、比例。",
+    "This adapter cannot create binding drafts yet.": "该适配器暂不能创建绑定草稿。",
+    "This adapter is not implemented yet.": "该适配器尚未实现。",
+    "Unavailable": "不可用",
+    "OpenTU submits this logical ID as model. Leave blank to generate an ID from the selected backend manifest prefix, channel, model, and suffix.": "OpenTU 会将该逻辑 ID 作为 model 提交。留空则根据后端清单的前缀、渠道、模型和后缀生成 ID。",
+    "Adapter manifests come from the backend. Duomi and GrsAI live adapters are visible as future adapters but cannot be enabled until live transport, billing, polling, and parser checks are implemented. Validate and dry-run are nonce-protected and must report noProviderCall=true before save.": "适配器清单来自后端。Duomi 和 GrsAI live 适配器会以未来支持展示，但在 live 传输、计费、轮询和解析器检查完成前不能启用。保存前必须通过 nonce 保护的校验与 dry-run，并返回 noProviderCall=true。"
   }
 }

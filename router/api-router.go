@@ -204,6 +204,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			creativeAdminRoute.GET("/model-policy", controller.GetCreativeModelPolicy)
 			creativeAdminRoute.PUT("/model-policy", middleware.CreativeRequireNonce(), controller.UpdateCreativeModelPolicy)
+			creativeAdminRoute.GET("/adapter-manifests", controller.GetCreativeAdapterManifests)
 			creativeAdminRoute.GET("/model-bindings", controller.GetCreativeModelBindings)
 			creativeAdminRoute.GET("/channel-summaries", controller.GetCreativeChannelSummaries)
 			creativeAdminRoute.PUT("/model-bindings", middleware.CreativeRequireNonce(), controller.UpdateCreativeModelBindings)

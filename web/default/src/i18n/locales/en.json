@@ -4686,6 +4686,24 @@
     "{{count}} enabled": "{{count}} enabled",
     "{{count}} mock": "{{count}} mock",
     "{{count}} normalized bindings": "{{count}} normalized bindings",
-    "{{count}} previews": "{{count}} previews"
+    "{{count}} previews": "{{count}} previews",
+    "Adapter": "Adapter",
+    "Adapter manifests are unavailable. Reload and try again.": "Adapter manifests are unavailable. Reload and try again.",
+    "Adapter template is unavailable": "Adapter template is unavailable",
+    "Binding builder is disabled because adapter capabilities could not be loaded from the backend. Existing JSON can still be reviewed, but new presets must not be guessed.": "Binding builder is disabled because adapter capabilities could not be loaded from the backend. Existing JSON can still be reviewed, but new presets must not be guessed.",
+    "Can be enabled": "Can be enabled",
+    "Disabled by policy": "Disabled by policy",
+    "Failed to load adapter manifests": "Failed to load adapter manifests",
+    "Future": "Future",
+    "Load {{name}} template": "Load {{name}} template",
+    "Load adapter manifests before creating a binding draft.": "Load adapter manifests before creating a binding draft.",
+    "Manifest-driven adapter safety": "Manifest-driven adapter safety",
+    "Parameter template": "Parameter template",
+    "The backend template supplies model-specific controls such as 尺寸、分辨率、质量、比例.": "The backend template supplies model-specific controls such as 尺寸、分辨率、质量、比例.",
+    "This adapter cannot create binding drafts yet.": "This adapter cannot create binding drafts yet.",
+    "This adapter is not implemented yet.": "This adapter is not implemented yet.",
+    "Unavailable": "Unavailable",
+    "OpenTU submits this logical ID as model. Leave blank to generate an ID from the selected backend manifest prefix, channel, model, and suffix.": "OpenTU submits this logical ID as model. Leave blank to generate an ID from the selected backend manifest prefix, channel, model, and suffix.",
+    "Adapter manifests come from the backend. Duomi and GrsAI live adapters are visible as future adapters but cannot be enabled until live transport, billing, polling, and parser checks are implemented. Validate and dry-run are nonce-protected and must report noProviderCall=true before save.": "Adapter manifests come from the backend. Duomi and GrsAI live adapters are visible as future adapters but cannot be enabled until live transport, billing, polling, and parser checks are implemented. Validate and dry-run are nonce-protected and must report noProviderCall=true before save."
   }
 }

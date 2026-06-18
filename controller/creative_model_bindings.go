@@ -59,6 +59,19 @@ func GetCreativeChannelSummaries(c *gin.Context) {
 	common.ApiSuccess(c, result)
 }
 
+func GetCreativeAdapterManifests(c *gin.Context) {
+	creativeModelBindingsNoStore(c)
+	if !creativeModelBindingsRequireDashboardSession(c) {
+		return
+	}
+	state, err := service.GetCreativeAdapterManifestAdminState()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	common.ApiSuccess(c, state)
+}
+
 func ValidateCreativeModelBindings(c *gin.Context) {
 	creativeModelBindingsNoStore(c)
 	if !creativeModelBindingsRequireDashboardSession(c) {

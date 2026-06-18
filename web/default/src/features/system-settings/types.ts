@@ -146,6 +146,43 @@ export type CreativeModelBindingsResponse = {
   data: CreativeModelBindingsState
 }
 
+export type CreativeAdapterManifest = {
+  id: string
+  label: string
+  description: string
+  modality: string
+  providerFamily?: string
+  transportMode: 'mock' | 'dry_run' | 'future_live' | 'live' | string
+  status: 'available' | 'disabled' | 'future' | string
+  defaultTemplate: string
+  allowedTemplates: string[]
+  canBeEnabled: boolean
+  requiresChannel: boolean
+  supportsProviderCall: boolean
+  bindingIdPrefix?: string
+  bindingIdSuffix?: string
+  notes?: string[]
+}
+
+export type CreativeParameterTemplate = {
+  id: string
+  label: string
+  description: string
+  modality: string
+  schema: CreativeParameterSchemaItem[]
+}
+
+export type CreativeAdapterManifestsState = {
+  manifests: CreativeAdapterManifest[]
+  parameterTemplates: CreativeParameterTemplate[]
+}
+
+export type CreativeAdapterManifestsResponse = {
+  success: boolean
+  message: string
+  data: CreativeAdapterManifestsState
+}
+
 export type UpdateCreativeModelBindingsRequest = {
   config: CreativeModelBindingsConfig | string | Record<string, unknown>
 }

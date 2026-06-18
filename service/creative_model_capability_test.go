@@ -289,9 +289,13 @@ func TestStoredCreativeModelBindingsCatalogHidesFixtureProviderBindings(t *testi
 	config := grsAIGPTImageDryRunConfigForTest()
 	config.Bindings[0].Enabled = true
 	config.Bindings[0].CanaryGroups = []string{"vip"}
+	_, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot be enabled")
+
+	config.Bindings[0].Enabled = false
 	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
 	require.NoError(t, err)
-
 	withCreativeCapabilityOptions(t, map[string]string{
 		CreativeAdapterEnabledOptionKey: "true",
 		CreativeModelBindingsOptionKey:  configJSON,
@@ -458,6 +462,57 @@ func TestParseCreativeModelBindingsConfigAllowsGrsAIFixtureDryRunOnly(t *testing
 	require.NoError(t, err)
 	require.Equal(t, "grsai_gpt_image_dryrun", config.Bindings[0].AdapterPreset)
 	require.Equal(t, "grsai_gpt_image", config.Bindings[0].ParameterTemplate)
+}
+
+func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
+	state, err := GetCreativeAdapterManifestAdminState()
+	require.NoError(t, err)
+	require.NotEmpty(t, state.Manifests)
+	require.NotEmpty(t, state.ParameterTemplates)
+
+	var sawMock, sawDuomiFuture, sawQualityLabel bool
+	for _, manifest := range state.Manifests {
+		require.NotContains(t, manifest.Description, "apiKey")
+		require.NotContains(t, manifest.Description, "baseUrl")
+		if manifest.Id == "mock_image_task" {
+			sawMock = true
+			require.True(t, manifest.CanBeEnabled)
+			require.Equal(t, []string{"mock_gpt_image"}, manifest.AllowedTemplates)
+		}
+		if manifest.Id == "duomi_image_live" {
+			sawDuomiFuture = true
+			require.False(t, manifest.CanBeEnabled)
+			require.Equal(t, "future", manifest.Status)
+		}
+	}
+	for _, template := range state.ParameterTemplates {
+		for _, item := range template.Schema {
+			if item.Id == "quality" && item.Label == "质量" {
+				sawQualityLabel = true
+			}
+		}
+	}
+	require.True(t, sawMock)
+	require.True(t, sawDuomiFuture)
+	require.True(t, sawQualityLabel)
+}
+
+func TestValidateCreativeModelBindingsConfigRejectsEnabledDryRunAndFutureLive(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+
+	config := grsAIGPTImageDryRunConfigForTest()
+	config.Bindings[0].Enabled = true
+	err := ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot be enabled")
+
+	config = validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].AdapterPreset = "duomi_image_live"
+	config.Bindings[0].ParameterTemplate = "duomi_gpt_image"
+	config.Bindings[0].Enabled = false
+	err = ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not supported")
 }
 
 func validCreativeModelBindingsConfigForTest() CreativeModelBindingsConfig {

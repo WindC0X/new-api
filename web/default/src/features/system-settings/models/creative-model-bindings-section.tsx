@@ -40,6 +40,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import {
   dryRunCreativeModelBindings,
+  getCreativeAdapterManifests,
   getCreativeChannelSummaries,
   getCreativeModelBindings,
   updateCreativeModelBindings,
@@ -49,6 +50,8 @@ import { SettingsCard } from '../components/settings-card'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import type {
+  CreativeAdapterManifest,
+  CreativeParameterTemplate,
   CreativeChannelSummary,
   CreativeModelBindingConfig,
   CreativeModelBindingsConfig,
@@ -58,140 +61,11 @@ import type {
 
 const queryKey = ['creative-model-bindings']
 const channelsQueryKey = ['creative-model-bindings', 'channels']
+const manifestsQueryKey = ['creative-model-bindings', 'adapter-manifests']
 
 const emptyConfig: CreativeModelBindingsConfig = {
   version: 1,
   bindings: [],
-}
-
-const mockTemplate: CreativeModelBindingsConfig = {
-  version: 1,
-  bindings: [
-    {
-      id: 'mock:gpt-image-2:preview',
-      providerModelId: 'gpt-image-2',
-      priceModelId: 'mock-gpt-image-2-price',
-      displayName: 'GPT Image 2 · Mock Preview',
-      modality: 'image',
-      enabled: false,
-      canaryGroups: ['test'],
-      adapterPreset: 'mock_image_task',
-      parameterTemplate: 'mock_gpt_image',
-      recommendedScore: 10,
-      sortOrder: 1000,
-      parameterSchema: [
-        {
-          id: 'size',
-          label: 'Size',
-          shortLabel: 'Size',
-          description: 'Mock preview image size.',
-          type: 'enum',
-          defaultValue: '1024x1024',
-          options: [
-            { value: '1024x1024', label: '1024×1024' },
-            { value: '16:9', label: '16:9' },
-          ],
-          order: 10,
-        },
-        {
-          id: 'quality',
-          label: 'Quality',
-          shortLabel: 'Quality',
-          description: 'Mock preview quality.',
-          type: 'enum',
-          defaultValue: 'auto',
-          options: [
-            { value: 'auto', label: 'Auto' },
-            { value: 'high', label: 'High' },
-          ],
-          order: 20,
-        },
-      ],
-    },
-  ],
-}
-
-const grsaiDryRunTemplate: CreativeModelBindingsConfig = {
-  version: 1,
-  bindings: [
-    {
-      id: 'grsai:gpt-image-2:dryrun',
-      providerModelId: 'gpt-image-2',
-      priceModelId: 'gpt-image-2',
-      displayName: 'GrsAI GPT Image 2 · Dry Run Only',
-      modality: 'image',
-      enabled: false,
-      canaryGroups: ['test'],
-      adapterPreset: 'grsai_gpt_image_dryrun',
-      parameterTemplate: 'grsai_gpt_image',
-      recommendedScore: 5,
-      sortOrder: 1100,
-      parameterSchema: [
-        {
-          id: 'aspectRatio',
-          label: 'Aspect Ratio',
-          shortLabel: 'Ratio',
-          description: 'Offline GrsAI fixture request preview ratio.',
-          type: 'enum',
-          defaultValue: '1024x1024',
-          options: [
-            { value: '1024x1024', label: '1:1' },
-            { value: '16:9', label: '16:9' },
-            { value: '9:16', label: '9:16' },
-          ],
-          order: 10,
-        },
-      ],
-    },
-  ],
-}
-
-type AdapterPresetDraft = {
-  id: SupportedAdapterPreset
-  bindingIdPrefix: 'mock' | 'grsai'
-  bindingIdSuffix: 'preview' | 'dryrun'
-  labelKey: string
-  descriptionKey: string
-  parameterTemplate: CreativeModelBindingConfig['parameterTemplate']
-  disabled?: boolean
-}
-
-type SupportedAdapterPreset = 'mock_image_task' | 'grsai_gpt_image_dryrun'
-
-const adapterPresetDraftMap = {
-  mock_image_task: {
-    id: 'mock_image_task',
-    bindingIdPrefix: 'mock',
-    bindingIdSuffix: 'preview',
-    disabled: false,
-    labelKey: 'Mock image task (enabled path)',
-    descriptionKey:
-      'Uses local mock task execution. This is the only binding family that can be exposed after validation; it still starts enabled=false.',
-    parameterTemplate: 'mock_gpt_image',
-  },
-  grsai_gpt_image_dryrun: {
-    id: 'grsai_gpt_image_dryrun',
-    bindingIdPrefix: 'grsai',
-    bindingIdSuffix: 'dryrun',
-    disabled: false,
-    labelKey: 'GrsAI GPT image dry-run',
-    descriptionKey:
-      'Prepares an offline GrsAI fixture request preview only. It is future adapter preparation, not a live provider call.',
-    parameterTemplate: 'grsai_gpt_image',
-  },
-} as const satisfies Record<SupportedAdapterPreset, AdapterPresetDraft>
-
-const adapterPresetDrafts = Object.values(adapterPresetDraftMap)
-
-function createSchemaForPreset(
-  preset: SupportedAdapterPreset
-): CreativeModelBindingConfig['parameterSchema'] {
-  switch (preset) {
-    case 'mock_image_task':
-      return mockTemplate.bindings[0]?.parameterSchema ?? []
-    case 'grsai_gpt_image_dryrun':
-      return grsaiDryRunTemplate.bindings[0]?.parameterSchema ?? []
-  }
 }
 
 function safeModelSlug(modelId: string): string {
@@ -205,11 +79,69 @@ function safeModelSlug(modelId: string): string {
 }
 
 function generatedBindingId(
-  preset: AdapterPresetDraft,
+  manifest: CreativeAdapterManifest,
   providerModelId: string,
   channelId: number
 ): string {
-  return `${preset.bindingIdPrefix}:${safeModelSlug(providerModelId)}:ch${channelId}:${preset.bindingIdSuffix}`
+  const prefix = manifest.bindingIdPrefix || manifest.providerFamily || 'creative'
+  const suffix = manifest.bindingIdSuffix || manifest.transportMode || 'binding'
+  const channelSegment = manifest.requiresChannel ? `:ch${channelId}` : ''
+  return `${prefix}:${safeModelSlug(providerModelId)}${channelSegment}:${suffix}`
+}
+
+function templateById(
+  templates: CreativeParameterTemplate[],
+  templateId: string
+): CreativeParameterTemplate | null {
+  return templates.find((template) => template.id === templateId) ?? null
+}
+
+function defaultTemplateForManifest(
+  manifest: CreativeAdapterManifest | null,
+  templates: CreativeParameterTemplate[]
+): CreativeParameterTemplate | null {
+  if (!manifest) return null
+  const allowedTemplates = manifest.allowedTemplates
+    .map((templateId) => templateById(templates, templateId))
+    .filter((template): template is CreativeParameterTemplate =>
+      Boolean(template)
+    )
+  return (
+    allowedTemplates.find(
+      (template) => template.id === manifest.defaultTemplate
+    ) ??
+    allowedTemplates[0] ??
+    null
+  )
+}
+
+function configTemplateFromManifest(
+  manifest: CreativeAdapterManifest,
+  template: CreativeParameterTemplate,
+  providerModelId = 'gpt-image-2',
+  channelId = 1
+): CreativeModelBindingsConfig {
+  const bindingId = generatedBindingId(manifest, providerModelId, channelId)
+  return {
+    version: 1,
+    bindings: [
+      {
+        id: bindingId,
+        providerModelId,
+        priceModelId: providerModelId,
+        displayName: `${manifest.label} · ${providerModelId}`,
+        modality: manifest.modality || template.modality || 'image',
+        enabled: false,
+        canaryGroups: ['test'],
+        channelId: manifest.requiresChannel ? channelId : undefined,
+        adapterPreset: manifest.id,
+        parameterTemplate: template.id,
+        recommendedScore: 0,
+        sortOrder: 1000,
+        parameterSchema: template.schema,
+      },
+    ],
+  }
 }
 
 function parseChannelModels(models: string[] | null | undefined): string[] {
@@ -392,6 +324,18 @@ function CreativeModelBindingsLoaded(props: {
         keyword: draftChannelSearch.trim() || undefined,
       }),
   })
+  const manifestsQuery = useQuery({
+    queryKey: manifestsQueryKey,
+    queryFn: getCreativeAdapterManifests,
+  })
+  const adapterManifests = useMemo(
+    () => manifestsQuery.data?.data?.manifests ?? [],
+    [manifestsQuery.data]
+  )
+  const parameterTemplates = useMemo(
+    () => manifestsQuery.data?.data?.parameterTemplates ?? [],
+    [manifestsQuery.data]
+  )
   const channels = useMemo(
     () => channelsQuery.data?.data?.items ?? [],
     [channelsQuery.data]
@@ -427,11 +371,53 @@ function CreativeModelBindingsLoaded(props: {
   const [draftPriceModelId, setDraftPriceModelId] = useState('')
   const [draftCanaryGroups, setDraftCanaryGroups] = useState('test')
   const [draftAdapterPreset, setDraftAdapterPreset] =
-    useState<SupportedAdapterPreset>('mock_image_task')
-  const selectedAdapterPreset = useMemo(
-    () => adapterPresetDraftMap[draftAdapterPreset],
-    [draftAdapterPreset]
+    useState('mock_image_task')
+  const [draftParameterTemplate, setDraftParameterTemplate] =
+    useState('mock_gpt_image')
+  const firstAvailableAdapterManifest = useMemo(
+    () =>
+      adapterManifests.find((manifest) => manifest.status === 'available') ??
+      null,
+    [adapterManifests]
   )
+  const selectedAdapterManifest = useMemo(
+    () =>
+      adapterManifests.find((manifest) => manifest.id === draftAdapterPreset) ??
+      firstAvailableAdapterManifest,
+    [adapterManifests, draftAdapterPreset, firstAvailableAdapterManifest]
+  )
+  const allowedTemplatesForSelectedManifest = useMemo(
+    () =>
+      selectedAdapterManifest
+        ? selectedAdapterManifest.allowedTemplates
+            .map((templateId) => templateById(parameterTemplates, templateId))
+            .filter((template): template is CreativeParameterTemplate =>
+              Boolean(template)
+            )
+        : [],
+    [parameterTemplates, selectedAdapterManifest]
+  )
+  const selectedParameterTemplate = useMemo(
+    () =>
+      allowedTemplatesForSelectedManifest.find(
+        (template) => template.id === draftParameterTemplate
+      ) ??
+      defaultTemplateForManifest(selectedAdapterManifest, parameterTemplates),
+    [
+      allowedTemplatesForSelectedManifest,
+      draftParameterTemplate,
+      parameterTemplates,
+      selectedAdapterManifest,
+    ]
+  )
+  const manifestsReady =
+    !manifestsQuery.isLoading &&
+    !manifestsQuery.isError &&
+    adapterManifests.length > 0 &&
+    parameterTemplates.length > 0
+  const selectedAdapterCanDraft =
+    selectedAdapterManifest?.status === 'available' &&
+    allowedTemplatesForSelectedManifest.length > 0
   const formatChannelLabel = (channel: CreativeChannelSummary) => {
     const status =
       channel.status === 1
@@ -606,11 +592,22 @@ function CreativeModelBindingsLoaded(props: {
   const handleUpsertDraftBinding = () => {
     const channelId = Number(draftChannelId)
     const providerModelId = draftProviderModelId.trim()
+    if (!manifestsReady || !selectedAdapterManifest || !selectedParameterTemplate) {
+      toast.error(t('Adapter manifests are unavailable. Reload and try again.'))
+      return
+    }
+    if (!selectedAdapterCanDraft) {
+      toast.error(t('This adapter cannot create binding drafts yet.'))
+      return
+    }
     const bindingId =
       draftBindingId.trim() ||
-      generatedBindingId(selectedAdapterPreset, providerModelId, channelId)
+      generatedBindingId(selectedAdapterManifest, providerModelId, channelId)
     const priceModelId = draftPriceModelId.trim() || providerModelId
-    if (!Number.isInteger(channelId) || channelId <= 0) {
+    if (
+      selectedAdapterManifest.requiresChannel &&
+      (!Number.isInteger(channelId) || channelId <= 0)
+    ) {
       toast.error(t('Select a channel before adding a binding'))
       return
     }
@@ -651,15 +648,15 @@ function CreativeModelBindingsLoaded(props: {
       providerModelId,
       priceModelId,
       displayName: draftDisplayName.trim() || providerModelId,
-      modality: 'image',
+      modality: selectedAdapterManifest.modality || selectedParameterTemplate.modality,
       enabled: false,
       canaryGroups,
-      channelId,
-      adapterPreset: draftAdapterPreset,
-      parameterTemplate: selectedAdapterPreset.parameterTemplate,
+      channelId: Number.isInteger(channelId) && channelId > 0 ? channelId : undefined,
+      adapterPreset: selectedAdapterManifest.id,
+      parameterTemplate: selectedParameterTemplate.id,
       recommendedScore: 0,
       sortOrder: 1000,
-      parameterSchema: createSchemaForPreset(draftAdapterPreset),
+      parameterSchema: selectedParameterTemplate.schema,
     }
     try {
       const currentConfig = parseEditorValue(editorValue)
@@ -718,13 +715,25 @@ function CreativeModelBindingsLoaded(props: {
 
       <Alert>
         <FlaskConical />
-        <AlertTitle>{t('Mock-first provider safety')}</AlertTitle>
+        <AlertTitle>{t('Manifest-driven adapter safety')}</AlertTitle>
         <AlertDescription>
           {t(
-            'Duomi and GrsAI live adapters are future adapter preparation, not implemented here. GrsAI is dry-run/fixture only. Validate and dry-run are nonce-protected and must report noProviderCall=true before any save is considered safe.'
+            'Adapter manifests come from the backend. Duomi and GrsAI live adapters are visible as future adapters but cannot be enabled until live transport, billing, polling, and parser checks are implemented. Validate and dry-run are nonce-protected and must report noProviderCall=true before save.'
           )}
         </AlertDescription>
       </Alert>
+
+      {!manifestsQuery.isLoading && !manifestsReady && (
+        <Alert variant='destructive'>
+          <AlertTriangle />
+          <AlertTitle>{t('Failed to load adapter manifests')}</AlertTitle>
+          <AlertDescription>
+            {t(
+              'Binding builder is disabled because adapter capabilities could not be loaded from the backend. Existing JSON can still be reviewed, but new presets must not be guessed.'
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       <SettingsCard
         title={t('How to configure image provider channels')}
@@ -895,32 +904,89 @@ function CreativeModelBindingsLoaded(props: {
 
           <div className='space-y-2'>
             <Label htmlFor='creative-binding-adapter'>
-              {t('Adapter preset')}
+              {t('Adapter')}
             </Label>
             <NativeSelect
               id='creative-binding-adapter'
               className='w-full'
-              value={draftAdapterPreset}
-              disabled={isBusy}
+              value={selectedAdapterManifest?.id ?? draftAdapterPreset}
+              disabled={isBusy || !manifestsReady}
               onChange={(event) => {
-                setDraftAdapterPreset(
-                  event.target.value as SupportedAdapterPreset
-                )
+                const nextPreset = event.target.value
+                setDraftAdapterPreset(nextPreset)
+                const nextManifest =
+                  adapterManifests.find(
+                    (manifest) => manifest.id === nextPreset
+                  ) ?? null
+                setDraftParameterTemplate(nextManifest?.defaultTemplate ?? '')
                 setDraftBindingId('')
               }}
             >
-              {adapterPresetDrafts.map((preset) => (
+              {adapterManifests.map((manifest) => (
                 <NativeSelectOption
-                  key={preset.id}
-                  value={preset.id}
-                  disabled={preset.disabled}
+                  key={manifest.id}
+                  value={manifest.id}
+                  disabled={manifest.status !== 'available'}
                 >
-                  {t(preset.labelKey)}
+                  {manifest.label}
+                  {manifest.status !== 'available'
+                    ? ` · ${t(manifest.status === 'future' ? 'Future' : 'Unavailable')}`
+                    : ''}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
             <p className='text-muted-foreground text-xs'>
-              {t(selectedAdapterPreset.descriptionKey)}
+              {selectedAdapterManifest
+                ? selectedAdapterManifest.description
+                : t('Load adapter manifests before creating a binding draft.')}
+            </p>
+            {selectedAdapterManifest && (
+              <div className='flex flex-wrap gap-2'>
+                <Badge variant='outline'>
+                  {selectedAdapterManifest.transportMode}
+                </Badge>
+                <Badge
+                  variant={
+                    selectedAdapterManifest.canBeEnabled
+                      ? 'default'
+                      : 'secondary'
+                  }
+                >
+                  {selectedAdapterManifest.canBeEnabled
+                    ? t('Can be enabled')
+                    : t('Disabled by policy')}
+                </Badge>
+              </div>
+            )}
+          </div>
+
+          <div className='space-y-2'>
+            <Label htmlFor='creative-binding-parameter-template'>
+              {t('Parameter template')}
+            </Label>
+            <NativeSelect
+              id='creative-binding-parameter-template'
+              className='w-full'
+              value={selectedParameterTemplate?.id ?? draftParameterTemplate}
+              disabled={
+                isBusy ||
+                !selectedAdapterManifest ||
+                allowedTemplatesForSelectedManifest.length === 0
+              }
+              onChange={(event) => {
+                setDraftParameterTemplate(event.target.value)
+              }}
+            >
+              {allowedTemplatesForSelectedManifest.map((template) => (
+                <NativeSelectOption key={template.id} value={template.id}>
+                  {template.label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <p className='text-muted-foreground text-xs'>
+              {selectedParameterTemplate
+                ? selectedParameterTemplate.description
+                : t('The backend template supplies model-specific controls such as 尺寸、分辨率、质量、比例.')}
             </p>
           </div>
 
@@ -935,7 +1001,7 @@ function CreativeModelBindingsLoaded(props: {
             />
             <p className='text-muted-foreground text-xs'>
               {t(
-                'OpenTU submits this logical ID as model. Leave blank to generate mock:<model>:ch<id>:preview or grsai:<model>:ch<id>:dryrun.'
+                'OpenTU submits this logical ID as model. Leave blank to generate an ID from the selected backend manifest prefix, channel, model, and suffix.'
               )}
             </p>
           </div>
@@ -992,7 +1058,7 @@ function CreativeModelBindingsLoaded(props: {
             type='button'
             variant='outline'
             onClick={handleUpsertDraftBinding}
-            disabled={isBusy}
+            disabled={isBusy || !manifestsReady || !selectedAdapterCanDraft}
           >
             <PlusCircle data-icon='inline-start' />
             {t('Add or replace binding draft')}
@@ -1066,20 +1132,33 @@ function CreativeModelBindingsLoaded(props: {
             >
               {t('Load empty config')}
             </Button>
-            <Button
-              type='button'
-              variant='outline'
-              onClick={() => handleLoadTemplate(mockTemplate)}
-            >
-              {t('Load mock template')}
-            </Button>
-            <Button
-              type='button'
-              variant='outline'
-              onClick={() => handleLoadTemplate(grsaiDryRunTemplate)}
-            >
-              {t('Load GrsAI dry-run template')}
-            </Button>
+            {adapterManifests
+              .filter((manifest) => manifest.status === 'available')
+              .map((manifest) => {
+                const template = defaultTemplateForManifest(
+                  manifest,
+                  parameterTemplates
+                )
+                return (
+                  <Button
+                    key={manifest.id}
+                    type='button'
+                    variant='outline'
+                    onClick={() => {
+                      if (!template) {
+                        toast.error(t('Adapter template is unavailable'))
+                        return
+                      }
+                      handleLoadTemplate(
+                        configTemplateFromManifest(manifest, template)
+                      )
+                    }}
+                    disabled={!manifestsReady || !template}
+                  >
+                    {t('Load {{name}} template', { name: manifest.label })}
+                  </Button>
+                )
+              })}
             <Button
               type='button'
               variant='outline'

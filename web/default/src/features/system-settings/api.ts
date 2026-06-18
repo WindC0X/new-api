@@ -20,6 +20,7 @@ import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
   CreativeChannelSummariesResponse,
+  CreativeAdapterManifestsResponse,
   CreativeModelBindingsDryRunResponse,
   CreativeModelBindingsResponse,
   CreativeModelPolicyResponse,
@@ -89,6 +90,18 @@ export async function getCreativeModelBindings() {
   const res = await api.get<CreativeModelBindingsResponse>(
     '/api/creative/model-bindings'
   )
+  return res.data
+}
+
+export async function getCreativeAdapterManifests() {
+  const res = await api.get<CreativeAdapterManifestsResponse>(
+    '/api/creative/adapter-manifests'
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(
+      res.data.message || 'Failed to load Creative adapter manifests'
+    )
+  }
   return res.data
 }
 

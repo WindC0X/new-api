@@ -170,6 +170,36 @@ func TestCreativeChannelSummariesOmitSensitiveChannelFields(t *testing.T) {
 	require.Equal(t, []any{"gpt-image-2", "grs-image"}, item["models"])
 }
 
+func TestCreativeAdapterManifestsAreSafeAndNoStore(t *testing.T) {
+	router := newCreativeModelBindingsAdminTestRouter(false)
+
+	recorder := performJSONRequest(t, router, http.MethodGet, "/api/creative/adapter-manifests", nil)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	requireCreativeModelBindingsNoStore(t, recorder)
+	raw := recorder.Body.String()
+	for _, forbidden := range []string{
+		"apiKey",
+		"baseUrl",
+		"credential",
+		"credentials",
+		"Authorization",
+		"sk-test",
+		"notifyHook",
+		"callback",
+		"webhook",
+	} {
+		require.NotContains(t, raw, forbidden)
+	}
+	data := creativeResponseData(t, decodeCreativeResponse(t, recorder))
+	manifests := creativeResponseArray(t, data, "manifests")
+	require.NotEmpty(t, manifests)
+	require.Contains(t, raw, "mock_image_task")
+	require.Contains(t, raw, "duomi_image_live")
+	require.Contains(t, raw, "\"canBeEnabled\":false")
+	require.Contains(t, raw, "\"quality\"")
+	require.Contains(t, raw, "质量")
+}
+
 func TestCreativeModelBindingsAdminRejectsUnsafeAndAccessToken(t *testing.T) {
 	router := newCreativeModelBindingsAdminTestRouter(false)
 	unsafePayload := validCreativeModelBindingsPayload()
@@ -187,6 +217,11 @@ func TestCreativeModelBindingsAdminRejectsUnsafeAndAccessToken(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, accessToken.Code)
 	requireCreativeModelBindingsNoStore(t, accessToken)
 	require.Contains(t, decodeCreativeResponse(t, accessToken)["message"], "dashboard session")
+
+	accessTokenManifest := performJSONRequest(t, accessTokenRouter, http.MethodGet, "/api/creative/adapter-manifests", nil)
+	require.Equal(t, http.StatusForbidden, accessTokenManifest.Code)
+	requireCreativeModelBindingsNoStore(t, accessTokenManifest)
+	require.Contains(t, decodeCreativeResponse(t, accessTokenManifest)["message"], "dashboard session")
 }
 
 func TestCreativeModelBindingsAdminRejectsEnabledUnknownCanaryGroup(t *testing.T) {
@@ -290,6 +325,10 @@ func TestCreativeModelBindingsAdminRouteRejectsNonRoot(t *testing.T) {
 	encoded, err := common.Marshal(validCreativeModelBindingsPayload())
 	require.NoError(t, err)
 
+	manifest := performCreativeModelBindingsRouteRequest(t, router, http.MethodGet, "/api/creative/adapter-manifests", nil, nil)
+	require.Equal(t, false, decodeCreativeResponse(t, manifest)["success"])
+	requireCreativeModelBindingsNoStore(t, manifest)
+
 	recorder := performCreativeModelBindingsRouteRequest(t, router, http.MethodPost, "/api/creative/model-bindings/validate", encoded, map[string]string{
 		"X-Creative-CSRF":  "csrf-test",
 		"X-Creative-Nonce": "nonce-test",
@@ -318,6 +357,7 @@ func newCreativeModelBindingsRouteTestRouter(t *testing.T, role int) *gin.Engine
 	group := router.Group("/api/creative")
 	group.Use(middleware.DisableCache())
 	group.Use(middleware.RootAuth())
+	group.GET("/adapter-manifests", GetCreativeAdapterManifests)
 	group.PUT("/model-bindings", middleware.CreativeRequireNonce(), UpdateCreativeModelBindings)
 	group.POST("/model-bindings/validate", middleware.CreativeRequireNonce(), ValidateCreativeModelBindings)
 	group.POST("/model-bindings/dry-run", middleware.CreativeRequireNonce(), DryRunCreativeModelBindings)
@@ -350,6 +390,7 @@ func newCreativeModelBindingsAdminTestRouter(useAccessToken bool) *gin.Engine {
 		c.Next()
 	})
 	router.GET("/api/creative/model-bindings", GetCreativeModelBindings)
+	router.GET("/api/creative/adapter-manifests", GetCreativeAdapterManifests)
 	router.PUT("/api/creative/model-bindings", UpdateCreativeModelBindings)
 	router.POST("/api/creative/model-bindings/validate", ValidateCreativeModelBindings)
 	router.POST("/api/creative/model-bindings/dry-run", DryRunCreativeModelBindings)

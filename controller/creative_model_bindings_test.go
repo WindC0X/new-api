@@ -189,6 +189,25 @@ func TestCreativeModelBindingsAdminRejectsUnsafeAndAccessToken(t *testing.T) {
 	require.Contains(t, decodeCreativeResponse(t, accessToken)["message"], "dashboard session")
 }
 
+func TestCreativeModelBindingsAdminRejectsEnabledUnknownCanaryGroup(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	router := newCreativeModelBindingsAdminTestRouter(false)
+	payload := validCreativeModelBindingsPayload()
+	config := payload["config"].(map[string]any)
+	bindings := config["bindings"].([]any)
+	binding := bindings[0].(map[string]any)
+	binding["enabled"] = true
+	binding["canaryGroups"] = []any{"beta"}
+
+	validate := performJSONRequest(t, router, http.MethodPost, "/api/creative/model-bindings/validate", payload)
+	require.Equal(t, http.StatusBadRequest, validate.Code)
+	require.Contains(t, decodeCreativeResponse(t, validate)["message"], "unknown group")
+
+	dryRun := performJSONRequest(t, router, http.MethodPost, "/api/creative/model-bindings/dry-run", payload)
+	require.Equal(t, http.StatusBadRequest, dryRun.Code)
+	require.Contains(t, decodeCreativeResponse(t, dryRun)["message"], "unknown group")
+}
+
 func TestCreativeModelBindingsAdminRejectsFakeSecretCorpusWithoutLogging(t *testing.T) {
 	router := newCreativeModelBindingsAdminTestRouter(false)
 	secrets := []string{

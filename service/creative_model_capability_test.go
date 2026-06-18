@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -215,7 +216,7 @@ func TestValidateCreativeUserParamsForSchemaIsTypedAndFailClosed(t *testing.T) {
 func TestResolveCreativeImageModelBindingForGroupIsMockOnlyAndGroupScoped(t *testing.T) {
 	config := validCreativeModelBindingsConfigForTest()
 	config.Bindings[0].Enabled = true
-	config.Bindings[0].CanaryGroups = []string{"test"}
+	config.Bindings[0].CanaryGroups = []string{"vip"}
 	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
 	require.NoError(t, err)
 	withCreativeCapabilityOptions(t, map[string]string{
@@ -223,7 +224,7 @@ func TestResolveCreativeImageModelBindingForGroupIsMockOnlyAndGroupScoped(t *tes
 		CreativeModelBindingsOptionKey:  configJSON,
 	})
 
-	resolved, err := ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "test", map[string]any{"size": "1024x1024"})
+	resolved, err := ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "vip", map[string]any{"size": "1024x1024"})
 	require.NoError(t, err)
 	require.Equal(t, "mock:gpt-image-2:preview", resolved.BindingId)
 	require.Equal(t, "gpt-image-2", resolved.ProviderModelId)
@@ -237,14 +238,14 @@ func TestResolveCreativeImageModelBindingForGroupIsMockOnlyAndGroupScoped(t *tes
 		CreativeAdapterEnabledOptionKey: "",
 		CreativeModelBindingsOptionKey:  configJSON,
 	})
-	_, err = ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "test", map[string]any{"size": "1024x1024"})
+	_, err = ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "vip", map[string]any{"size": "1024x1024"})
 	require.Error(t, err)
 }
 
 func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchema(t *testing.T) {
 	config := validCreativeModelBindingsConfigForTest()
 	config.Bindings[0].Enabled = true
-	config.Bindings[0].CanaryGroups = []string{"test"}
+	config.Bindings[0].CanaryGroups = []string{"vip"}
 	config.Bindings[0].ParameterSchema = append(config.Bindings[0].ParameterSchema, dto.CreativeParameterSchemaItem{
 		Id:     "serverOnly",
 		Label:  "Server Only",
@@ -258,7 +259,7 @@ func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchem
 		CreativeAdapterEnabledOptionKey: "true",
 		CreativeModelBindingsOptionKey:  configJSON,
 	})
-	items := GetStoredCreativeModelBindingsCatalogForGroup("test")
+	items := GetStoredCreativeModelBindingsCatalogForGroup("vip")
 	require.Len(t, items, 1)
 	require.Equal(t, "mock:gpt-image-2:preview", items[0].Id)
 	require.Equal(t, "gpt-image-2", items[0].ProviderModelId)
@@ -275,19 +276,19 @@ func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchem
 		CreativeAdapterEnabledOptionKey: "true",
 		CreativeModelBindingsOptionKey:  disabledJSON,
 	})
-	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("test"))
+	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("vip"))
 
 	withCreativeCapabilityOptions(t, map[string]string{
 		CreativeAdapterEnabledOptionKey: "",
 		CreativeModelBindingsOptionKey:  configJSON,
 	})
-	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("test"))
+	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("vip"))
 }
 
 func TestStoredCreativeModelBindingsCatalogHidesFixtureProviderBindings(t *testing.T) {
 	config := grsAIGPTImageDryRunConfigForTest()
 	config.Bindings[0].Enabled = true
-	config.Bindings[0].CanaryGroups = []string{"test"}
+	config.Bindings[0].CanaryGroups = []string{"vip"}
 	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
 	require.NoError(t, err)
 
@@ -296,8 +297,8 @@ func TestStoredCreativeModelBindingsCatalogHidesFixtureProviderBindings(t *testi
 		CreativeModelBindingsOptionKey:  configJSON,
 	})
 
-	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("test"))
-	_, err = ResolveCreativeImageModelBindingForGroup(config.Bindings[0].Id, "test", map[string]any{"aspectRatio": "1024x1024"})
+	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("vip"))
+	_, err = ResolveCreativeImageModelBindingForGroup(config.Bindings[0].Id, "vip", map[string]any{"aspectRatio": "1024x1024"})
 	require.Error(t, err)
 }
 
@@ -370,11 +371,28 @@ func TestCreativeForbiddenKeyNormalizerCoversControlVariants(t *testing.T) {
 		"base URL",
 		"base\tURL",
 		"headers/Authorization",
+		"upstream",
+		"upstreamOptions",
+		"xUpstreamConfig",
+		"model",
+		"proxy",
+		"organization",
+		"storageBackend",
+		"sourceUrl",
+		"objectKey",
+		"bucketUrl",
+		"signedUrl",
+		"presignedUrl",
+		"accessKeyId",
+		"secretAccessKey",
+		"s3Endpoint",
 	} {
 		require.True(t, CreativeForbiddenKey(key), key)
 	}
 	require.Equal(t, "notifyhook", NormalizeCreativeForbiddenKey("notify_hook"))
-	require.False(t, CreativeForbiddenKey("size"))
+	for _, key := range []string{"size", "aspectRatio", "quality", "n", "seed"} {
+		require.False(t, CreativeForbiddenKey(key), key)
+	}
 }
 
 func TestParseCreativeModelBindingsConfigValidatesVersionAndDistinctIDs(t *testing.T) {
@@ -720,6 +738,46 @@ func TestValidateCreativeModelBindingsConfigRejectsUnsupportedRoutingFields(t *t
 	}
 }
 
+func TestValidateCreativeModelBindingsConfigCanaryGroupsFailClosedForEnabledBindings(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+
+	config := validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = true
+	config.Bindings[0].CanaryGroups = []string{"beta"}
+	err := ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown group")
+
+	config = validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = true
+	config.Bindings[0].CanaryGroups = []string{"vip"}
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+
+	config = validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = true
+	config.Bindings[0].CanaryGroups = []string{"*"}
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+
+	config = validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = false
+	config.Bindings[0].CanaryGroups = []string{"futureprivate"}
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+}
+
+func TestValidateCreativeModelBindingsConfigUsesCurrentUserUsableGroups(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	restore := setting.UserUsableGroups2JSONString()
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"默认分组","vip":"vip分组","beta":"Beta 分组"}`))
+	t.Cleanup(func() {
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(restore))
+	})
+
+	config := validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = true
+	config.Bindings[0].CanaryGroups = []string{"beta"}
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+}
+
 func TestValidateCreativeModelBindingsConfigRedactsSensitiveCanaryGroupErrors(t *testing.T) {
 	config := validCreativeModelBindingsConfigForTest()
 	rawGroup := "https://provider.example/private/group?token=secret"
@@ -938,6 +996,8 @@ func TestBuildCreativeModelBindingsDryRunSupportsGrsAIFixtureWithoutProviderMate
 	require.Equal(t, "gpt-image-2", body["model"])
 	require.Equal(t, "1024x1024", body["aspectRatio"])
 	require.Equal(t, "json", body["replyType"])
+	require.NotContains(t, body, "images")
+	require.NotContains(t, fmtAnyForTest(body), "<managed-input-image-ref>")
 	require.NotContains(t, fmtAnyForTest(preview), "authorization")
 	require.NotContains(t, fmtAnyForTest(preview), "bearer")
 	require.NotContains(t, fmtAnyForTest(preview), "http://")
@@ -960,11 +1020,44 @@ func TestParseCreativeGrsAIImageFixtureResponseRedactsProviderResults(t *testing
 	require.NotContains(t, fmtAnyForTest(summary), "https://")
 	require.NotContains(t, fmtAnyForTest(summary), "token=secret")
 
+	wrapperSummary, err := ParseCreativeGrsAIImageFixtureResponse([]byte(`{
+		"code": 0,
+		"data": {
+			"id": "wrapped-fixture-task",
+			"status": "succeeded",
+			"results": ["https://provider.example/private/wrapped.png?token=secret"],
+			"progress": 100,
+			"error": "Bearer token https://provider.example/private/error"
+		}
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, "wrapped-fixture-task", wrapperSummary.Id)
+	require.Equal(t, "succeeded", wrapperSummary.Status)
+	require.Equal(t, 1, wrapperSummary.ResultCount)
+	require.Equal(t, 100, wrapperSummary.Progress)
+	require.Empty(t, wrapperSummary.Error)
+	require.NotContains(t, fmtAnyForTest(wrapperSummary), "https://")
+	require.NotContains(t, fmtAnyForTest(wrapperSummary), "token")
+	require.NotContains(t, fmtAnyForTest(wrapperSummary), "bearer")
+
 	_, err = ParseCreativeGrsAIImageFixtureResponse([]byte(`{"id":"14-fixture-task","status":"queued"}`))
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "https://")
 
+	_, err = ParseCreativeGrsAIImageFixtureResponse([]byte(`{"id":"https://provider.example/private/task?token=secret","status":"running"}`))
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "provider.example")
+	require.NotContains(t, err.Error(), "token=secret")
+
+	_, err = ParseCreativeGrsAIImageFixtureResponse([]byte(`{"id":"14-fixture-task","status":"https://provider.example/private/status?token=secret"}`))
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "provider.example")
+	require.NotContains(t, err.Error(), "token=secret")
+
 	_, err = ParseCreativeGrsAIImageFixtureResponse([]byte(`{"id":"14-fixture-task","status":"succeeded","results":[]}`))
+	require.Error(t, err)
+
+	_, err = ParseCreativeGrsAIImageFixtureResponse([]byte(`{"code":0,"data":{"id":"wrapped-fixture-task","status":"succeeded"}}`))
 	require.Error(t, err)
 }
 

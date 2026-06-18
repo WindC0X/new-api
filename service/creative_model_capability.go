@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 )
 
 const (
@@ -182,6 +183,47 @@ var creativeParameterForbiddenFragments = []string{
 	"header",
 	"channel",
 	"provider",
+	"upstream",
+	"model",
+	"modelid",
+	"modelname",
+	"modelref",
+	"proxy",
+	"organization",
+	"sourceprofileid",
+	"profileid",
+	"internaloptions",
+	"onprogress",
+	"onsubmitted",
+	"idempotency",
+	"route",
+	"routing",
+	"group",
+	"user",
+	"owner",
+	"notify",
+	"notifyhook",
+	"callback",
+	"webhook",
+	"mjapisecret",
+	"storagebackend",
+}
+
+var creativeSensitiveStringForbiddenFragments = []string{
+	"apikey",
+	"authorization",
+	"bearer",
+	"token",
+	"secret",
+	"credential",
+	"baseurl",
+	"url",
+	"endpoint",
+	"host",
+	"header",
+	"channel",
+	"provider",
+	"upstream",
 	"modelid",
 	"modelname",
 	"modelref",
@@ -674,7 +716,6 @@ func creativeModelBindingDryRunRequestPreview(binding CreativeModelBindingConfig
 			"requestBody": map[string]any{
 				"model":       binding.ProviderModelId,
 				"prompt":      "<user-prompt>",
-				"images":      []any{"<managed-input-image-ref>"},
 				"aspectRatio": creativeDryRunSchemaDefault(binding.ParameterSchema, "aspectRatio", "1024x1024"),
 				"replyType":   "json",
 			},
@@ -757,39 +798,48 @@ func creativeAdapterPresetTemplateAllowed(preset string, template string) bool {
 }
 
 func ParseCreativeGrsAIImageFixtureResponse(raw []byte) (CreativeGrsAIImageFixtureSummary, error) {
+	type fixtureResponsePayload struct {
+		Id       string            `json:"id"`
+		Status   string            `json:"status"`
+		Results  []json.RawMessage `json:"results"`
+		Progress int               `json:"progress"`
+		Error    string            `json:"error"`
+	}
 	var response struct {
-		Id      string `json:"id"`
-		Status  string `json:"status"`
-		Results []struct {
-			URL string `json:"url"`
-		} `json:"results"`
-		Progress int    `json:"progress"`
-		Error    string `json:"error"`
+		fixtureResponsePayload
+		Data *fixtureResponsePayload `json:"data"`
 	}
 	if err := common.Unmarshal(raw, &response); err != nil {
 		return CreativeGrsAIImageFixtureSummary{}, err
 	}
-	id := strings.TrimSpace(response.Id)
-	status := strings.TrimSpace(strings.ToLower(response.Status))
+	payload := response.fixtureResponsePayload
+	if response.Data != nil {
+		payload = *response.Data
+	}
+	id := strings.TrimSpace(payload.Id)
+	status := strings.TrimSpace(strings.ToLower(payload.Status))
 	if id == "" {
 		return CreativeGrsAIImageFixtureSummary{}, errors.New("grsai image fixture response id is required")
+	}
+	if CreativeSensitiveStringValue(id) {
+		return CreativeGrsAIImageFixtureSummary{}, errors.New("grsai image fixture response id contains sensitive material")
 	}
 	switch status {
 	case "running", "violation", "succeeded", "failed":
 	default:
-		return CreativeGrsAIImageFixtureSummary{}, fmt.Errorf("grsai image fixture response status %q is unsupported", status)
+		return CreativeGrsAIImageFixtureSummary{}, errors.New("grsai image fixture response status is unsupported")
 	}
-	if status == "succeeded" && len(response.Results) == 0 {
+	if status == "succeeded" && len(payload.Results) == 0 {
 		return CreativeGrsAIImageFixtureSummary{}, errors.New("grsai image fixture response has no result")
 	}
 	summary := CreativeGrsAIImageFixtureSummary{
 		Id:          id,
 		Status:      status,
-		ResultCount: len(response.Results),
-		Progress:    response.Progress,
+		ResultCount: len(payload.Results),
+		Progress:    payload.Progress,
 	}
-	if response.Error != "" && !CreativeSensitiveStringValue(response.Error) {
-		summary.Error = response.Error
+	if errorText := strings.TrimSpace(payload.Error); errorText != "" && !CreativeSensitiveStringValue(errorText) {
+		summary.Error = errorText
 	}
 	return summary, nil
 }
@@ -916,7 +966,7 @@ func RedactCreativeDryRunValue(value any) any {
 
 func creativeDryRunSafeDiagnosticKey(key string) bool {
 	switch strings.TrimSpace(key) {
-	case "lockedChannelId", "finalProviderModelId", "channelModelId":
+	case "model", "priceModel", "lockedChannelId", "finalProviderModelId", "channelModelId":
 		return true
 	default:
 		return false
@@ -1060,11 +1110,14 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 			if trimmedGroup == "" {
 				return fmt.Errorf("binding %q canaryGroups contains an empty group", id)
 			}
-			if CreativeSensitiveStringValue(trimmedGroup) {
+			if creativeCanaryGroupSensitiveValue(trimmedGroup) {
 				return fmt.Errorf("binding %q canaryGroups[%d] contains sensitive material", id, groupIndex)
 			}
 			if trimmedGroup != "*" && CreativeForbiddenKey(trimmedGroup) {
 				return fmt.Errorf("binding %q canaryGroups[%d] is forbidden", id, groupIndex)
+			}
+			if binding.Enabled && trimmedGroup != "*" && !creativeKnownCanaryGroup(trimmedGroup) {
+				return fmt.Errorf("binding %q canaryGroups[%d] unknown group %q", id, groupIndex, trimmedGroup)
 			}
 		}
 		if err := ValidateCreativeParameterSchema(binding.ParameterSchema); err != nil {
@@ -1072,6 +1125,53 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 		}
 	}
 	return nil
+}
+
+func creativeKnownCanaryGroup(group string) bool {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return false
+	}
+	usableGroups := setting.GetUserUsableGroupsCopy()
+	_, ok := usableGroups[group]
+	return ok
+}
+
+func creativeCanaryGroupSensitiveValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "://") || strings.HasPrefix(lower, "data:") {
+		return true
+	}
+	for _, marker := range []string{
+		"bearer ",
+		"sk-",
+		"x-amz-",
+		"x-oss-",
+		"signature=",
+		"credential=",
+		"expires=",
+		"cookie=",
+		"set-cookie:",
+		"csrf=",
+		"nonce=",
+		"api_key=",
+		"apikey=",
+		"access_key=",
+		"accesskey=",
+		"object_key=",
+		"objectkey=",
+		"secret=",
+		"token=",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func creativeBindingIDCollidesWithEnabledChannelModel(bindingID string) bool {
@@ -1318,7 +1418,13 @@ func CreativeSensitiveStringValue(value string) bool {
 			return true
 		}
 	}
-	return CreativeForbiddenKey(trimmed)
+	normalized := NormalizeCreativeForbiddenKey(trimmed)
+	for _, fragment := range creativeSensitiveStringForbiddenFragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func creativeParameterValueSensitive(value any) bool {

@@ -2793,10 +2793,25 @@ func TestCreativeForbiddenNormalizerMatrixCoversAdminSchemaDryRunAndRelay(t *tes
 		"notifyHook",
 		"ownerId",
 		"callback_url",
+		"upstream",
+		"upstreamOptions",
 		"x_upstream_base_url",
+		"xUpstreamConfig",
 		"providerOverride",
 		"channelId",
 		"modelName",
+		"model",
+		"proxy",
+		"organization",
+		"storageBackend",
+		"sourceUrl",
+		"objectKey",
+		"bucketUrl",
+		"signedUrl",
+		"presignedUrl",
+		"accessKeyId",
+		"secretAccessKey",
+		"s3Endpoint",
 	}
 	for _, key := range dangerousKeys {
 		t.Run("service "+key, func(t *testing.T) {
@@ -2828,7 +2843,11 @@ func TestCreativeForbiddenNormalizerMatrixCoversAdminSchemaDryRunAndRelay(t *tes
 			}}, map[string]any{key: "unsafe"})
 			require.Error(t, err)
 			redacted := service.RedactCreativeDryRunValue(map[string]any{key: "unsafe"}).(map[string]any)
-			require.Equal(t, "[REDACTED]", redacted[key])
+			if key == "model" {
+				require.Equal(t, "unsafe", redacted[key])
+			} else {
+				require.Equal(t, "[REDACTED]", redacted[key])
+			}
 		})
 	}
 	_, err := service.ValidateCreativeUserParamsForSchema([]dto.CreativeParameterSchemaItem{{
@@ -2863,26 +2882,38 @@ func TestCreativeForbiddenNormalizerMatrixCoversAdminSchemaDryRunAndRelay(t *tes
 			require.Equal(t, http.StatusBadRequest, recorder.Code)
 		})
 		t.Run("relay form "+key, func(t *testing.T) {
+			fieldKey := key
+			if key == "model" {
+				fieldKey = "userParams.model"
+			}
 			recorder := performCreativeSessionForm(t, router, http.MethodPost, "/creative/relay/v1/images/generations", auth.cookies, creativeSameOriginNonceHeaders(auth), map[string]string{
 				"model":  "creative-model-05",
 				"prompt": "safe image prompt",
-				key:      "unsafe",
+				fieldKey: "unsafe",
 			})
 			require.Equal(t, http.StatusBadRequest, recorder.Code)
 		})
 		t.Run("relay multipart field "+key, func(t *testing.T) {
+			fieldKey := key
+			if key == "model" {
+				fieldKey = "userParams.model"
+			}
 			recorder := performCreativeSessionMultipart(t, router, http.MethodPost, "/creative/relay/v1/images/generations", auth.cookies, creativeSameOriginNonceHeaders(auth), map[string]string{
 				"model":  "creative-model-05",
 				"prompt": "safe image prompt",
-				key:      "unsafe",
+				fieldKey: "unsafe",
 			})
 			require.Equal(t, http.StatusBadRequest, recorder.Code)
 		})
 		t.Run("relay multipart file "+key, func(t *testing.T) {
+			fileKey := key
+			if key == "model" {
+				fileKey = "userParams.model"
+			}
 			recorder := performCreativeSessionMultipartWithFiles(t, router, http.MethodPost, "/creative/relay/v1/images/generations", auth.cookies, creativeSameOriginNonceHeaders(auth), map[string]string{
 				"model":  "creative-model-05",
 				"prompt": "safe image prompt",
-			}, map[string]string{key: "file contents"})
+			}, map[string]string{fileKey: "file contents"})
 			require.Equal(t, http.StatusBadRequest, recorder.Code)
 		})
 	}

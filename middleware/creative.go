@@ -328,15 +328,6 @@ func creativeRequestOrigin(c *gin.Context) string {
 }
 
 func creativeRequestScheme(request *http.Request) string {
-	if scheme := creativeForwardedProto(request.Header.Get("Forwarded")); scheme != "" {
-		return scheme
-	}
-	if scheme := creativeFirstHeaderScheme(request.Header.Get("X-Forwarded-Proto")); scheme != "" {
-		return scheme
-	}
-	if scheme := creativeFirstHeaderScheme(request.Header.Get("X-Forwarded-Scheme")); scheme != "" {
-		return scheme
-	}
 	if request.TLS != nil {
 		return "https"
 	}

@@ -620,7 +620,7 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	require.NotEmpty(t, state.Manifests)
 	require.NotEmpty(t, state.ParameterTemplates)
 
-	var sawMock, sawDuomiLive, sawQualityLabel, sawNanoTemplate bool
+	var sawMock, sawDuomiLive, sawQualityLabel, sawNanoTemplate, sawGrsAISquareLabel bool
 	for _, manifest := range state.Manifests {
 		require.NotContains(t, manifest.Description, "apiKey")
 		require.NotContains(t, manifest.Description, "baseUrl")
@@ -640,6 +640,19 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 		if template.Id == "grsai_nano_banana" {
 			sawNanoTemplate = true
 		}
+		if template.Id == "grsai_gpt_image" {
+			for _, item := range template.Schema {
+				if item.Id == "aspectRatio" {
+					require.Equal(t, "图片尺寸", item.Label)
+					require.Equal(t, "尺寸", item.ShortLabel)
+					for _, option := range item.Options {
+						if option.Value == "1024x1024" && option.Label == "1024×1024 (1:1)" {
+							sawGrsAISquareLabel = true
+						}
+					}
+				}
+			}
+		}
 		for _, item := range template.Schema {
 			if item.Id == "quality" && item.Label == "质量" {
 				sawQualityLabel = true
@@ -650,6 +663,7 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	require.True(t, sawDuomiLive)
 	require.True(t, sawQualityLabel)
 	require.True(t, sawNanoTemplate)
+	require.True(t, sawGrsAISquareLabel)
 }
 
 func TestValidateCreativeModelBindingsConfigRejectsEnabledDryRunAndInvalidLive(t *testing.T) {

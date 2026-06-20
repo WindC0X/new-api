@@ -388,13 +388,13 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 			Schema: []dto.CreativeParameterSchemaItem{
 				{
 					Id:           "aspectRatio",
-					Label:        "比例",
-					ShortLabel:   "比例",
-					Description:  "GrsAI aspect ratio or documented pixel option.",
+					Label:        "图片尺寸",
+					ShortLabel:   "尺寸",
+					Description:  "GrsAI documented aspectRatio value; square uses the documented 1024×1024 value.",
 					Type:         "enum",
 					DefaultValue: "1024x1024",
 					Options: []dto.CreativeParamOption{
-						{Value: "1024x1024", Label: "1:1"},
+						{Value: "1024x1024", Label: "1024×1024 (1:1)"},
 						{Value: "16:9", Label: "16:9"},
 						{Value: "9:16", Label: "9:16"},
 						{Value: "4:3", Label: "4:3"},
@@ -441,7 +441,7 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 					DefaultValue: "1024x1024",
 					Options: []dto.CreativeParamOption{
 						{Value: "auto", Label: "Auto"},
-						{Value: "1024x1024", Label: "1:1"},
+						{Value: "1024x1024", Label: "1024×1024 (1:1)"},
 						{Value: "16:9", Label: "16:9"},
 						{Value: "9:16", Label: "9:16"},
 						{Value: "4:3", Label: "4:3"},

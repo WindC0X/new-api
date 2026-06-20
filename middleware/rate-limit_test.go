@@ -74,6 +74,7 @@ func TestGlobalWebRateLimitStillAppliesToCreativeAPIAndRelay(t *testing.T) {
 	for index, path := range []string{
 		"/creative/api/bootstrap",
 		"/creative/relay/v1/videos/task_abc",
+		"/creative/relay/v1/images/tasks",
 	} {
 		t.Run(path, func(t *testing.T) {
 			for i, want := range []int{http.StatusNoContent, http.StatusTooManyRequests} {
@@ -84,6 +85,59 @@ func TestGlobalWebRateLimitStillAppliesToCreativeAPIAndRelay(t *testing.T) {
 				require.Equal(t, want, recorder.Code, "request %d", i+1)
 			}
 		})
+	}
+}
+
+func TestGlobalWebRateLimitBypassesCreativeHighFrequencyOperationalRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	configureGlobalWebRateLimitForTest(t, 1)
+
+	engine := gin.New()
+	engine.Use(GlobalWebRateLimit())
+	engine.Any("/*path", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/creative/relay/v1/images/tasks/task_abc"},
+		{http.MethodHead, "/creative/relay/v1/images/tasks/task_abc"},
+		{http.MethodGet, "/creative/relay/v1/images/tasks/task_abc/content"},
+		{http.MethodPut, "/creative/api/documents/doc_abc"},
+		{http.MethodPatch, "/creative/api/preferences/model"},
+	}
+
+	for index, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			for i := 0; i < 3; i++ {
+				recorder := httptest.NewRecorder()
+				request := httptest.NewRequest(tc.method, tc.path, nil)
+				request.RemoteAddr = fmt.Sprintf("203.0.113.%d:12345", 100+index)
+				engine.ServeHTTP(recorder, request)
+				require.Equal(t, http.StatusNoContent, recorder.Code, "request %d", i+1)
+			}
+		})
+	}
+}
+
+func TestGlobalWebRateLimitDoesNotBypassCreativeImageTaskMutation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	configureGlobalWebRateLimitForTest(t, 1)
+
+	engine := gin.New()
+	engine.Use(GlobalWebRateLimit())
+	engine.POST("/*path", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	for i, want := range []int{http.StatusNoContent, http.StatusTooManyRequests} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/creative/relay/v1/images/tasks", nil)
+		request.RemoteAddr = "203.0.113.130:12345"
+		engine.ServeHTTP(recorder, request)
+		require.Equal(t, want, recorder.Code, "request %d", i+1)
 	}
 }
 

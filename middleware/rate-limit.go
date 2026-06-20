@@ -108,6 +108,10 @@ func GlobalWebRateLimit() func(c *gin.Context) {
 }
 
 func shouldBypassGlobalWebRateLimit(method string, path string) bool {
+	if shouldBypassCreativeOperationalGlobalWebRateLimit(method, path) {
+		return true
+	}
+
 	if method != http.MethodGet && method != http.MethodHead {
 		return false
 	}
@@ -131,6 +135,48 @@ func shouldBypassGlobalWebRateLimit(method string, path string) bool {
 	switch path {
 	case "/favicon.ico", "/manifest.json", "/robots.txt", "/logo.png", "/logo.svg":
 		return true
+	default:
+		return false
+	}
+}
+
+func shouldBypassCreativeOperationalGlobalWebRateLimit(method string, path string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead:
+		return isCreativeImageTaskReadPath(path)
+	case http.MethodPut:
+		return isCreativeDocumentUpdatePath(path)
+	case http.MethodPatch:
+		return path == "/creative/api/preferences/model"
+	default:
+		return false
+	}
+}
+
+func isCreativeDocumentUpdatePath(path string) bool {
+	const prefix = "/creative/api/documents/"
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	id := strings.TrimPrefix(path, prefix)
+	return id != "" && !strings.Contains(id, "/")
+}
+
+func isCreativeImageTaskReadPath(path string) bool {
+	const prefix = "/creative/relay/v1/images/tasks/"
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	if rest == "" || strings.HasSuffix(rest, "/") {
+		return false
+	}
+	parts := strings.Split(rest, "/")
+	switch len(parts) {
+	case 1:
+		return parts[0] != ""
+	case 2:
+		return parts[0] != "" && parts[1] == "content"
 	default:
 		return false
 	}

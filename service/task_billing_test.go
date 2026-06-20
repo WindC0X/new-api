@@ -936,7 +936,11 @@ func TestTaskBillingOutboxSubmitSettleAdjustsPreConsumeDelta(t *testing.T) {
 
 	assert.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
 	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, int64(0), countLogs(t), "submit settle outbox should not duplicate consumption logs")
+	assert.Equal(t, int64(1), countLogs(t), "submit settle outbox should record consumption once")
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, actualQuota, log.Quota)
 }
 
 func TestTaskAdjustFundingTxSubscriptionRejectsOwnerMismatch(t *testing.T) {

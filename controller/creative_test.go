@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -24,6 +26,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -1948,6 +1951,9 @@ func TestCreativeImageTaskSubmitAcceptsExposedBuiltInPreviewBinding(t *testing.T
 		},
 	}, auth.cookies, headers)
 
+	if submit.Code != http.StatusAccepted {
+		t.Logf("live submit body: %s", submit.Body.String())
+	}
 	require.Equal(t, http.StatusAccepted, submit.Code)
 	payload := decodeCreativeResponse(t, submit)
 	taskID, ok := payload["task_id"].(string)
@@ -1971,6 +1977,760 @@ func TestCreativeImageTaskSubmitAcceptsExposedBuiltInPreviewBinding(t *testing.T
 	require.Equal(t, "mock_image_task", storedMetadata.AdapterPreset)
 	require.Equal(t, "mock_gpt_image", storedMetadata.ParameterTemplate)
 	require.Equal(t, map[string]any{"quality": "auto", "size": "1024x1024"}, storedMetadata.UserParams)
+}
+
+func TestCreativeImageTaskSubmitLiveBindingUsesLockedChannelAndSanitizedDTO(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}, &model.Channel{}, &model.TaskBillingOutbox{}, &model.Log{}, &model.UserSubscription{}))
+	seedCreativeControllerUser(t, 813)
+	originalModelPriceJSON := ratio_setting.ModelPrice2JSONString()
+	priceMap := ratio_setting.GetModelPriceCopy()
+	priceMap["duomi-gpt-image-2-price"] = 0
+	priceMapJSON, err := common.Marshal(priceMap)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(priceMapJSON)))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalModelPriceJSON))
+	})
+
+	providerCalls := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls++
+		require.Equal(t, "/v1/images/generations", r.URL.Path)
+		require.Equal(t, "true", r.URL.Query().Get("async"))
+		require.Equal(t, "test-live-key", r.Header.Get("Authorization"))
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Contains(t, string(body), `"model":"gpt-image-2"`)
+		require.Contains(t, string(body), `"quality":"high"`)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"dm-live-task-1","state":"running","progress":3}`))
+	}))
+	t.Cleanup(provider.Close)
+
+	endpoint := provider.URL
+	channelID := 8131
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    1,
+		Key:     "test-live-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative live channel",
+		Models:  ",gpt-image-2,",
+		Group:   "default",
+		BaseURL: &endpoint,
+	}).Error)
+	config := service.CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []service.CreativeModelBindingConfig{{
+			Id:                "duomi:gpt-image-2:live",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "duomi-gpt-image-2-price",
+			DisplayName:       "Duomi Live",
+			Modality:          "image",
+			Enabled:           true,
+			CanaryGroups:      []string{"*"},
+			ChannelId:         &channelID,
+			AdapterPreset:     service.CreativeImageAdapterPresetDuomiLive,
+			ParameterTemplate: "duomi_gpt_image",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{Id: "size", Label: "Size", Type: "enum", DefaultValue: "1024x1024", Options: []dto.CreativeParamOption{{Value: "1024x1024", Label: "1024×1024"}}},
+				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "medium", Options: []dto.CreativeParamOption{{Value: "medium", Label: "Medium"}, {Value: "high", Label: "High"}}},
+			},
+		}},
+	}
+	configJSON, err := service.NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "false",
+		service.CreativeModelBindingsOptionKey:         configJSON,
+	})
+
+	router := newCreativeRelayBrokerTestRouter(t, 813, func(c *gin.Context) {
+		t.Fatal("live image task route must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "image-task-live-submit-1"
+
+	submit := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "duomi:gpt-image-2:live",
+		"prompt": "safe live image",
+		"userParams": map[string]any{
+			"size":    "1024x1024",
+			"quality": "high",
+		},
+	}, auth.cookies, headers)
+
+	require.Equal(t, http.StatusAccepted, submit.Code)
+	require.Equal(t, 1, providerCalls)
+	require.NotContains(t, submit.Body.String(), "test-live-key")
+	require.NotContains(t, submit.Body.String(), "dm-live-task-1")
+	require.NotContains(t, submit.Body.String(), "channelId")
+	payload := decodeCreativeResponse(t, submit)
+	taskID := payload["task_id"].(string)
+	require.Equal(t, "in_progress", payload["status"])
+	require.Equal(t, "duomi:gpt-image-2:live", payload["model"])
+
+	var stored model.Task
+	require.NoError(t, model.DB.Where("user_id = ? AND task_id = ?", 813, taskID).First(&stored).Error)
+	require.Equal(t, string(constant.TaskPlatformCreativeImage), string(stored.Platform))
+	require.Equal(t, channelID, stored.ChannelId)
+	require.Equal(t, "dm-live-task-1", stored.PrivateData.UpstreamTaskID)
+	require.Equal(t, "test-live-key", stored.PrivateData.Key)
+	require.Equal(t, endpoint, stored.PrivateData.ProviderEndpoint)
+	require.NotNil(t, stored.PrivateData.BillingContext)
+	require.Equal(t, "duomi-gpt-image-2-price", stored.PrivateData.BillingContext.OriginModelName)
+
+	replay := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "duomi:gpt-image-2:live",
+		"prompt": "safe live image",
+		"userParams": map[string]any{
+			"size":    "1024x1024",
+			"quality": "high",
+		},
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusOK, replay.Code)
+	require.Equal(t, taskID, decodeCreativeResponse(t, replay)["task_id"])
+	require.Equal(t, 1, providerCalls)
+}
+
+func TestCreativeImageTaskSubmitGrsAILiveForcesAsyncAndBearerAuth(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}, &model.Channel{}, &model.TaskBillingOutbox{}, &model.Log{}, &model.UserSubscription{}))
+	seedCreativeControllerUser(t, 817)
+	originalModelPriceJSON := ratio_setting.ModelPrice2JSONString()
+	priceMap := ratio_setting.GetModelPriceCopy()
+	priceMap["grsai-gpt-image-2-price"] = 0
+	priceMapJSON, err := common.Marshal(priceMap)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(priceMapJSON)))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalModelPriceJSON))
+	})
+
+	providerCalls := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls++
+		require.Equal(t, "/v1/api/generate", r.URL.Path)
+		require.Equal(t, "Bearer grs-live-key", r.Header.Get("Authorization"))
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Contains(t, string(body), `"model":"gpt-image-2-vip"`)
+		require.Contains(t, string(body), `"replyType":"async"`)
+		require.Contains(t, string(body), `"aspectRatio":"1K"`)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"grs-live-task-1","status":"running","progress":7}`))
+	}))
+	t.Cleanup(provider.Close)
+
+	channelID := 8171
+	endpoint := provider.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "grs-live-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative grsai live channel",
+		Models:  ",gpt-image-2-vip,",
+		Group:   "default",
+		BaseURL: &endpoint,
+	}).Error)
+	config := service.CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []service.CreativeModelBindingConfig{{
+			Id:                "grsai:gpt-image-2-vip:live",
+			ProviderModelId:   "gpt-image-2-vip",
+			PriceModelId:      "grsai-gpt-image-2-price",
+			DisplayName:       "GrsAI Live",
+			Modality:          "image",
+			Enabled:           true,
+			CanaryGroups:      []string{"*"},
+			ChannelId:         &channelID,
+			AdapterPreset:     service.CreativeImageAdapterPresetGrsAILive,
+			ParameterTemplate: "grsai_gpt_image_vip",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{Id: "aspectRatio", Label: "Aspect Ratio", Type: "enum", DefaultValue: "1K", Options: []dto.CreativeParamOption{{Value: "1K", Label: "1K"}, {Value: "2K", Label: "2K"}, {Value: "4K", Label: "4K"}}},
+			},
+		}},
+	}
+	configJSON, err := service.NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "false",
+		service.CreativeModelBindingsOptionKey:         configJSON,
+	})
+
+	router := newCreativeRelayBrokerTestRouter(t, 817, func(c *gin.Context) {
+		t.Fatal("live image task route must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "image-task-grsai-live-submit-1"
+	submit := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "grsai:gpt-image-2-vip:live",
+		"prompt": "safe grsai live image",
+		"userParams": map[string]any{
+			"aspectRatio": "1K",
+		},
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusAccepted, submit.Code)
+	require.Equal(t, 1, providerCalls)
+	require.NotContains(t, submit.Body.String(), "grs-live-key")
+	require.NotContains(t, submit.Body.String(), "grs-live-task-1")
+
+	taskID := decodeCreativeResponse(t, submit)["task_id"].(string)
+	var stored model.Task
+	require.NoError(t, model.DB.Where("user_id = ? AND task_id = ?", 817, taskID).First(&stored).Error)
+	require.Equal(t, channelID, stored.ChannelId)
+	require.Equal(t, "grs-live-task-1", stored.PrivateData.UpstreamTaskID)
+	require.Equal(t, "grs-live-key", stored.PrivateData.Key)
+	require.Equal(t, endpoint, stored.PrivateData.ProviderEndpoint)
+}
+
+func TestCreativeImageTaskSubmitLiveRecordsConsumptionOnce(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}, &model.Channel{}, &model.TaskBillingOutbox{}, &model.Log{}, &model.UserSubscription{}))
+	seedCreativeControllerUser(t, 821)
+	originalLogConsumeEnabled := common.LogConsumeEnabled
+	common.LogConsumeEnabled = true
+	t.Cleanup(func() { common.LogConsumeEnabled = originalLogConsumeEnabled })
+	originalModelPriceJSON := ratio_setting.ModelPrice2JSONString()
+	priceMap := ratio_setting.GetModelPriceCopy()
+	priceMap["duomi-gpt-image-2-price"] = 0.01
+	priceMapJSON, err := common.Marshal(priceMap)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(priceMapJSON)))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalModelPriceJSON))
+	})
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"dm-bill-once","state":"running","progress":3}`))
+	}))
+	t.Cleanup(provider.Close)
+
+	endpoint := provider.URL
+	channelID := 8211
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "test-live-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative live billing channel",
+		Models:  ",gpt-image-2,",
+		Group:   "default",
+		BaseURL: &endpoint,
+	}).Error)
+	config := service.CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []service.CreativeModelBindingConfig{{
+			Id:                "duomi:gpt-image-2:live",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "duomi-gpt-image-2-price",
+			DisplayName:       "Duomi Live",
+			Modality:          "image",
+			Enabled:           true,
+			CanaryGroups:      []string{"*"},
+			ChannelId:         &channelID,
+			AdapterPreset:     service.CreativeImageAdapterPresetDuomiLive,
+			ParameterTemplate: "duomi_gpt_image",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{Id: "size", Label: "Size", Type: "enum", DefaultValue: "1024x1024", Options: []dto.CreativeParamOption{{Value: "1024x1024", Label: "1024×1024"}}},
+			},
+		}},
+	}
+	configJSON, err := service.NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "false",
+		service.CreativeModelBindingsOptionKey:         configJSON,
+	})
+
+	router := newCreativeRelayBrokerTestRouter(t, 821, func(c *gin.Context) {
+		t.Fatal("live image task route must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "image-task-live-billing-once"
+
+	submit := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "duomi:gpt-image-2:live",
+		"prompt": "safe live billing image",
+		"userParams": map[string]any{
+			"size": "1024x1024",
+		},
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusAccepted, submit.Code)
+
+	var stored model.Task
+	require.NoError(t, model.DB.Where("user_id = ? AND task_id = ?", 821, decodeCreativeResponse(t, submit)["task_id"]).First(&stored).Error)
+	require.Greater(t, stored.Quota, 0)
+
+	var consumeLogs []model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", 821, model.LogTypeConsume).Find(&consumeLogs).Error)
+	require.Len(t, consumeLogs, 1)
+	require.Equal(t, stored.Quota, consumeLogs[0].Quota)
+	require.Equal(t, channelID, consumeLogs[0].ChannelId)
+
+	var user model.User
+	require.NoError(t, model.DB.Where("id = ?", 821).First(&user).Error)
+	require.Equal(t, stored.Quota, user.UsedQuota)
+	var channel model.Channel
+	require.NoError(t, model.DB.Where("id = ?", channelID).First(&channel).Error)
+	require.Equal(t, int64(stored.Quota), channel.UsedQuota)
+
+	var outbox model.TaskBillingOutbox
+	require.NoError(t, model.DB.Where("task_id = ? AND operation = ?", stored.TaskID, model.TaskBillingOutboxOperationSubmitSettle).First(&outbox).Error)
+	require.NoError(t, service.ProcessTaskBillingOutbox(context.Background(), &outbox))
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", 821, model.LogTypeConsume).Find(&consumeLogs).Error)
+	require.Len(t, consumeLogs, 1)
+}
+
+func TestCreativeImageTaskSubmitLiveAcceptedInsertFailureRefundsAndKeepsGuard(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}, &model.Channel{}, &model.TaskBillingOutbox{}, &model.Log{}, &model.UserSubscription{}))
+	seedCreativeControllerUser(t, 818)
+	originalModelPriceJSON := ratio_setting.ModelPrice2JSONString()
+	priceMap := ratio_setting.GetModelPriceCopy()
+	priceMap["duomi-gpt-image-2-price"] = 0.01
+	priceMapJSON, err := common.Marshal(priceMap)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(priceMapJSON)))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalModelPriceJSON))
+	})
+	previousInsertWithBilling := creativeImageTaskInsertWithBilling
+	creativeImageTaskInsertWithBilling = func(task *model.Task, operation string, actualQuota int, preConsumedQuota int, reason string) (*model.TaskBillingOutbox, error) {
+		return nil, fmt.Errorf("forced insert failure")
+	}
+	t.Cleanup(func() { creativeImageTaskInsertWithBilling = previousInsertWithBilling })
+
+	providerCalls := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"dm-accepted-before-insert-failure","state":"running","progress":1}`))
+	}))
+	t.Cleanup(provider.Close)
+
+	channelID := 8181
+	endpoint := provider.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "test-live-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative live insert failure channel",
+		Models:  ",gpt-image-2,",
+		Group:   "default",
+		BaseURL: &endpoint,
+	}).Error)
+	config := service.CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []service.CreativeModelBindingConfig{{
+			Id:                "duomi:gpt-image-2:live",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "duomi-gpt-image-2-price",
+			DisplayName:       "Duomi Live",
+			Modality:          "image",
+			Enabled:           true,
+			CanaryGroups:      []string{"*"},
+			ChannelId:         &channelID,
+			AdapterPreset:     service.CreativeImageAdapterPresetDuomiLive,
+			ParameterTemplate: "duomi_gpt_image",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{Id: "size", Label: "Size", Type: "enum", DefaultValue: "1024x1024", Options: []dto.CreativeParamOption{{Value: "1024x1024", Label: "1024×1024"}}},
+				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "medium", Options: []dto.CreativeParamOption{{Value: "medium", Label: "Medium"}, {Value: "high", Label: "High"}}},
+			},
+		}},
+	}
+	configJSON, err := service.NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "false",
+		service.CreativeModelBindingsOptionKey:         configJSON,
+	})
+
+	router := newCreativeRelayBrokerTestRouter(t, 818, func(c *gin.Context) {
+		t.Fatal("live image task route must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "image-task-live-insert-failure"
+	body := map[string]any{
+		"model":  "duomi:gpt-image-2:live",
+		"prompt": "safe live image",
+		"userParams": map[string]any{
+			"size":    "1024x1024",
+			"quality": "high",
+		},
+	}
+	submit := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, headers)
+	require.Equal(t, http.StatusInternalServerError, submit.Code)
+	require.Equal(t, 1, providerCalls)
+	require.Eventually(t, func() bool {
+		var user model.User
+		require.NoError(t, model.DB.Where("id = ?", 818).First(&user).Error)
+		return user.Quota == 100000
+	}, 2*time.Second, 20*time.Millisecond)
+	var taskCount int64
+	require.NoError(t, model.DB.Model(&model.Task{}).Where("user_id = ?", 818).Count(&taskCount).Error)
+	require.Equal(t, int64(0), taskCount)
+
+	replay := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, headers)
+	require.Equal(t, http.StatusConflict, replay.Code)
+	require.Contains(t, replay.Body.String(), "still being prepared")
+	require.Equal(t, 1, providerCalls)
+	var guardCount int64
+	require.NoError(t, model.DB.Model(&model.CreativeVideoIdempotency{}).
+		Where("user_id = ? AND scope = ? AND request_id = ?", 818, creativeImageTaskIdempotencyScope, "image-task-live-insert-failure").
+		Count(&guardCount).Error)
+	require.Equal(t, int64(1), guardCount)
+}
+
+func TestCreativeImageTaskFetchPollsLiveTaskWithCASBillingAndPrivateDTO(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}, &model.TaskBillingOutbox{}, &model.Log{}, &model.UserSubscription{}))
+	seedCreativeControllerUser(t, 814)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "false",
+	})
+
+	providerHits := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerHits++
+		require.Equal(t, "/v1/tasks/upstream-success", r.URL.Path)
+		require.Equal(t, "selected-live-key", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"upstream-success","state":"succeeded","data":{"images":[{"url":"https://cdn.example/live.png?signature=secret"}]}}`))
+	}))
+	t.Cleanup(provider.Close)
+
+	channelID := 8141
+	endpoint := provider.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "fresh-key-must-not-be-used",
+		BaseURL: &endpoint,
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative live poll channel",
+	}).Error)
+	task := creativeLiveImageTaskForTest("task_live_poll_success", 814, channelID, model.TaskStatusInProgress)
+	task.PrivateData.Key = "selected-live-key"
+	task.PrivateData.UpstreamTaskID = "upstream-success"
+	task.PrivateData.ProviderEndpoint = endpoint
+	require.NoError(t, task.Insert())
+
+	router := newCreativeRelayBrokerTestRouter(t, 814, func(c *gin.Context) {
+		t.Fatal("live image task fetch must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	fetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_live_poll_success", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, fetch.Code)
+	require.Equal(t, 1, providerHits)
+	require.NotContains(t, fetch.Body.String(), "upstream-success")
+	require.NotContains(t, fetch.Body.String(), "selected-live-key")
+	require.NotContains(t, fetch.Body.String(), "signature=secret")
+	payload := decodeCreativeResponse(t, fetch)
+	require.Equal(t, "completed", payload["status"])
+	result := creativeResponseObject(t, payload, "result")
+	require.Equal(t, "/creative/relay/v1/images/tasks/task_live_poll_success/content", result["url"])
+
+	var stored model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", "task_live_poll_success").First(&stored).Error)
+	require.Equal(t, string(model.TaskStatusSuccess), string(stored.Status))
+	require.Equal(t, "https://cdn.example/live.png?signature=secret", stored.PrivateData.ResultURL)
+	var outboxCount int64
+	require.NoError(t, model.DB.Model(&model.TaskBillingOutbox{}).
+		Where("task_id = ? AND operation = ?", "task_live_poll_success", model.TaskBillingOutboxOperationTerminalSettle).
+		Count(&outboxCount).Error)
+	require.Equal(t, int64(1), outboxCount)
+
+	replayFetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_live_poll_success", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, replayFetch.Code)
+	require.Equal(t, 1, providerHits)
+	require.NoError(t, model.DB.Model(&model.TaskBillingOutbox{}).
+		Where("task_id = ? AND operation = ?", "task_live_poll_success", model.TaskBillingOutboxOperationTerminalSettle).
+		Count(&outboxCount).Error)
+	require.Equal(t, int64(1), outboxCount)
+}
+
+func TestCreativeImageTaskFetchFailClosesWhenLiveEndpointAffinityChanges(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}, &model.TaskBillingOutbox{}, &model.Log{}, &model.UserSubscription{}))
+	seedCreativeControllerUser(t, 822)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "false",
+	})
+
+	providerHits := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"upstream-affinity","state":"succeeded","data":{"images":[{"url":"https://cdn.example/live.png"}]}}`))
+	}))
+	t.Cleanup(provider.Close)
+
+	changedEndpoint := "https://changed-provider.example"
+	channelID := 8221
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "fresh-key-must-not-be-used",
+		BaseURL: &changedEndpoint,
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative live changed poll channel",
+	}).Error)
+	task := creativeLiveImageTaskForTest("task_live_endpoint_changed", 822, channelID, model.TaskStatusInProgress)
+	task.Quota = 100
+	task.PrivateData.Key = "selected-live-key"
+	task.PrivateData.UpstreamTaskID = "upstream-affinity"
+	task.PrivateData.ProviderEndpoint = provider.URL
+	task.PrivateData.BillingContext.PreConsumedQuota = 100
+	require.NoError(t, task.Insert())
+
+	router := newCreativeRelayBrokerTestRouter(t, 822, func(c *gin.Context) {
+		t.Fatal("live image task fetch must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	fetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_live_endpoint_changed", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, fetch.Code)
+	require.Equal(t, 0, providerHits)
+	payload := decodeCreativeResponse(t, fetch)
+	require.Equal(t, "failed", payload["status"])
+
+	var stored model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", "task_live_endpoint_changed").First(&stored).Error)
+	require.Equal(t, string(model.TaskStatusFailure), string(stored.Status))
+	require.Contains(t, stored.FailReason, "provider endpoint")
+	var outboxCount int64
+	require.NoError(t, model.DB.Model(&model.TaskBillingOutbox{}).
+		Where("task_id = ? AND operation = ?", "task_live_endpoint_changed", model.TaskBillingOutboxOperationTerminalRefund).
+		Count(&outboxCount).Error)
+	require.Equal(t, int64(1), outboxCount)
+}
+
+func TestCreativeImageTaskFetchFailClosesMissingLiveAffinityAndRefundsOnce(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}, &model.TaskBillingOutbox{}, &model.Log{}, &model.UserSubscription{}))
+	seedCreativeControllerUser(t, 815)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "false",
+	})
+	task := creativeLiveImageTaskForTest("task_live_missing_affinity", 815, 8151, model.TaskStatusInProgress)
+	task.PrivateData.IdempotencyKey = "missing-affinity-key"
+	task.PrivateData.Key = ""
+	task.PrivateData.UpstreamTaskID = ""
+	require.NoError(t, task.Insert())
+
+	router := newCreativeRelayBrokerTestRouter(t, 815, func(c *gin.Context) {
+		t.Fatal("live image task fetch must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	fetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_live_missing_affinity", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, fetch.Code)
+	payload := decodeCreativeResponse(t, fetch)
+	require.Equal(t, "failed", payload["status"])
+	require.NotContains(t, fetch.Body.String(), "channelId")
+	require.NotContains(t, fetch.Body.String(), "upstream")
+
+	var outboxCount int64
+	require.NoError(t, model.DB.Model(&model.TaskBillingOutbox{}).
+		Where("task_id = ? AND operation = ?", "task_live_missing_affinity", model.TaskBillingOutboxOperationTerminalRefund).
+		Count(&outboxCount).Error)
+	require.Equal(t, int64(1), outboxCount)
+	replayFetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_live_missing_affinity", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, replayFetch.Code)
+	require.NoError(t, model.DB.Model(&model.TaskBillingOutbox{}).
+		Where("task_id = ? AND operation = ?", "task_live_missing_affinity", model.TaskBillingOutboxOperationTerminalRefund).
+		Count(&outboxCount).Error)
+	require.Equal(t, int64(1), outboxCount)
+}
+
+func TestCreativeImageTaskFetchFailClosesTerminalProviderResultWithoutURL(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}, &model.TaskBillingOutbox{}, &model.Log{}, &model.UserSubscription{}))
+	seedCreativeControllerUser(t, 819)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "false",
+	})
+	providerHits := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"upstream-missing-result","state":"succeeded","data":{"images":[]}}`))
+	}))
+	t.Cleanup(provider.Close)
+	channelID := 8191
+	endpoint := provider.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "fresh-key-must-not-be-used",
+		BaseURL: &endpoint,
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative live malformed poll channel",
+	}).Error)
+	task := creativeLiveImageTaskForTest("task_live_missing_result", 819, channelID, model.TaskStatusInProgress)
+	task.PrivateData.Key = "selected-live-key"
+	task.PrivateData.UpstreamTaskID = "upstream-missing-result"
+	task.PrivateData.ProviderEndpoint = endpoint
+	require.NoError(t, task.Insert())
+
+	router := newCreativeRelayBrokerTestRouter(t, 819, func(c *gin.Context) {
+		t.Fatal("live image task fetch must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	fetch := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_live_missing_result", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, fetch.Code)
+	require.Equal(t, 1, providerHits)
+	payload := decodeCreativeResponse(t, fetch)
+	require.Equal(t, "failed", payload["status"])
+	require.NotContains(t, fetch.Body.String(), "upstream-missing-result")
+
+	var outboxCount int64
+	require.NoError(t, model.DB.Model(&model.TaskBillingOutbox{}).
+		Where("task_id = ? AND operation = ?", "task_live_missing_result", model.TaskBillingOutboxOperationTerminalRefund).
+		Count(&outboxCount).Error)
+	require.Equal(t, int64(1), outboxCount)
+}
+
+func TestCreativeImageTaskReconcileReloadsWhenTerminalCASLoses(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}, &model.TaskBillingOutbox{}, &model.Log{}, &model.UserSubscription{}))
+	seedCreativeControllerUser(t, 820)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"upstream-cas-loser","state":"failed","message":"late failure"}`))
+	}))
+	t.Cleanup(provider.Close)
+	channelID := 8201
+	endpoint := provider.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "fresh-key",
+		BaseURL: &endpoint,
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative live cas channel",
+	}).Error)
+	stored := creativeLiveImageTaskForTest("task_live_cas_loser", 820, channelID, model.TaskStatusSuccess)
+	stored.Progress = "100%"
+	stored.PrivateData.ResultURL = "https://cdn.example/already-success.png"
+	require.NoError(t, stored.Insert())
+
+	stale := *stored
+	stale.Status = model.TaskStatusInProgress
+	stale.Progress = "0%"
+	stale.PrivateData.ResultURL = ""
+	stale.PrivateData.Key = "selected-live-key"
+	stale.PrivateData.UpstreamTaskID = "upstream-cas-loser"
+	stale.PrivateData.ProviderEndpoint = endpoint
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/creative/relay/v1/images/tasks/task_live_cas_loser", nil)
+	require.NoError(t, creativeReconcileLiveImageTask(ctx, &stale))
+	require.Equal(t, string(model.TaskStatusSuccess), string(stale.Status))
+	require.Equal(t, "https://cdn.example/already-success.png", stale.PrivateData.ResultURL)
+	var outboxCount int64
+	require.NoError(t, model.DB.Model(&model.TaskBillingOutbox{}).Where("task_id = ?", "task_live_cas_loser").Count(&outboxCount).Error)
+	require.Equal(t, int64(0), outboxCount)
+}
+
+func TestCreativeImageTaskContentProxiesLiveResultPrivately(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}, &model.TaskBillingOutbox{}))
+	seedCreativeControllerUser(t, 816)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "false",
+	})
+	fetchSetting := system_setting.GetFetchSetting()
+	previousSSRFProtection := fetchSetting.EnableSSRFProtection
+	fetchSetting.EnableSSRFProtection = false
+	t.Cleanup(func() { fetchSetting.EnableSSRFProtection = previousSSRFProtection })
+
+	providerHits := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerHits++
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("live-image-bytes"))
+	}))
+	t.Cleanup(provider.Close)
+
+	task := creativeLiveImageTaskForTest("task_live_content", 816, 8161, model.TaskStatusSuccess)
+	task.Progress = "100%"
+	task.PrivateData.ResultURL = provider.URL + "/result.png?signature=secret"
+	require.NoError(t, task.Insert())
+
+	router := newCreativeRelayBrokerTestRouter(t, 816, func(c *gin.Context) {
+		t.Fatal("live image task content must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	content := performCreativeSessionJSON(t, router, http.MethodGet, "/creative/relay/v1/images/tasks/task_live_content/content", nil, auth.cookies, map[string]string{"Origin": "http://example.com"})
+	require.Equal(t, http.StatusOK, content.Code)
+	require.Equal(t, "image/png", content.Header().Get("Content-Type"))
+	require.Equal(t, "private, no-store", content.Header().Get("Cache-Control"))
+	require.Equal(t, "live-image-bytes", content.Body.String())
+	require.Equal(t, 1, providerHits)
+}
+
+func creativeLiveImageTaskForTest(taskID string, userID int, channelID int, status model.TaskStatus) *model.Task {
+	now := common.GetTimestamp()
+	task := &model.Task{
+		TaskID:     taskID,
+		Platform:   constant.TaskPlatformCreativeImage,
+		UserId:     userID,
+		Group:      "default",
+		ChannelId:  channelID,
+		Quota:      0,
+		Action:     creativeImageTaskActionGenerate,
+		Status:     status,
+		Progress:   "0%",
+		SubmitTime: now,
+		StartTime:  now,
+		Properties: model.Properties{
+			Input:             "safe live prompt",
+			OriginModelName:   "duomi-gpt-image-2-price",
+			UpstreamModelName: "gpt-image-2",
+		},
+		PrivateData: model.TaskPrivateData{
+			Key:            "selected-live-key",
+			UpstreamTaskID: "upstream-task",
+			IdempotencyKey: "live-task-idempotency",
+			BillingContext: &model.TaskBillingContext{
+				OriginModelName:  "duomi-gpt-image-2-price",
+				PerCallBilling:   true,
+				PreConsumedQuota: 0,
+			},
+		},
+	}
+	if status == model.TaskStatusSuccess || status == model.TaskStatusFailure {
+		task.FinishTime = now
+	}
+	task.SetData(creativeImageTaskMetadata{
+		Version:           1,
+		CreativeManaged:   true,
+		BindingId:         "duomi:gpt-image-2:live",
+		ProviderModelId:   "gpt-image-2",
+		PriceModelId:      "duomi-gpt-image-2-price",
+		AdapterPreset:     service.CreativeImageAdapterPresetDuomiLive,
+		ParameterTemplate: "duomi_gpt_image",
+		ChannelId:         channelID,
+		UserParams:        map[string]any{"quality": "high", "size": "1024x1024"},
+	})
+	return task
 }
 
 func TestCreativeImageTaskRouteRejectsWhenMockPreviewDisabledByDefault(t *testing.T) {

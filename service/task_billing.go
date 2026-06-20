@@ -342,6 +342,9 @@ func taskBillingOutboxEffect(task *model.Task, outbox *model.TaskBillingOutbox) 
 		delta = outbox.ActualQuota - outbox.PreConsumedQuota
 		nextQuota = outbox.ActualQuota
 		shouldUpdateTaskQuota = outbox.ActualQuota > 0 && task.Quota != outbox.ActualQuota
+		if outbox.ActualQuota > 0 {
+			return delta, nextQuota, shouldUpdateTaskQuota, true, model.LogTypeConsume, outbox.ActualQuota
+		}
 		return delta, nextQuota, shouldUpdateTaskQuota, false, 0, 0
 	case model.TaskBillingOutboxOperationTerminalSettle:
 		if outbox.ActualQuota <= 0 {

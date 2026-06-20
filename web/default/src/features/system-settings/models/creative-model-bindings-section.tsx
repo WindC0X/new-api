@@ -718,7 +718,7 @@ function CreativeModelBindingsLoaded(props: {
         <AlertTitle>{t('Manifest-driven adapter safety')}</AlertTitle>
         <AlertDescription>
           {t(
-            'Adapter manifests come from the backend. Duomi and GrsAI live adapters are visible as future adapters but cannot be enabled until live transport, billing, polling, and parser checks are implemented. Validate and dry-run are nonce-protected and must report noProviderCall=true before save.'
+            'Adapter manifests come from the backend. Duomi and GrsAI live adapters are channel-backed and can be enabled only after backend validation passes for a locked channel, provider model, canary group, and safe parameter schema. Validate and dry-run are nonce-protected and must report noProviderCall=true before save.'
           )}
         </AlertDescription>
       </Alert>
@@ -767,7 +767,7 @@ function CreativeModelBindingsLoaded(props: {
             <div className='mb-1 font-medium'>{t('3. Validate and save')}</div>
             <p className='text-muted-foreground'>
               {t(
-                'Run backend validation and offline dry-run for the exact JSON draft before saving. Live Duomi/GrsAI calls remain blocked until the real adapter phase.'
+                'Run backend validation and offline dry-run for the exact JSON draft before saving. Dry-run previews request mapping only; real provider calls happen only from user task submit or an explicitly authorized live smoke.'
               )}
             </p>
           </div>
@@ -930,7 +930,7 @@ function CreativeModelBindingsLoaded(props: {
                 >
                   {manifest.label}
                   {manifest.status !== 'available'
-                    ? ` · ${t(manifest.status === 'future' ? 'Future' : 'Unavailable')}`
+                    ? ` · ${t('Unavailable')}`
                     : ''}
                 </NativeSelectOption>
               ))}

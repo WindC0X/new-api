@@ -620,7 +620,7 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	require.NotEmpty(t, state.Manifests)
 	require.NotEmpty(t, state.ParameterTemplates)
 
-	var sawMock, sawDuomiFuture, sawQualityLabel bool
+	var sawMock, sawDuomiLive, sawQualityLabel, sawNanoTemplate bool
 	for _, manifest := range state.Manifests {
 		require.NotContains(t, manifest.Description, "apiKey")
 		require.NotContains(t, manifest.Description, "baseUrl")
@@ -630,12 +630,16 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 			require.Equal(t, []string{"mock_gpt_image"}, manifest.AllowedTemplates)
 		}
 		if manifest.Id == "duomi_image_live" {
-			sawDuomiFuture = true
-			require.False(t, manifest.CanBeEnabled)
-			require.Equal(t, "future", manifest.Status)
+			sawDuomiLive = true
+			require.True(t, manifest.CanBeEnabled)
+			require.Equal(t, "available", manifest.Status)
+			require.Equal(t, "live", manifest.TransportMode)
 		}
 	}
 	for _, template := range state.ParameterTemplates {
+		if template.Id == "grsai_nano_banana" {
+			sawNanoTemplate = true
+		}
 		for _, item := range template.Schema {
 			if item.Id == "quality" && item.Label == "质量" {
 				sawQualityLabel = true
@@ -643,11 +647,12 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 		}
 	}
 	require.True(t, sawMock)
-	require.True(t, sawDuomiFuture)
+	require.True(t, sawDuomiLive)
 	require.True(t, sawQualityLabel)
+	require.True(t, sawNanoTemplate)
 }
 
-func TestValidateCreativeModelBindingsConfigRejectsEnabledDryRunAndFutureLive(t *testing.T) {
+func TestValidateCreativeModelBindingsConfigRejectsEnabledDryRunAndInvalidLive(t *testing.T) {
 	setupCreativeCapabilityServiceTestDB(t)
 
 	config := grsAIGPTImageDryRunConfigForTest()
@@ -662,7 +667,7 @@ func TestValidateCreativeModelBindingsConfigRejectsEnabledDryRunAndFutureLive(t 
 	config.Bindings[0].Enabled = false
 	err = ValidateCreativeModelBindingsConfig(config)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported")
+	require.Contains(t, err.Error(), "requires channelId")
 }
 
 func validCreativeModelBindingsConfigForTest() CreativeModelBindingsConfig {

@@ -310,36 +310,36 @@ func creativeAdapterManifestsRegistry() []CreativeAdapterManifest {
 		{
 			Id:                   "duomi_image_live",
 			Label:                "Duomi image live",
-			Description:          "Planned Duomi live image adapter. Visible for planning, blocked from save/enable until mapper, parser, billing, polling, and safety tests exist.",
+			Description:          "Duomi live async image adapter. Provider connection details stay in Channels; users only see this logical Creative binding.",
 			Modality:             "image",
 			ProviderFamily:       "duomi",
-			TransportMode:        "future_live",
-			Status:               "future",
+			TransportMode:        "live",
+			Status:               "available",
 			DefaultTemplate:      "duomi_gpt_image",
 			AllowedTemplates:     []string{"duomi_gpt_image"},
-			CanBeEnabled:         false,
+			CanBeEnabled:         true,
 			RequiresChannel:      true,
-			SupportsProviderCall: false,
+			SupportsProviderCall: true,
 			BindingIdPrefix:      "duomi",
 			BindingIdSuffix:      "live",
-			Notes:                []string{"Configure connection details in Channels.", "No real Duomi upstream calls are implemented in Phase A."},
+			Notes:                []string{"Configure keys, base URL, and model support in Channels.", "Live smoke is not part of normal dry-run validation."},
 		},
 		{
 			Id:                   "grsai_image_live",
 			Label:                "GrsAI image live",
-			Description:          "Planned GrsAI live image adapter. Visible for planning, blocked from save/enable until live transport and settlement tests exist.",
+			Description:          "GrsAI live async image adapter for GPT image and nano-banana model families.",
 			Modality:             "image",
 			ProviderFamily:       "grsai",
-			TransportMode:        "future_live",
-			Status:               "future",
+			TransportMode:        "live",
+			Status:               "available",
 			DefaultTemplate:      "grsai_gpt_image",
-			AllowedTemplates:     []string{"grsai_gpt_image"},
-			CanBeEnabled:         false,
+			AllowedTemplates:     []string{"grsai_gpt_image", "grsai_gpt_image_vip", "grsai_nano_banana"},
+			CanBeEnabled:         true,
 			RequiresChannel:      true,
-			SupportsProviderCall: false,
+			SupportsProviderCall: true,
 			BindingIdPrefix:      "grsai",
 			BindingIdSuffix:      "live",
-			Notes:                []string{"Configure connection details in Channels.", "No real GrsAI upstream calls are implemented in Phase A."},
+			Notes:                []string{"Configure keys, base URL, and model support in Channels.", "replyType is forced to async by the backend adapter."},
 		},
 	}
 }
@@ -383,20 +383,71 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 		{
 			Id:          "grsai_gpt_image",
 			Label:       "GrsAI GPT image",
-			Description: "Offline GrsAI GPT image fixture parameter schema.",
+			Description: "GrsAI GPT image async parameter schema.",
 			Modality:    "image",
 			Schema: []dto.CreativeParameterSchemaItem{
 				{
 					Id:           "aspectRatio",
 					Label:        "比例",
 					ShortLabel:   "比例",
-					Description:  "Offline GrsAI fixture request preview ratio.",
+					Description:  "GrsAI aspect ratio or documented pixel option.",
 					Type:         "enum",
 					DefaultValue: "1024x1024",
 					Options: []dto.CreativeParamOption{
 						{Value: "1024x1024", Label: "1:1"},
 						{Value: "16:9", Label: "16:9"},
 						{Value: "9:16", Label: "9:16"},
+						{Value: "4:3", Label: "4:3"},
+						{Value: "3:4", Label: "3:4"},
+					},
+					Order: 10,
+				},
+			},
+		},
+		{
+			Id:          "grsai_gpt_image_vip",
+			Label:       "GrsAI GPT image VIP",
+			Description: "GrsAI GPT image VIP async pixel-size parameter schema.",
+			Modality:    "image",
+			Schema: []dto.CreativeParameterSchemaItem{
+				{
+					Id:           "aspectRatio",
+					Label:        "尺寸",
+					ShortLabel:   "尺寸",
+					Description:  "GrsAI VIP pixel output size.",
+					Type:         "enum",
+					DefaultValue: "1K",
+					Options: []dto.CreativeParamOption{
+						{Value: "1K", Label: "1K"},
+						{Value: "2K", Label: "2K"},
+						{Value: "4K", Label: "4K"},
+					},
+					Order: 10,
+				},
+			},
+		},
+		{
+			Id:          "duomi_gpt_image",
+			Label:       "Duomi GPT image",
+			Description: "Duomi GPT image async parameter schema.",
+			Modality:    "image",
+			Schema: []dto.CreativeParameterSchemaItem{
+				{
+					Id:           "size",
+					Label:        "图片尺寸",
+					ShortLabel:   "尺寸",
+					Description:  "Image size or aspect ratio interpreted by the Duomi adapter.",
+					Type:         "enum",
+					DefaultValue: "1024x1024",
+					Options: []dto.CreativeParamOption{
+						{Value: "auto", Label: "Auto"},
+						{Value: "1024x1024", Label: "1:1"},
+						{Value: "16:9", Label: "16:9"},
+						{Value: "9:16", Label: "9:16"},
+						{Value: "4:3", Label: "4:3"},
+						{Value: "3:4", Label: "3:4"},
+						{Value: "3:2", Label: "3:2"},
+						{Value: "2:3", Label: "2:3"},
 					},
 					Order: 10,
 				},
@@ -404,11 +455,12 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 					Id:           "quality",
 					Label:        "质量",
 					ShortLabel:   "质量",
-					Description:  "Quality hint. Exact live mapping is adapter-owned.",
+					Description:  "Duomi quality parameter.",
 					Type:         "enum",
-					DefaultValue: "auto",
+					DefaultValue: "medium",
 					Options: []dto.CreativeParamOption{
-						{Value: "auto", Label: "Auto"},
+						{Value: "low", Label: "Low"},
+						{Value: "medium", Label: "Medium"},
 						{Value: "high", Label: "High"},
 					},
 					Order: 20,
@@ -416,37 +468,46 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 			},
 		},
 		{
-			Id:          "duomi_gpt_image",
-			Label:       "Duomi GPT image",
-			Description: "Future Duomi GPT image schema placeholder for admin planning. Live mapping is not implemented in Phase A.",
+			Id:          "grsai_nano_banana",
+			Label:       "GrsAI nano-banana",
+			Description: "GrsAI nano-banana async parameter schema.",
 			Modality:    "image",
 			Schema: []dto.CreativeParameterSchemaItem{
 				{
-					Id:           "size",
-					Label:        "图片尺寸",
-					ShortLabel:   "尺寸",
-					Description:  "Image size or aspect ratio interpreted by the future Duomi adapter.",
-					Type:         "enum",
-					DefaultValue: "1024x1024",
-					Options: []dto.CreativeParamOption{
-						{Value: "1024x1024", Label: "1:1"},
-						{Value: "16:9", Label: "16:9"},
-						{Value: "9:16", Label: "9:16"},
-					},
-					Order: 10,
-				},
-				{
-					Id:           "quality",
-					Label:        "质量",
-					ShortLabel:   "质量",
-					Description:  "Quality hint. Exact live mapping is adapter-owned.",
+					Id:           "aspectRatio",
+					Label:        "比例",
+					ShortLabel:   "比例",
+					Description:  "Nano-banana aspect ratio.",
 					Type:         "enum",
 					DefaultValue: "auto",
 					Options: []dto.CreativeParamOption{
 						{Value: "auto", Label: "Auto"},
-						{Value: "high", Label: "High"},
+						{Value: "1:1", Label: "1:1"},
+						{Value: "16:9", Label: "16:9"},
+						{Value: "9:16", Label: "9:16"},
+						{Value: "4:3", Label: "4:3"},
+						{Value: "3:4", Label: "3:4"},
+						{Value: "3:2", Label: "3:2"},
+						{Value: "2:3", Label: "2:3"},
+						{Value: "5:4", Label: "5:4"},
+						{Value: "4:5", Label: "4:5"},
+						{Value: "21:9", Label: "21:9"},
+						{Value: "1:4", Label: "1:4"},
+						{Value: "4:1", Label: "4:1"},
+						{Value: "1:8", Label: "1:8"},
+						{Value: "8:1", Label: "8:1"},
 					},
-					Order: 20,
+					Order: 10,
+				},
+				{
+					Id:           "imageSize",
+					Label:        "尺寸档位",
+					ShortLabel:   "尺寸",
+					Description:  "Nano-banana image size tier.",
+					Type:         "enum",
+					DefaultValue: "1K",
+					Options:      []dto.CreativeParamOption{{Value: "1K", Label: "1K"}},
+					Order:        20,
 				},
 			},
 		},
@@ -488,12 +549,11 @@ func creativeAdapterManifestCanBeSaved(manifest CreativeAdapterManifest) bool {
 	if manifest.Status != "available" {
 		return false
 	}
-	if manifest.SupportsProviderCall {
-		return false
-	}
 	switch manifest.TransportMode {
 	case "mock", "dry_run":
 		return true
+	case "live":
+		return CreativeImageLiveAdapterPreset(manifest.Id)
 	default:
 		return false
 	}
@@ -563,7 +623,7 @@ func GetCreativePreviewModelBindingsForGroup(userGroup string) []dto.CreativeMod
 }
 
 func GetStoredCreativeModelBindingsCatalogForGroup(userGroup string) []dto.CreativeModelCatalogItem {
-	if !creativeAdapterPreviewEnabled() || !creativeMockImageTasksEnabled() {
+	if !creativeAdapterPreviewEnabled() {
 		return nil
 	}
 	config, err := GetStoredCreativeModelBindingsConfig()
@@ -576,7 +636,15 @@ func GetStoredCreativeModelBindingsCatalogForGroup(userGroup string) []dto.Creat
 		if !binding.Enabled || binding.Modality != "image" || !creativeBindingCanaryGroupAllowed(binding, userGroup) {
 			continue
 		}
-		if binding.AdapterPreset != "mock_image_task" || binding.ParameterTemplate != "mock_gpt_image" {
+		if binding.AdapterPreset == CreativeImageAdapterPresetMock {
+			if !creativeMockImageTasksEnabled() || binding.ParameterTemplate != "mock_gpt_image" {
+				continue
+			}
+		} else if CreativeImageLiveAdapterPreset(binding.AdapterPreset) {
+			if binding.ChannelId == nil || !creativeLiveBindingChannelReady(binding) {
+				continue
+			}
+		} else {
 			continue
 		}
 		if err := ValidateCreativeParameterSchema(binding.ParameterSchema); err != nil {
@@ -622,7 +690,7 @@ func ParseCreativeModelBindingsConfig(raw string) (CreativeModelBindingsConfig, 
 	if config.Bindings == nil {
 		config.Bindings = []CreativeModelBindingConfig{}
 	}
-	config, err := NormalizeCreativeModelBindingsConfig(config)
+	config, err := normalizeCreativeModelBindingsConfigForStoredRead(config)
 	if err != nil {
 		return CreativeModelBindingsConfig{}, err
 	}
@@ -634,15 +702,15 @@ func GetStoredCreativeModelBindingsConfig() (CreativeModelBindingsConfig, error)
 }
 
 func BuildCreativeModelBindingsAdminState(config CreativeModelBindingsConfig) (CreativeModelBindingsAdminState, error) {
-	normalized, err := NormalizeCreativeModelBindingsConfig(config)
+	normalized, err := normalizeCreativeModelBindingsConfigForStoredRead(config)
 	if err != nil {
 		return CreativeModelBindingsAdminState{}, err
 	}
-	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	bytes, err := common.Marshal(normalized)
 	if err != nil {
 		return CreativeModelBindingsAdminState{}, err
 	}
-	return CreativeModelBindingsAdminState{Config: normalized, ConfigJSON: configJSON}, nil
+	return CreativeModelBindingsAdminState{Config: normalized, ConfigJSON: string(bytes)}, nil
 }
 
 func GetCreativeModelBindingsAdminState() (CreativeModelBindingsAdminState, error) {
@@ -743,9 +811,6 @@ func ResolveCreativeImageModelBindingForGroup(bindingID string, userGroup string
 	if !creativeAdapterPreviewEnabled() {
 		return CreativeResolvedModelBinding{}, errors.New("creative adapter is disabled")
 	}
-	if !creativeMockImageTasksEnabled() {
-		return CreativeResolvedModelBinding{}, errors.New("creative mock image task route is disabled")
-	}
 	bindingID = strings.TrimSpace(bindingID)
 	if bindingID == "" {
 		return CreativeResolvedModelBinding{}, errors.New("creative image model is required")
@@ -769,8 +834,22 @@ func ResolveCreativeImageModelBindingForGroup(bindingID string, userGroup string
 		if binding.Modality != "image" {
 			return CreativeResolvedModelBinding{}, fmt.Errorf("creative binding %q is not an image binding", bindingID)
 		}
-		if binding.AdapterPreset != "mock_image_task" || binding.ParameterTemplate != "mock_gpt_image" {
-			return CreativeResolvedModelBinding{}, fmt.Errorf("creative binding %q is not available for mock image tasks", bindingID)
+		if binding.AdapterPreset == CreativeImageAdapterPresetMock {
+			if !creativeMockImageTasksEnabled() {
+				return CreativeResolvedModelBinding{}, errors.New("creative mock image task route is disabled")
+			}
+			if binding.ParameterTemplate != "mock_gpt_image" {
+				return CreativeResolvedModelBinding{}, fmt.Errorf("creative binding %q is not available for mock image tasks", bindingID)
+			}
+		} else if CreativeImageLiveAdapterPreset(binding.AdapterPreset) {
+			if binding.ChannelId == nil {
+				return CreativeResolvedModelBinding{}, fmt.Errorf("creative image binding %q requires a locked channel", bindingID)
+			}
+			if !creativeLiveBindingChannelReady(binding) {
+				return CreativeResolvedModelBinding{}, fmt.Errorf("creative image binding %q channel is not available", bindingID)
+			}
+		} else {
+			return CreativeResolvedModelBinding{}, fmt.Errorf("creative binding %q adapter preset is not executable", bindingID)
 		}
 		if !creativeBindingCanaryGroupAllowed(binding, userGroup) {
 			return CreativeResolvedModelBinding{}, fmt.Errorf("creative image binding %q is not enabled for this group", bindingID)
@@ -801,6 +880,9 @@ func ResolveCreativeImageModelBindingForGroup(bindingID string, userGroup string
 }
 
 func resolveBuiltInCreativeImagePreviewBindingForGroup(binding dto.CreativeModelCatalogItem, userGroup string, userParams map[string]any) (CreativeResolvedModelBinding, error) {
+	if !creativeMockImageTasksEnabled() {
+		return CreativeResolvedModelBinding{}, errors.New("creative mock image task route is disabled")
+	}
 	if !creativeAdapterCanaryGroupAllowed(userGroup) {
 		return CreativeResolvedModelBinding{}, fmt.Errorf("creative image binding %q is not enabled for this group", binding.Id)
 	}
@@ -857,6 +939,15 @@ func creativeModelCatalogItemFromBinding(binding CreativeModelBindingConfig) dto
 	if displayName == "" {
 		displayName = binding.Id
 	}
+	tags := []string{"creative-adapter", binding.Modality}
+	if CreativeImageLiveAdapterPreset(binding.AdapterPreset) {
+		tags = append(tags, "live")
+		if manifest, ok := CreativeAdapterManifestByID(binding.AdapterPreset); ok && manifest.ProviderFamily != "" {
+			tags = append(tags, manifest.ProviderFamily)
+		}
+	} else if binding.AdapterPreset == CreativeImageAdapterPresetMock {
+		tags = append(tags, "mock")
+	}
 	return dto.CreativeModelCatalogItem{
 		Id:                     binding.Id,
 		Object:                 "model",
@@ -872,7 +963,7 @@ func creativeModelCatalogItemFromBinding(binding CreativeModelBindingConfig) dto
 		Type:                   binding.Modality,
 		Modality:               binding.Modality,
 		Vendor:                 "new-api-creative",
-		Tags:                   []string{"creative-adapter", "mock", binding.Modality},
+		Tags:                   tags,
 		RecommendedScore:       binding.RecommendedScore,
 		SortOrder:              binding.SortOrder,
 		ParameterSchema:        creativeVisibleParameterSchema(binding.ParameterSchema),
@@ -953,6 +1044,17 @@ func ValidateCreativeUserParamsForSchema(schema []dto.CreativeParameterSchemaIte
 }
 
 func NormalizeCreativeModelBindingsConfig(config CreativeModelBindingsConfig) (CreativeModelBindingsConfig, error) {
+	config, err := normalizeCreativeModelBindingsConfigForStoredRead(config)
+	if err != nil {
+		return CreativeModelBindingsConfig{}, err
+	}
+	if err := validateCreativeModelBindingsConfig(config, true); err != nil {
+		return CreativeModelBindingsConfig{}, err
+	}
+	return config, nil
+}
+
+func normalizeCreativeModelBindingsConfigForStoredRead(config CreativeModelBindingsConfig) (CreativeModelBindingsConfig, error) {
 	if config.Version == 0 {
 		config.Version = 1
 	}
@@ -983,7 +1085,7 @@ func NormalizeCreativeModelBindingsConfig(config CreativeModelBindingsConfig) (C
 			}
 		}
 	}
-	if err := ValidateCreativeModelBindingsConfig(config); err != nil {
+	if err := validateCreativeModelBindingsConfig(config, false); err != nil {
 		return CreativeModelBindingsConfig{}, err
 	}
 	return config, nil
@@ -1027,7 +1129,7 @@ func BuildCreativeModelBindingsDryRun(config CreativeModelBindingsConfig) (Creat
 	}
 	for _, binding := range config.Bindings {
 		if manifest, ok := CreativeAdapterManifestByID(binding.AdapterPreset); ok {
-			result.NoProviderCall = result.NoProviderCall && !manifest.SupportsProviderCall && creativeAdapterManifestCanBeSaved(manifest)
+			result.NoProviderCall = result.NoProviderCall && creativeAdapterManifestCanBeSaved(manifest)
 		} else {
 			result.NoProviderCall = false
 		}
@@ -1057,6 +1159,54 @@ func BuildCreativeModelBindingsDryRun(config CreativeModelBindingsConfig) (Creat
 }
 
 func creativeModelBindingDryRunRequestPreview(binding CreativeModelBindingConfig) map[string]any {
+	if binding.AdapterPreset == CreativeImageAdapterPresetDuomiLive && binding.ParameterTemplate == "duomi_gpt_image" {
+		return map[string]any{
+			"transport":         "live",
+			"adapterFamily":     "duomi",
+			"operation":         "image_generate_async_preview",
+			"offline":           true,
+			"model":             binding.ProviderModelId,
+			"priceModel":        binding.PriceModelId,
+			"parameterTemplate": binding.ParameterTemplate,
+			"requestBody": map[string]any{
+				"model":   binding.ProviderModelId,
+				"prompt":  "<user-prompt>",
+				"size":    creativeDryRunSchemaDefault(binding.ParameterSchema, "size", "1024x1024"),
+				"quality": creativeDryRunSchemaDefault(binding.ParameterSchema, "quality", "medium"),
+			},
+			"responseShape": map[string]any{
+				"id":    "<provider-task-id>",
+				"state": "running|succeeded|failed",
+				"data":  map[string]any{"images": []any{map[string]any{"url": "[REDACTED]"}}},
+			},
+		}
+	}
+	if binding.AdapterPreset == CreativeImageAdapterPresetGrsAILive {
+		requestBody := map[string]any{
+			"model":       binding.ProviderModelId,
+			"prompt":      "<user-prompt>",
+			"aspectRatio": creativeDryRunSchemaDefault(binding.ParameterSchema, "aspectRatio", "1024x1024"),
+			"replyType":   "async",
+		}
+		if binding.ParameterTemplate == "grsai_nano_banana" {
+			requestBody["imageSize"] = creativeDryRunSchemaDefault(binding.ParameterSchema, "imageSize", "1K")
+		}
+		return map[string]any{
+			"transport":         "live",
+			"adapterFamily":     "grsai",
+			"operation":         "image_generate_async_preview",
+			"offline":           true,
+			"model":             binding.ProviderModelId,
+			"priceModel":        binding.PriceModelId,
+			"parameterTemplate": binding.ParameterTemplate,
+			"requestBody":       requestBody,
+			"responseShape": map[string]any{
+				"id":      "<provider-task-id>",
+				"status":  "running|violation|succeeded|failed",
+				"results": []any{map[string]any{"url": "[REDACTED]"}},
+			},
+		}
+	}
 	if binding.AdapterPreset == "grsai_gpt_image_dryrun" && binding.ParameterTemplate == "grsai_gpt_image" {
 		return map[string]any{
 			"transport":         "fixture",
@@ -1382,7 +1532,108 @@ func creativeChannelModelMappingResolvesTo(modelID string, mapped map[string]str
 	}
 }
 
+func creativeLiveBindingChannelReady(binding CreativeModelBindingConfig) bool {
+	return creativeValidateLiveBindingChannel(binding) == nil
+}
+
+func creativeValidateLiveBindingChannel(binding CreativeModelBindingConfig) error {
+	id := strings.TrimSpace(binding.Id)
+	if binding.ChannelId == nil || *binding.ChannelId <= 0 {
+		return fmt.Errorf("binding %q adapterPreset %q requires channelId", id, binding.AdapterPreset)
+	}
+	channel, err := model.GetChannelById(*binding.ChannelId, true)
+	if err != nil {
+		return fmt.Errorf("binding %q channelId %d was not found", id, *binding.ChannelId)
+	}
+	if channel == nil {
+		return fmt.Errorf("binding %q channelId %d was not found", id, *binding.ChannelId)
+	}
+	if channel.Status != common.ChannelStatusEnabled {
+		return fmt.Errorf("binding %q channelId %d is disabled", id, *binding.ChannelId)
+	}
+	if !creativeChannelSupportsProviderModel(channel, binding.ProviderModelId) {
+		return fmt.Errorf("binding %q channelId %d does not support providerModelId %q", id, *binding.ChannelId, binding.ProviderModelId)
+	}
+	if channel.BaseURL == nil || strings.TrimSpace(*channel.BaseURL) == "" {
+		return fmt.Errorf("binding %q channelId %d requires explicit baseURL for live adapter", id, *binding.ChannelId)
+	}
+	if !creativeChannelHasAvailableKey(channel) {
+		return fmt.Errorf("binding %q channelId %d requires an available channel key for live adapter", id, *binding.ChannelId)
+	}
+	return nil
+}
+
+func creativeChannelHasAvailableKey(channel *model.Channel) bool {
+	if channel == nil {
+		return false
+	}
+	if !channel.ChannelInfo.IsMultiKey {
+		return strings.TrimSpace(channel.Key) != ""
+	}
+	keys := channel.GetKeys()
+	if len(keys) == 0 {
+		return false
+	}
+	for index, key := range keys {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		status := common.ChannelStatusEnabled
+		if channel.ChannelInfo.MultiKeyStatusList != nil {
+			if configuredStatus, ok := channel.ChannelInfo.MultiKeyStatusList[index]; ok {
+				status = configuredStatus
+			}
+		}
+		if status == common.ChannelStatusEnabled {
+			return true
+		}
+	}
+	return false
+}
+
+func creativeProviderModelAllowedForTemplate(preset string, template string, providerModelID string) bool {
+	providerModelID = strings.TrimSpace(providerModelID)
+	switch preset {
+	case CreativeImageAdapterPresetDuomiLive:
+		return template == "duomi_gpt_image" && providerModelID == "gpt-image-2"
+	case CreativeImageAdapterPresetGrsAILive:
+		switch template {
+		case "grsai_gpt_image":
+			return providerModelID == "gpt-image-2"
+		case "grsai_gpt_image_vip":
+			return providerModelID == "gpt-image-2-vip"
+		case "grsai_nano_banana":
+			return creativeGrsAINanoBananaProviderModel(providerModelID)
+		default:
+			return false
+		}
+	default:
+		return true
+	}
+}
+
+func creativeGrsAINanoBananaProviderModel(modelID string) bool {
+	switch strings.TrimSpace(modelID) {
+	case "nano-banana",
+		"nano-banana-fast",
+		"nano-banana-2",
+		"nano-banana-2-cl",
+		"nano-banana-2-4k-cl",
+		"nano-banana-pro",
+		"nano-banana-pro-cl",
+		"nano-banana-pro-vip",
+		"nano-banana-pro-4k-vip":
+		return true
+	default:
+		return false
+	}
+}
+
 func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) error {
+	return validateCreativeModelBindingsConfig(config, true)
+}
+
+func validateCreativeModelBindingsConfig(config CreativeModelBindingsConfig, validateRuntimeChannel bool) error {
 	if config.Version != 1 {
 		return fmt.Errorf("unsupported creative model bindings version %d", config.Version)
 	}
@@ -1458,10 +1709,23 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 		if !creativeAdapterPresetTemplateAllowed(preset, template) {
 			return fmt.Errorf("binding %q adapterPreset %q cannot use parameterTemplate %q", id, preset, template)
 		}
+		if !creativeProviderModelAllowedForTemplate(preset, template, binding.ProviderModelId) {
+			return fmt.Errorf("binding %q providerModelId %q is not supported by adapterPreset %q with parameterTemplate %q", id, binding.ProviderModelId, preset, template)
+		}
+		if err := creativeValidateAdapterParameterSchemaIDs(binding); err != nil {
+			return err
+		}
 		if binding.ChannelId != nil && *binding.ChannelId <= 0 {
 			return fmt.Errorf("binding %q channelId must be positive", id)
 		}
-		if binding.ChannelId != nil {
+		if manifest.TransportMode == "live" && manifest.RequiresChannel && binding.ChannelId == nil {
+			return fmt.Errorf("binding %q adapterPreset %q requires channelId", id, preset)
+		}
+		if CreativeImageLiveAdapterPreset(preset) && validateRuntimeChannel {
+			if err := creativeValidateLiveBindingChannel(binding); err != nil {
+				return err
+			}
+		} else if binding.ChannelId != nil && validateRuntimeChannel {
 			channel, err := model.GetChannelById(*binding.ChannelId, false)
 			if err != nil {
 				return fmt.Errorf("binding %q channelId %d was not found", id, *binding.ChannelId)
@@ -1472,6 +1736,9 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 			if !creativeChannelSupportsProviderModel(channel, binding.ProviderModelId) {
 				return fmt.Errorf("binding %q channelId %d does not support providerModelId %q", id, *binding.ChannelId, binding.ProviderModelId)
 			}
+		}
+		if binding.Enabled && len(binding.CanaryGroups) == 0 {
+			return fmt.Errorf("binding %q must set canaryGroups before enabling", id)
 		}
 		for groupIndex, group := range binding.CanaryGroups {
 			trimmedGroup := strings.TrimSpace(group)
@@ -1493,6 +1760,74 @@ func ValidateCreativeModelBindingsConfig(config CreativeModelBindingsConfig) err
 		}
 	}
 	return nil
+}
+
+func creativeValidateAdapterParameterSchemaIDs(binding CreativeModelBindingConfig) error {
+	if !CreativeImageLiveAdapterPreset(binding.AdapterPreset) {
+		return nil
+	}
+	allowed := creativeAdapterSupportedParameterIDs(binding.AdapterPreset, binding.ParameterTemplate)
+	if len(allowed) == 0 {
+		return fmt.Errorf("binding %q adapterPreset %q with parameterTemplate %q has no supported parameter fields", binding.Id, binding.AdapterPreset, binding.ParameterTemplate)
+	}
+	if len(binding.ParameterSchema) == 0 {
+		return fmt.Errorf("binding %q live parameterSchema is required", binding.Id)
+	}
+	visibleFieldCount := 0
+	for _, item := range binding.ParameterSchema {
+		id := strings.TrimSpace(item.Id)
+		if id == "" {
+			continue
+		}
+		if _, ok := allowed[id]; !ok {
+			return fmt.Errorf("binding %q parameterSchema field %q is not supported by adapterPreset %q with parameterTemplate %q", binding.Id, id, binding.AdapterPreset, binding.ParameterTemplate)
+		}
+		if err := creativeValidateAdapterParameterSchemaValueSet(binding, item); err != nil {
+			return err
+		}
+		if !item.Hidden {
+			visibleFieldCount++
+		}
+	}
+	if visibleFieldCount == 0 {
+		return fmt.Errorf("binding %q live parameterSchema must expose at least one visible field", binding.Id)
+	}
+	return nil
+}
+
+func creativeValidateAdapterParameterSchemaValueSet(binding CreativeModelBindingConfig, item dto.CreativeParameterSchemaItem) error {
+	if strings.TrimSpace(binding.AdapterPreset) != CreativeImageAdapterPresetGrsAILive ||
+		strings.TrimSpace(binding.ParameterTemplate) != "grsai_gpt_image_vip" ||
+		strings.TrimSpace(item.Id) != "aspectRatio" {
+		return nil
+	}
+	allowedValues := map[string]struct{}{"1K": {}, "2K": {}, "4K": {}}
+	if item.DefaultValue != nil {
+		if _, ok := allowedValues[strings.TrimSpace(fmt.Sprint(item.DefaultValue))]; !ok {
+			return fmt.Errorf("binding %q parameterSchema field %q defaultValue is not supported by adapterPreset %q with parameterTemplate %q", binding.Id, item.Id, binding.AdapterPreset, binding.ParameterTemplate)
+		}
+	}
+	for _, option := range item.Options {
+		if _, ok := allowedValues[strings.TrimSpace(fmt.Sprint(option.Value))]; !ok {
+			return fmt.Errorf("binding %q parameterSchema field %q option %q is not supported by adapterPreset %q with parameterTemplate %q", binding.Id, item.Id, option.Value, binding.AdapterPreset, binding.ParameterTemplate)
+		}
+	}
+	return nil
+}
+
+func creativeAdapterSupportedParameterIDs(preset string, template string) map[string]struct{} {
+	switch strings.TrimSpace(preset) + "|" + strings.TrimSpace(template) {
+	case CreativeImageAdapterPresetDuomiLive + "|duomi_gpt_image":
+		return map[string]struct{}{"size": {}, "quality": {}}
+	case CreativeImageAdapterPresetGrsAILive + "|grsai_gpt_image":
+		return map[string]struct{}{"aspectRatio": {}}
+	case CreativeImageAdapterPresetGrsAILive + "|grsai_gpt_image_vip":
+		return map[string]struct{}{"aspectRatio": {}}
+	case CreativeImageAdapterPresetGrsAILive + "|grsai_nano_banana":
+		return map[string]struct{}{"aspectRatio": {}, "imageSize": {}}
+	default:
+		return nil
+	}
 }
 
 func creativeKnownCanaryGroup(group string) bool {

@@ -100,10 +100,11 @@ func (m Properties) Value() (driver.Value, error) {
 }
 
 type TaskPrivateData struct {
-	Key            string `json:"key,omitempty"`
-	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	ResultURL      string `json:"result_url,omitempty"` // 任务成功后的结果 URL（视频地址等）
+	Key              string `json:"key,omitempty"`
+	UpstreamTaskID   string `json:"upstream_task_id,omitempty"`  // 上游真实 task ID
+	ProviderEndpoint string `json:"provider_endpoint,omitempty"` // 提交时的 provider endpoint 快照，用于轮询亲和性校验
+	IdempotencyKey   string `json:"idempotency_key,omitempty"`
+	ResultURL        string `json:"result_url,omitempty"` // 任务成功后的结果 URL（视频地址等）
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -572,6 +573,10 @@ func (r *TaskBillingOutbox) BeforeUpdate(tx *gorm.DB) error {
 
 func EnqueueTaskBillingOutbox(task *Task, operation string, actualQuota int, preConsumedQuota int, reason string) (*TaskBillingOutbox, error) {
 	return enqueueTaskBillingOutbox(DB, task, operation, actualQuota, preConsumedQuota, reason)
+}
+
+func EnqueueTaskBillingOutboxTx(tx *gorm.DB, task *Task, operation string, actualQuota int, preConsumedQuota int, reason string) (*TaskBillingOutbox, error) {
+	return enqueueTaskBillingOutbox(tx, task, operation, actualQuota, preConsumedQuota, reason)
 }
 
 func enqueueTaskBillingOutbox(tx *gorm.DB, task *Task, operation string, actualQuota int, preConsumedQuota int, reason string) (*TaskBillingOutbox, error) {

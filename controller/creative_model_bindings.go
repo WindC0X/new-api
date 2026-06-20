@@ -81,6 +81,11 @@ func ValidateCreativeModelBindings(c *gin.Context) {
 	if !ok {
 		return
 	}
+	config, err := service.NormalizeCreativeModelBindingsConfig(config)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
 	state, err := service.BuildCreativeModelBindingsAdminState(config)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})

@@ -1239,6 +1239,11 @@ func copyHeaderInContext(context map[string]interface{}, fromHeader, toHeader st
 	if fromHeader == "" || toHeader == "" {
 		return fmt.Errorf("copy_header from/to is required")
 	}
+	connectionHeaderValues := requestConnectionHeaderValuesFromContext(context)
+	if ShouldSkipClientHeaderForUpstreamWithConnectionTokens(fromHeader, connectionHeaderValues...) ||
+		ShouldSkipClientHeaderForUpstreamWithConnectionTokens(toHeader, connectionHeaderValues...) {
+		return nil
+	}
 	value, exists := getHeaderValueFromContext(context, fromHeader)
 	if !exists {
 		return fmt.Errorf("%w: %s", errSourceHeaderNotFound, fromHeader)
@@ -1251,6 +1256,11 @@ func moveHeaderInContext(context map[string]interface{}, fromHeader, toHeader st
 	toHeader = normalizeHeaderContextKey(toHeader)
 	if fromHeader == "" || toHeader == "" {
 		return fmt.Errorf("move_header from/to is required")
+	}
+	connectionHeaderValues := requestConnectionHeaderValuesFromContext(context)
+	if ShouldSkipClientHeaderForUpstreamWithConnectionTokens(fromHeader, connectionHeaderValues...) ||
+		ShouldSkipClientHeaderForUpstreamWithConnectionTokens(toHeader, connectionHeaderValues...) {
+		return nil
 	}
 	if err := copyHeaderInContext(context, fromHeader, toHeader, keepOrigin); err != nil {
 		return err
@@ -1271,24 +1281,124 @@ func deleteHeaderOverrideInContext(context map[string]interface{}, headerName st
 	return nil
 }
 
-func shouldSkipPassThroughHeaderName(name string) bool {
+// ShouldSkipClientHeaderForUpstream returns true for browser/session/control
+// headers that must never be copied from an incoming Creative/client request to
+// an upstream provider. It is shared by wildcard/pass-through header handling
+// and param-override copy/move header operations so those paths cannot drift.
+func ShouldSkipClientHeaderForUpstream(name string) bool {
 	normalized := normalizeHeaderContextKey(name)
 	if normalized == "" {
 		return true
 	}
-	switch normalized {
-	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
-		"te", "trailer", "transfer-encoding", "upgrade",
-		"cookie", "set-cookie", "host", "content-length", "accept-encoding",
-		"authorization", "x-api-key", "x-goog-api-key", "x-selected-key", "x-upstream-key":
+	compact := compactHeaderSafetyKey(normalized)
+	switch compact {
+	case "connection", "keepalive", "proxyauthenticate", "proxyauthorization",
+		"proxyconnection", "te", "trailer", "transferencoding", "upgrade",
+		"cookie", "setcookie", "host", "contentlength", "acceptencoding",
+		"authorization", "xapikey", "xgoogapikey",
+		"selectedkey", "xselectedkey", "upstreamkey", "xupstreamkey",
+		"requestkey", "xrequestkey", "reqkey", "xreqkey",
+		"secwebsocketkey", "secwebsocketversion", "secwebsocketextensions", "secwebsocketprotocol":
 		return true
 	default:
-		return strings.HasPrefix(normalized, "x-creative") ||
-			strings.Contains(normalized, "api-key") ||
-			strings.Contains(normalized, "apikey") ||
-			strings.Contains(normalized, "api-secret") ||
-			strings.Contains(normalized, "apisecret")
+		return strings.HasPrefix(compact, "xcreative") ||
+			strings.HasPrefix(compact, "notify") ||
+			strings.Contains(compact, "notification") ||
+			strings.Contains(compact, "callback") ||
+			strings.Contains(compact, "webhook") ||
+			strings.Contains(compact, "selectedkey") ||
+			strings.Contains(compact, "upstreamkey") ||
+			strings.Contains(compact, "requestkey") ||
+			strings.HasPrefix(compact, "owner") ||
+			strings.HasPrefix(compact, "xowner") ||
+			strings.HasPrefix(compact, "useroverride") ||
+			strings.HasPrefix(compact, "xuseroverride") ||
+			strings.Contains(compact, "apikey") ||
+			strings.Contains(compact, "apisecret") ||
+			strings.Contains(compact, "secret")
 	}
+}
+
+func ShouldSkipClientHeaderForUpstreamWithConnectionTokens(name string, connectionHeaderValues ...string) bool {
+	if ShouldSkipClientHeaderForUpstream(name) {
+		return true
+	}
+	target := compactHeaderSafetyKey(name)
+	if target == "" {
+		return true
+	}
+	for _, raw := range connectionHeaderValues {
+		for _, token := range splitHeaderListValue(raw) {
+			if compactHeaderSafetyKey(token) == target {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func compactHeaderSafetyKey(key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(key))
+	for _, r := range key {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func shouldSkipPassThroughHeaderName(name string) bool {
+	return ShouldSkipClientHeaderForUpstream(name)
+}
+
+func requestConnectionHeaderValuesFromContext(context map[string]interface{}) []string {
+	if context == nil {
+		return nil
+	}
+	rawHeaders, ok := context[paramOverrideContextRequestHeaders]
+	if !ok {
+		return nil
+	}
+	headers, ok := rawHeaders.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	values := make([]string, 0, 1)
+	for key, rawValue := range headers {
+		if normalizeHeaderContextKey(key) != "connection" {
+			continue
+		}
+		switch value := rawValue.(type) {
+		case string:
+			if strings.TrimSpace(value) != "" {
+				values = append(values, value)
+			}
+		case []string:
+			for _, item := range value {
+				if strings.TrimSpace(item) != "" {
+					values = append(values, item)
+				}
+			}
+		case []interface{}:
+			for _, item := range value {
+				stringValue := strings.TrimSpace(fmt.Sprintf("%v", item))
+				if stringValue != "" {
+					values = append(values, stringValue)
+				}
+			}
+		default:
+			stringValue := strings.TrimSpace(fmt.Sprintf("%v", rawValue))
+			if stringValue != "" {
+				values = append(values, stringValue)
+			}
+		}
+	}
+	return values
 }
 
 func parseHeaderPassThroughNames(value interface{}) ([]string, error) {

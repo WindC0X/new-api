@@ -38,6 +38,32 @@ func redactURLForLog(raw string) string {
 	return parsed.Scheme + "://" + parsed.Host + "/[redacted]"
 }
 
+func creativeVideoContentPlatformAllowed(platform constant.TaskPlatform) bool {
+	normalized := strings.ToLower(strings.TrimSpace(string(platform)))
+	if normalized == "" {
+		return false
+	}
+	switch normalized {
+	case "openai", "sora", "gemini", "vertex", "vertexai", "vertex-ai",
+		"ali", "alibaba", "kling", "jimeng", "vidu", "doubao",
+		"volcengine", "volc-engine", "minimax", "hailuo",
+		fmt.Sprintf("%d", constant.ChannelTypeOpenAI),
+		fmt.Sprintf("%d", constant.ChannelTypeSora),
+		fmt.Sprintf("%d", constant.ChannelTypeGemini),
+		fmt.Sprintf("%d", constant.ChannelTypeVertexAi),
+		fmt.Sprintf("%d", constant.ChannelTypeAli),
+		fmt.Sprintf("%d", constant.ChannelTypeKling),
+		fmt.Sprintf("%d", constant.ChannelTypeJimeng),
+		fmt.Sprintf("%d", constant.ChannelTypeVidu),
+		fmt.Sprintf("%d", constant.ChannelTypeDoubaoVideo),
+		fmt.Sprintf("%d", constant.ChannelTypeVolcEngine),
+		fmt.Sprintf("%d", constant.ChannelTypeMiniMax):
+		return true
+	default:
+		return false
+	}
+}
+
 func VideoProxy(c *gin.Context) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
@@ -60,6 +86,11 @@ func VideoProxy(c *gin.Context) {
 	if task.Status != model.TaskStatusSuccess {
 		videoProxyError(c, http.StatusBadRequest, "invalid_request_error",
 			fmt.Sprintf("Task is not completed yet, current status: %s", task.Status))
+		return
+	}
+
+	if c.GetBool(creativeVideoContentContextKey) && !creativeVideoContentPlatformAllowed(task.Platform) {
+		videoProxyError(c, http.StatusNotFound, "invalid_request_error", "Task not found")
 		return
 	}
 

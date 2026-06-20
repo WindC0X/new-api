@@ -3,6 +3,8 @@ package common
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 
@@ -11,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 )
@@ -1321,14 +1324,14 @@ func TestApplyParamOverrideSetHeaderAndUseInLaterCondition(t *testing.T) {
 	assertJSONEqual(t, `{"temperature":0.1}`, string(out))
 }
 
-func TestApplyParamOverrideCopyHeaderFromRequestHeaders(t *testing.T) {
+func TestApplyParamOverrideCopySafeHeaderFromRequestHeaders(t *testing.T) {
 	input := []byte(`{"temperature":0.7}`)
 	override := map[string]interface{}{
 		"operations": []interface{}{
 			map[string]interface{}{
 				"mode": "copy_header",
-				"from": "Authorization",
-				"to":   "X-Upstream-Auth",
+				"from": "X-Trace-Id",
+				"to":   "X-Upstream-Trace",
 			},
 			map[string]interface{}{
 				"path":  "temperature",
@@ -1336,9 +1339,9 @@ func TestApplyParamOverrideCopyHeaderFromRequestHeaders(t *testing.T) {
 				"value": 0.1,
 				"conditions": []interface{}{
 					map[string]interface{}{
-						"path":  "header_override.x-upstream-auth",
-						"mode":  "contains",
-						"value": "Bearer ",
+						"path":  "header_override.x-upstream-trace",
+						"mode":  "full",
+						"value": "trace-123",
 					},
 				},
 			},
@@ -1346,7 +1349,7 @@ func TestApplyParamOverrideCopyHeaderFromRequestHeaders(t *testing.T) {
 	}
 	ctx := map[string]interface{}{
 		"request_headers": map[string]interface{}{
-			"authorization": "Bearer token-123",
+			"x-trace-id": "trace-123",
 		},
 	}
 
@@ -1428,6 +1431,363 @@ func TestApplyParamOverridePassHeadersSkipsSensitiveBrowserHeaders(t *testing.T)
 		if _, exists := headers[forbidden]; exists {
 			t.Fatalf("expected sensitive header %s to be skipped", forbidden)
 		}
+	}
+}
+
+func TestApplyParamOverridePassHeadersSkipsProxyConnectionAndConnectionTokens(t *testing.T) {
+	input := []byte(`{"temperature":0.7}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{
+				"mode":  "pass_headers",
+				"value": []interface{}{"X-Trace-Id", "X-Debug-Hop", "Proxy-Connection", "X-Safe"},
+			},
+		},
+	}
+	ctx := map[string]interface{}{
+		"request_headers": map[string]interface{}{
+			"connection":       "X-Trace-Id, X-Debug-Hop",
+			"x-trace-id":       "trace-hop",
+			"x-debug-hop":      "debug-hop",
+			"proxy-connection": "keep-alive",
+			"x-safe":           "safe-123",
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, ctx)
+	if err != nil {
+		t.Fatalf("ApplyParamOverride returned error: %v", err)
+	}
+	assertJSONEqual(t, `{"temperature":0.7}`, string(out))
+
+	headers, ok := ctx["header_override"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected header_override context map")
+	}
+	if headers["x-safe"] != "safe-123" {
+		t.Fatalf("expected safe header to be passed, got: %v", headers["x-safe"])
+	}
+	for _, forbidden := range []string{"x-trace-id", "x-debug-hop", "proxy-connection", "connection"} {
+		if _, exists := headers[forbidden]; exists {
+			t.Fatalf("expected hop-by-hop header %s to be skipped", forbidden)
+		}
+	}
+}
+
+func TestApplyParamOverrideCopyMoveHeaderSkipsSensitiveBrowserHeaders(t *testing.T) {
+	input := []byte(`{"temperature":0.7}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{"mode": "copy_header", "from": "Cookie", "to": "X-Upstream-Cookie"},
+			map[string]interface{}{"mode": "copy_header", "from": "Authorization", "to": "X-Upstream-Auth"},
+			map[string]interface{}{"mode": "copy_header", "from": "X-Creative-CSRF", "to": "X-Upstream-CSRF"},
+			map[string]interface{}{"mode": "move_header", "from": "X-Creative-Nonce", "to": "X-Upstream-Nonce"},
+			map[string]interface{}{"mode": "copy_header", "from": "X-Trace-Id", "to": "X-Upstream-Trace"},
+			map[string]interface{}{"mode": "move_header", "from": "X-Trace-Move", "to": "X-Upstream-Move"},
+			map[string]interface{}{"mode": "copy_header", "from": "X-Trace-Target-Auth", "to": "Authorization"},
+			map[string]interface{}{"mode": "move_header", "from": "X-Trace-Target-CSRF", "to": "X-Creative-CSRF"},
+		},
+	}
+	ctx := map[string]interface{}{
+		"request_headers": map[string]interface{}{
+			"cookie":              "session=leak",
+			"authorization":       "Bearer leak",
+			"x-creative-csrf":     "csrf-leak",
+			"x-creative-nonce":    "nonce-leak",
+			"x-trace-id":          "trace-123",
+			"x-trace-move":        "move-123",
+			"x-trace-target-auth": "auth-target-123",
+			"x-trace-target-csrf": "csrf-target-123",
+		},
+		"header_override": map[string]interface{}{
+			"x-trace-move":        "move-123",
+			"x-trace-target-csrf": "csrf-target-123",
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, ctx)
+	if err != nil {
+		t.Fatalf("ApplyParamOverride returned error: %v", err)
+	}
+	assertJSONEqual(t, `{"temperature":0.7}`, string(out))
+
+	headers, ok := ctx["header_override"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected header_override context map")
+	}
+	if headers["x-upstream-trace"] != "trace-123" {
+		t.Fatalf("expected safe copied header, got: %v", headers["x-upstream-trace"])
+	}
+	if headers["x-upstream-move"] != "move-123" {
+		t.Fatalf("expected safe moved header, got: %v", headers["x-upstream-move"])
+	}
+	if _, exists := headers["x-trace-move"]; exists {
+		t.Fatalf("expected safe moved source header override to be deleted")
+	}
+	for _, forbidden := range []string{"x-upstream-cookie", "x-upstream-auth", "x-upstream-csrf", "x-upstream-nonce", "authorization", "x-creative-csrf"} {
+		if _, exists := headers[forbidden]; exists {
+			t.Fatalf("expected sensitive copy/move header target %s to be skipped", forbidden)
+		}
+	}
+	if headers["x-trace-target-csrf"] != "csrf-target-123" {
+		t.Fatalf("expected skipped sensitive move target to preserve original source override")
+	}
+}
+
+func TestApplyParamOverrideCopyMoveHeaderSkipsProxyConnectionAndConnectionTokens(t *testing.T) {
+	input := []byte(`{"temperature":0.7}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{"mode": "copy_header", "from": "X-Trace-Id", "to": "X-Upstream-Trace"},
+			map[string]interface{}{"mode": "copy_header", "from": "X-Safe", "to": "X-Debug-Hop"},
+			map[string]interface{}{"mode": "copy_header", "from": "X-Safe", "to": "Proxy-Connection"},
+			map[string]interface{}{"mode": "copy_header", "from": "X-Safe", "to": "X-Upstream-Safe"},
+			map[string]interface{}{"mode": "move_header", "from": "X-Debug-Hop", "to": "X-Upstream-Hop"},
+		},
+	}
+	ctx := map[string]interface{}{
+		"request_headers": map[string]interface{}{
+			"connection":  "X-Trace-Id, X-Debug-Hop",
+			"x-trace-id":  "trace-hop",
+			"x-debug-hop": "debug-hop",
+			"x-safe":      "safe-123",
+		},
+		"header_override": map[string]interface{}{
+			"x-debug-hop": "existing-debug-hop",
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, ctx)
+	if err != nil {
+		t.Fatalf("ApplyParamOverride returned error: %v", err)
+	}
+	assertJSONEqual(t, `{"temperature":0.7}`, string(out))
+
+	headers, ok := ctx["header_override"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected header_override context map")
+	}
+	if headers["x-upstream-safe"] != "safe-123" {
+		t.Fatalf("expected safe copied header, got: %v", headers["x-upstream-safe"])
+	}
+	if headers["x-debug-hop"] != "existing-debug-hop" {
+		t.Fatalf("expected skipped dynamic move source to be preserved, got: %v", headers["x-debug-hop"])
+	}
+	for _, forbidden := range []string{"x-upstream-trace", "proxy-connection", "x-upstream-hop"} {
+		if _, exists := headers[forbidden]; exists {
+			t.Fatalf("expected hop-by-hop copy/move header %s to be skipped", forbidden)
+		}
+	}
+}
+
+func TestApplyParamOverrideWithRelayInfoSkipsMultiValueConnectionTokensFromClonedRequestHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request.Header.Add("Connection", "X-First-Hop")
+	ctx.Request.Header.Add("Connection", "X-Second-Hop")
+	ctx.Request.Header.Set("X-First-Hop", "first-hop")
+	ctx.Request.Header.Set("X-Second-Hop", "second-hop")
+	ctx.Request.Header.Set("X-Safe", "safe-123")
+
+	info := &RelayInfo{
+		RequestHeaders: cloneRequestHeaders(ctx),
+		ChannelMeta: &ChannelMeta{
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode":  "pass_headers",
+						"value": []interface{}{"X-First-Hop", "X-Second-Hop", "X-Safe"},
+					},
+					map[string]interface{}{"mode": "copy_header", "from": "X-First-Hop", "to": "X-Upstream-First"},
+					map[string]interface{}{"mode": "copy_header", "from": "X-Second-Hop", "to": "X-Upstream-Second"},
+					map[string]interface{}{"mode": "copy_header", "from": "X-Safe", "to": "X-Upstream-Safe"},
+					map[string]interface{}{"mode": "move_header", "from": "X-Second-Hop", "to": "X-Upstream-Moved-Second"},
+				},
+			},
+			HeadersOverride: map[string]interface{}{
+				"X-Second-Hop": "existing-second-hop",
+			},
+		},
+	}
+
+	_, err := ApplyParamOverrideWithRelayInfo([]byte(`{"temperature":0.7}`), info)
+	require.NoError(t, err)
+	require.Equal(t, "X-First-Hop, X-Second-Hop", info.RequestHeaders["Connection"])
+	require.True(t, info.UseRuntimeHeadersOverride)
+	require.Equal(t, "safe-123", info.RuntimeHeadersOverride["x-safe"])
+	require.Equal(t, "safe-123", info.RuntimeHeadersOverride["x-upstream-safe"])
+	require.Equal(t, "existing-second-hop", info.RuntimeHeadersOverride["x-second-hop"])
+	require.NotContains(t, info.RuntimeHeadersOverride, "x-first-hop")
+	require.NotContains(t, info.RuntimeHeadersOverride, "x-upstream-first")
+	require.NotContains(t, info.RuntimeHeadersOverride, "x-upstream-second")
+	require.NotContains(t, info.RuntimeHeadersOverride, "x-upstream-moved-second")
+}
+
+func TestShouldSkipClientHeaderForUpstreamSkipsWebSocketProtocol(t *testing.T) {
+	for _, name := range []string{
+		"Sec-WebSocket-Protocol",
+		"Sec_WebSocket_Protocol",
+		"Sec.WebSocket.Protocol",
+	} {
+		if !ShouldSkipClientHeaderForUpstream(name) {
+			t.Fatalf("expected %s to be skipped", name)
+		}
+	}
+}
+
+func TestShouldSkipClientHeaderForUpstreamSkipsSelectedAndRequestKeyVariants(t *testing.T) {
+	for _, name := range []string{
+		"Selected-Key",
+		"X-Selected-Key",
+		"Selected-Key-Override",
+		"X-Selected-Key-Override",
+		"Upstream-Key",
+		"X-Upstream-Key",
+		"Upstream-Key-Override",
+		"Request-Key",
+		"X-Request-Key",
+		"Request-Key-Override",
+		"Req-Key",
+		"X-Req-Key",
+		"selected_key",
+		"x.request.key",
+		"Notify-Hook",
+		"Notification-Url",
+		"Notify.Endpoint",
+		"Callback-Url",
+		"Webhook-Url",
+		"Owner-Override",
+		"X-Owner-Id",
+		"User-Override",
+	} {
+		if !ShouldSkipClientHeaderForUpstream(name) {
+			t.Fatalf("expected %s to be skipped", name)
+		}
+	}
+}
+
+func TestApplyParamOverrideHeaderSafetySkipsSeparatorVariantsAndWebSocket(t *testing.T) {
+	input := []byte(`{"temperature":0.7}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{
+				"mode": "pass_headers",
+				"value": []interface{}{
+					"X-Trace-Id",
+					"X_API_Key",
+					"Api.Secret",
+					"X_Creative_CSRF",
+					"X Api Key",
+					"Api Secret",
+					"X Creative CSRF",
+					"Sec-WebSocket-Key",
+					"Sec_WebSocket_Version",
+					"Sec.WebSocket.Extensions",
+					"Sec-WebSocket-Protocol",
+				},
+			},
+			map[string]interface{}{"mode": "copy_header", "from": "X_API_Key", "to": "X-Upstream-Api-Key"},
+			map[string]interface{}{"mode": "copy_header", "from": "Api.Secret", "to": "X-Upstream-Secret"},
+			map[string]interface{}{"mode": "move_header", "from": "X_Creative_CSRF", "to": "X-Upstream-CSRF"},
+			map[string]interface{}{"mode": "copy_header", "from": "X Api Key", "to": "X-Upstream-Api-Key-Space"},
+			map[string]interface{}{"mode": "copy_header", "from": "Api Secret", "to": "X-Upstream-Secret-Space"},
+			map[string]interface{}{"mode": "move_header", "from": "X Creative CSRF", "to": "X-Upstream-CSRF-Space"},
+			map[string]interface{}{"mode": "copy_header", "from": "Sec-WebSocket-Key", "to": "X-Upstream-WebSocket-Key"},
+			map[string]interface{}{"mode": "copy_header", "from": "Sec-WebSocket-Protocol", "to": "X-Upstream-WebSocket-Protocol"},
+			map[string]interface{}{"mode": "copy_header", "from": "X-Trace-Id", "to": "X-Upstream-Trace"},
+		},
+	}
+	ctx := map[string]interface{}{
+		"request_headers": map[string]interface{}{
+			"x-trace-id":               "trace-123",
+			"x_api_key":                "api-key-leak",
+			"api.secret":               "api-secret-leak",
+			"x_creative_csrf":          "csrf-leak",
+			"x api key":                "api-key-space-leak",
+			"api secret":               "api-secret-space-leak",
+			"x creative csrf":          "csrf-space-leak",
+			"sec-websocket-key":        "ws-key-leak",
+			"sec_websocket_version":    "13",
+			"sec.websocket.extensions": "permessage-deflate",
+			"sec-websocket-protocol":   "realtime,openai-insecure-api-key.leak",
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, ctx)
+	if err != nil {
+		t.Fatalf("ApplyParamOverride returned error: %v", err)
+	}
+	assertJSONEqual(t, `{"temperature":0.7}`, string(out))
+
+	headers, ok := ctx["header_override"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected header_override context map")
+	}
+	if headers["x-trace-id"] != "trace-123" {
+		t.Fatalf("expected safe pass_headers header, got: %v", headers["x-trace-id"])
+	}
+	if headers["x-upstream-trace"] != "trace-123" {
+		t.Fatalf("expected safe copied header, got: %v", headers["x-upstream-trace"])
+	}
+	for _, forbidden := range []string{
+		"x_api_key",
+		"api.secret",
+		"x_creative_csrf",
+		"x api key",
+		"api secret",
+		"x creative csrf",
+		"sec-websocket-key",
+		"sec_websocket_version",
+		"sec.websocket.extensions",
+		"sec-websocket-protocol",
+		"x-upstream-api-key",
+		"x-upstream-secret",
+		"x-upstream-csrf",
+		"x-upstream-api-key-space",
+		"x-upstream-secret-space",
+		"x-upstream-csrf-space",
+		"x-upstream-websocket-key",
+		"x-upstream-websocket-protocol",
+	} {
+		if _, exists := headers[forbidden]; exists {
+			t.Fatalf("expected sensitive/header-control variant %s to be skipped", forbidden)
+		}
+	}
+}
+
+func TestApplyParamOverrideMoveHeaderSkipsSensitiveSourceAndPreservesExistingSourceOverride(t *testing.T) {
+	input := []byte(`{"temperature":0.7}`)
+	override := map[string]interface{}{
+		"operations": []interface{}{
+			map[string]interface{}{"mode": "move_header", "from": "X Creative CSRF", "to": "X-Upstream-CSRF"},
+		},
+	}
+	ctx := map[string]interface{}{
+		"request_headers": map[string]interface{}{
+			"x creative csrf": "csrf-space-leak",
+		},
+		"header_override": map[string]interface{}{
+			"x creative csrf": "existing-csrf-override",
+		},
+	}
+
+	out, err := ApplyParamOverride(input, override, ctx)
+	if err != nil {
+		t.Fatalf("ApplyParamOverride returned error: %v", err)
+	}
+	assertJSONEqual(t, `{"temperature":0.7}`, string(out))
+
+	headers, ok := ctx["header_override"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected header_override context map")
+	}
+	if headers["x creative csrf"] != "existing-csrf-override" {
+		t.Fatalf("expected skipped sensitive source move_header to preserve original source override, got: %v", headers["x creative csrf"])
+	}
+	if _, exists := headers["x-upstream-csrf"]; exists {
+		t.Fatalf("expected sensitive source move_header to skip target override")
 	}
 }
 

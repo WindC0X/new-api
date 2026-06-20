@@ -35,6 +35,25 @@ func TestTaskSubmitNonOKResponseErrorClosesBody(t *testing.T) {
 	require.True(t, body.closed, "non-200 task submit response body must be closed")
 }
 
+func TestTaskSubmitNonOKResponseErrorDoesNotExposeRawUpstreamBody(t *testing.T) {
+	body := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"provider rejected","api_key":"sk-leak","callback":"https://evil.example/hook","url":"https://signed.example/private?token=secret"}`)}
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       body,
+	}
+
+	taskErr := taskSubmitNonOKResponseError(resp)
+
+	require.NotNil(t, taskErr)
+	require.Equal(t, "fail_to_fetch_task", taskErr.Code)
+	require.NotContains(t, taskErr.Message, "sk-leak")
+	require.NotContains(t, taskErr.Message, "callback")
+	require.NotContains(t, taskErr.Message, "signed.example")
+	require.NotContains(t, taskErr.Message, "provider rejected")
+	require.NotContains(t, taskErr.Message, "secret")
+	require.True(t, body.closed, "non-200 task submit response body must still be closed")
+}
+
 func TestRealtimeFetchKeyAndTaskIDCreativeMissingStoredKeyFailsClosed(t *testing.T) {
 	task := &model.Task{
 		TaskID: "task_public_realtime",

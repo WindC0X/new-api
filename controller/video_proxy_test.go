@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -65,4 +66,14 @@ func TestGetVertexTaskKeyLegacyCanFallbackToChannelKey(t *testing.T) {
 	key := getVertexTaskKey(channel, task)
 
 	require.Equal(t, "sk-current-channel-key", key)
+}
+
+func TestCreativeVideoContentPlatformAllowedFailClosed(t *testing.T) {
+	require.True(t, creativeVideoContentPlatformAllowed(constant.TaskPlatform("openai")))
+	require.True(t, creativeVideoContentPlatformAllowed(constant.TaskPlatform("55")))
+	require.True(t, creativeVideoContentPlatformAllowed(constant.TaskPlatform("Gemini")))
+	require.False(t, creativeVideoContentPlatformAllowed(constant.TaskPlatformCreativeImage))
+	require.False(t, creativeVideoContentPlatformAllowed(constant.TaskPlatformSuno))
+	require.False(t, creativeVideoContentPlatformAllowed(constant.TaskPlatformMidjourney))
+	require.False(t, creativeVideoContentPlatformAllowed(constant.TaskPlatform("")))
 }

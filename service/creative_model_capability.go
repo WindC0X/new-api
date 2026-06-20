@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	CreativeAdapterEnabledOptionKey      = "creative.adapter.enabled"
-	CreativeAdapterCanaryGroupsOptionKey = "creative.adapter.canary_groups"
-	CreativeModelBindingsOptionKey       = "creative.model_bindings"
+	CreativeAdapterEnabledOptionKey        = "creative.adapter.enabled"
+	CreativeAdapterCanaryGroupsOptionKey   = "creative.adapter.canary_groups"
+	CreativeModelBindingsOptionKey         = "creative.model_bindings"
+	CreativeMockImageTasksEnabledOptionKey = "creative.mock_image_tasks.enabled"
 )
 
 var creativeParameterIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_:-]{0,63}$`)
@@ -550,7 +551,7 @@ func GetCreativeAdapterManifestAdminState() (CreativeAdapterManifestAdminState, 
 // are required. These bindings are catalog/schema previews only and are not a
 // provider routing contract.
 func GetCreativePreviewModelBindingsForGroup(userGroup string) []dto.CreativeModelCatalogItem {
-	if !creativeAdapterPreviewEnabled() || !creativeAdapterCanaryGroupAllowed(userGroup) {
+	if !creativeAdapterPreviewEnabled() || !creativeMockImageTasksEnabled() || !creativeAdapterCanaryGroupAllowed(userGroup) {
 		return nil
 	}
 	binding := mockCreativeImagePreviewBinding()
@@ -562,7 +563,7 @@ func GetCreativePreviewModelBindingsForGroup(userGroup string) []dto.CreativeMod
 }
 
 func GetStoredCreativeModelBindingsCatalogForGroup(userGroup string) []dto.CreativeModelCatalogItem {
-	if !creativeAdapterPreviewEnabled() {
+	if !creativeAdapterPreviewEnabled() || !creativeMockImageTasksEnabled() {
 		return nil
 	}
 	config, err := GetStoredCreativeModelBindingsConfig()
@@ -742,12 +743,20 @@ func ResolveCreativeImageModelBindingForGroup(bindingID string, userGroup string
 	if !creativeAdapterPreviewEnabled() {
 		return CreativeResolvedModelBinding{}, errors.New("creative adapter is disabled")
 	}
+	if !creativeMockImageTasksEnabled() {
+		return CreativeResolvedModelBinding{}, errors.New("creative mock image task route is disabled")
+	}
 	bindingID = strings.TrimSpace(bindingID)
 	if bindingID == "" {
 		return CreativeResolvedModelBinding{}, errors.New("creative image model is required")
 	}
+	builtInPreview := mockCreativeImagePreviewBinding()
+	isBuiltInPreview := bindingID == builtInPreview.Id
 	config, err := GetStoredCreativeModelBindingsConfig()
 	if err != nil {
+		if isBuiltInPreview {
+			return resolveBuiltInCreativeImagePreviewBindingForGroup(builtInPreview, userGroup, userParams)
+		}
 		return CreativeResolvedModelBinding{}, err
 	}
 	for _, binding := range config.Bindings {
@@ -785,7 +794,45 @@ func ResolveCreativeImageModelBindingForGroup(bindingID string, userGroup string
 			UserParams:        normalizedParams,
 		}, nil
 	}
+	if isBuiltInPreview {
+		return resolveBuiltInCreativeImagePreviewBindingForGroup(builtInPreview, userGroup, userParams)
+	}
 	return CreativeResolvedModelBinding{}, fmt.Errorf("creative image binding %q was not found", bindingID)
+}
+
+func resolveBuiltInCreativeImagePreviewBindingForGroup(binding dto.CreativeModelCatalogItem, userGroup string, userParams map[string]any) (CreativeResolvedModelBinding, error) {
+	if !creativeAdapterCanaryGroupAllowed(userGroup) {
+		return CreativeResolvedModelBinding{}, fmt.Errorf("creative image binding %q is not enabled for this group", binding.Id)
+	}
+	if err := ValidateCreativeParameterSchema(binding.ParameterSchema); err != nil {
+		return CreativeResolvedModelBinding{}, fmt.Errorf("built-in creative image binding %q schema is invalid: %w", binding.Id, err)
+	}
+	normalizedParams, err := ValidateCreativeUserParamsForSchema(binding.ParameterSchema, userParams)
+	if err != nil {
+		return CreativeResolvedModelBinding{}, err
+	}
+	return CreativeResolvedModelBinding{
+		Binding: CreativeModelBindingConfig{
+			Id:                binding.Id,
+			ProviderModelId:   binding.ProviderModelId,
+			PriceModelId:      binding.PriceModelId,
+			DisplayName:       binding.DisplayName,
+			Modality:          "image",
+			Enabled:           true,
+			AdapterPreset:     "mock_image_task",
+			ParameterTemplate: "mock_gpt_image",
+			RecommendedScore:  binding.RecommendedScore,
+			SortOrder:         binding.SortOrder,
+			ParameterSchema:   binding.ParameterSchema,
+		},
+		BindingId:         binding.Id,
+		ProviderModelId:   binding.ProviderModelId,
+		PriceModelId:      binding.PriceModelId,
+		AdapterPreset:     "mock_image_task",
+		ParameterTemplate: "mock_gpt_image",
+		ChannelId:         0,
+		UserParams:        normalizedParams,
+	}, nil
 }
 
 func GetCreativeModelBindingByID(bindingID string) (CreativeModelBindingConfig, bool, error) {
@@ -829,6 +876,7 @@ func creativeModelCatalogItemFromBinding(binding CreativeModelBindingConfig) dto
 		RecommendedScore:       binding.RecommendedScore,
 		SortOrder:              binding.SortOrder,
 		ParameterSchema:        creativeVisibleParameterSchema(binding.ParameterSchema),
+		ParameterSchemaPresent: true,
 	}
 }
 
@@ -1631,6 +1679,18 @@ func creativeAdapterPreviewEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(creativeOptionValue(CreativeAdapterEnabledOptionKey)), "true")
 }
 
+func CreativeAdapterPreviewEnabled() bool {
+	return creativeAdapterPreviewEnabled()
+}
+
+func CreativeMockImageTasksEnabled() bool {
+	return creativeAdapterPreviewEnabled() && creativeMockImageTasksEnabled()
+}
+
+func creativeMockImageTasksEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(creativeOptionValue(CreativeMockImageTasksEnabledOptionKey)), "true")
+}
+
 func creativeAdapterCanaryGroupAllowed(userGroup string) bool {
 	allowed := creativeOptionList(CreativeAdapterCanaryGroupsOptionKey)
 	if len(allowed) == 0 {
@@ -1896,5 +1956,6 @@ func mockCreativeImagePreviewBinding() dto.CreativeModelCatalogItem {
 		RecommendedScore:       &recommendedScore,
 		SortOrder:              &sortOrder,
 		ParameterSchema:        template.Schema,
+		ParameterSchemaPresent: true,
 	}
 }

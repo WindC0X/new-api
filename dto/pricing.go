@@ -1,6 +1,10 @@
 package dto
 
-import "github.com/QuantumNous/new-api/constant"
+import (
+	"encoding/json"
+
+	"github.com/QuantumNous/new-api/constant"
+)
 
 // 这里不好动就不动了，本来想独立出来的（
 type OpenAIModels struct {
@@ -31,6 +35,32 @@ type CreativeModelCatalogItem struct {
 	RecommendedScore       *int                          `json:"recommendedScore,omitempty"`
 	SortOrder              *int                          `json:"sortOrder,omitempty"`
 	ParameterSchema        []CreativeParameterSchemaItem `json:"parameterSchema,omitempty"`
+	ParameterSchemaPresent bool                          `json:"-"`
+}
+
+func (item CreativeModelCatalogItem) MarshalJSON() ([]byte, error) {
+	type alias CreativeModelCatalogItem
+	if !item.ParameterSchemaPresent {
+		return json.Marshal(alias(item))
+	}
+	raw, err := json.Marshal(alias(item))
+	if err != nil {
+		return nil, err
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, err
+	}
+	schema := item.ParameterSchema
+	if schema == nil {
+		schema = []CreativeParameterSchemaItem{}
+	}
+	encodedSchema, err := json.Marshal(schema)
+	if err != nil {
+		return nil, err
+	}
+	object["parameterSchema"] = encodedSchema
+	return json.Marshal(object)
 }
 
 type CreativeParamOption struct {

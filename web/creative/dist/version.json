@@ -1,7 +1,7 @@
 {
   "version": "0.9.6",
-  "buildTime": "2026-06-18T11:28:36.361Z",
-  "gitCommit": "unknown",
+  "buildTime": "2026-06-20T14:28:25.313Z",
+  "gitCommit": "f35a83102273bfa45c4e399639b2e4a0c2c9fc92",
   "changelog": [
     "为绘图工具添加键盘快捷键调整大小功能"
   ]

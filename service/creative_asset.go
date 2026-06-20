@@ -35,6 +35,7 @@ const (
 	creativeAssetDefaultDBGlobalMaxBytes    int64 = 1 << 30
 	creativeAssetDefaultDBUserMaxBytes      int64 = 256 << 20
 	creativeAssetDefaultDBReservedFreeBytes int64 = 4 << 30
+	creativeAssetDefaultS3RequestTimeoutSec       = 30
 
 	httpStatusPartialContent = http.StatusPartialContent
 )
@@ -67,6 +68,7 @@ type CreativeAssetConfig struct {
 	S3AccessKeyID             string
 	S3SecretAccessKey         string
 	S3ForcePathStyle          bool
+	S3RequestTimeoutSeconds   int
 
 	DiskSpaceProviderForWrites func() common.DiskSpaceInfo
 }
@@ -139,7 +141,7 @@ var (
 func DefaultCreativeAssetConfigFromEnv() CreativeAssetConfig {
 	cfg := CreativeAssetConfig{
 		Enabled:                   common.GetEnvOrDefaultBool("CREATIVE_ASSET_SYNC_ENABLED", false),
-		RolloutMode:               strings.TrimSpace(common.GetEnvOrDefaultString("CREATIVE_ASSET_ROLLOUT_MODE", CreativeAssetRolloutLocal)),
+		RolloutMode:               strings.TrimSpace(os.Getenv("CREATIVE_ASSET_ROLLOUT_MODE")),
 		StorageBackend:            strings.TrimSpace(common.GetEnvOrDefaultString("CREATIVE_ASSET_STORAGE", model.CreativeAssetStorageDatabase)),
 		DatabaseCanaryEnabled:     common.GetEnvOrDefaultBool("CREATIVE_ASSET_DATABASE_CANARY_ENABLED", false),
 		DatabaseGlobalMaxBytes:    envInt64("CREATIVE_ASSET_DB_GLOBAL_MAX_BYTES", creativeAssetDefaultDBGlobalMaxBytes),
@@ -155,11 +157,12 @@ func DefaultCreativeAssetConfigFromEnv() CreativeAssetConfig {
 		S3AccessKeyID:             strings.TrimSpace(os.Getenv("CREATIVE_ASSET_S3_ACCESS_KEY_ID")),
 		S3SecretAccessKey:         strings.TrimSpace(os.Getenv("CREATIVE_ASSET_S3_SECRET_ACCESS_KEY")),
 		S3ForcePathStyle:          common.GetEnvOrDefaultBool("CREATIVE_ASSET_S3_FORCE_PATH_STYLE", false),
+		S3RequestTimeoutSeconds:   common.GetEnvOrDefault("CREATIVE_ASSET_S3_REQUEST_TIMEOUT_SECONDS", creativeAssetDefaultS3RequestTimeoutSec),
 		DiskSpaceProviderForWrites: func() common.DiskSpaceInfo {
 			return common.GetDiskSpaceInfo()
 		},
 	}
-	return normalizeCreativeAssetConfig(cfg)
+	return cfg
 }
 
 func CurrentCreativeAssetRuntime() *CreativeAssetRuntime {
@@ -183,6 +186,18 @@ func CurrentCreativeAssetRuntime() *CreativeAssetRuntime {
 	return runtime
 }
 
+func InitializeCreativeAssetRuntimeFromEnv() (*CreativeAssetRuntime, error) {
+	cfg := DefaultCreativeAssetConfigFromEnv()
+	runtime, err := NewCreativeAssetRuntime(cfg, nil)
+	if err != nil {
+		return nil, scrubCreativeAssetError(err)
+	}
+	creativeAssetRuntimeMu.Lock()
+	creativeAssetRuntime = runtime
+	creativeAssetRuntimeMu.Unlock()
+	return runtime, nil
+}
+
 func SetCreativeAssetRuntimeForTest(t interface{ Cleanup(func()) }, runtime *CreativeAssetRuntime) {
 	creativeAssetRuntimeMu.Lock()
 	old := creativeAssetRuntime
@@ -196,9 +211,13 @@ func SetCreativeAssetRuntimeForTest(t interface{ Cleanup(func()) }, runtime *Cre
 }
 
 func NewCreativeAssetRuntime(cfg CreativeAssetConfig, s3Client S3CompatibleObjectClient) (*CreativeAssetRuntime, error) {
+	rawRolloutMode := strings.TrimSpace(cfg.RolloutMode)
 	cfg = normalizeCreativeAssetConfig(cfg)
 	if !cfg.Enabled {
 		return &CreativeAssetRuntime{cfg: cfg, disabled: "creative asset sync disabled"}, nil
+	}
+	if rawRolloutMode == "" {
+		return nil, errors.New("creative asset rollout mode must be explicit when sync is enabled")
 	}
 	if !creativeAssetRolloutModeAllowed(cfg.RolloutMode) {
 		return nil, fmt.Errorf("unsupported creative asset rollout mode: %s", cfg.RolloutMode)
@@ -747,9 +766,10 @@ type HTTPS3CompatibleObjectClient struct {
 }
 
 func NewHTTPS3CompatibleObjectClient(cfg CreativeAssetConfig) *HTTPS3CompatibleObjectClient {
+	cfg = normalizeCreativeAssetConfig(cfg)
 	return &HTTPS3CompatibleObjectClient{
-		cfg:        normalizeCreativeAssetConfig(cfg),
-		httpClient: ensureHTTPClient(),
+		cfg:        cfg,
+		httpClient: creativeAssetS3HTTPClient(ensureHTTPClient(), cfg.S3RequestTimeoutSeconds),
 		signer:     awsv4.NewSigner(),
 		credentials: aws.Credentials{
 			AccessKeyID:     strings.TrimSpace(cfg.S3AccessKeyID),
@@ -757,6 +777,21 @@ func NewHTTPS3CompatibleObjectClient(cfg CreativeAssetConfig) *HTTPS3CompatibleO
 			Source:          "creative-asset-s3-compatible-env",
 		},
 	}
+}
+
+func creativeAssetS3HTTPClient(base *http.Client, timeoutSeconds int) *http.Client {
+	if base == nil {
+		base = http.DefaultClient
+	}
+	clone := *base
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = creativeAssetDefaultS3RequestTimeoutSec
+	}
+	clone.Timeout = time.Duration(timeoutSeconds) * time.Second
+	if clone.CheckRedirect == nil {
+		clone.CheckRedirect = checkRedirect
+	}
+	return &clone
 }
 
 func (client *HTTPS3CompatibleObjectClient) PutObject(ctx context.Context, key string, body io.Reader, size int64, mimeType string) (CreativeAssetObjectInfo, error) {
@@ -1025,6 +1060,9 @@ func normalizeCreativeAssetConfig(cfg CreativeAssetConfig) CreativeAssetConfig {
 	cfg.S3Bucket = strings.TrimSpace(cfg.S3Bucket)
 	cfg.S3AccessKeyID = strings.TrimSpace(cfg.S3AccessKeyID)
 	cfg.S3SecretAccessKey = strings.TrimSpace(cfg.S3SecretAccessKey)
+	if cfg.S3RequestTimeoutSeconds <= 0 {
+		cfg.S3RequestTimeoutSeconds = creativeAssetDefaultS3RequestTimeoutSec
+	}
 	return cfg
 }
 

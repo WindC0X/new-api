@@ -8,10 +8,11 @@ It is intentionally session-bound: API-token-only callers must use the normal re
 | Variable | Default | Production note |
 | --- | --- | --- |
 | `CREATIVE_VIDEO_RELAY_ENABLED` | `false` | Enables `/creative/relay/v1/videos*`; keep disabled until provider/channel billing and polling are configured. |
-| `CREATIVE_ASSET_SYNC_ENABLED` | `false` | Enables `/creative/api/assets*`. |
-| `CREATIVE_ASSET_ROLLOUT_MODE` | `local` | `production` requires `s3-compatible`; DB storage is local/canary only. |
-| `CREATIVE_ASSET_STORAGE` | `database` | Use `s3-compatible` in production. Missing S3 config fails closed. |
-| `CREATIVE_ASSET_S3_*` | empty | Endpoint, region, bucket, prefix and credentials for private object storage. |
+| `CREATIVE_ASSET_SYNC_ENABLED` | `false` | Enables `/creative/api/assets*`; production must not set this to `true` without also setting explicit rollout mode, storage backend, and complete S3 config. |
+| `CREATIVE_ASSET_ROLLOUT_MODE` | `local` | Production cloud sync requires `production`; missing/implicit rollout mode fails closed when sync is enabled. |
+| `CREATIVE_ASSET_STORAGE` | `database` | Use `s3-compatible` in production; DB storage is local/canary only. Missing S3 config fails closed. |
+| `CREATIVE_ASSET_S3_*` | empty | Endpoint, region, bucket, prefix and credentials for private object storage; production endpoint must be HTTPS. |
+| `CREATIVE_PUBLIC_ORIGIN` | empty | Optional canonical browser origin such as `https://console.example.com` for HTTPS reverse-proxy/TLS-termination deployments. It replaces request-scheme/host in Creative same-origin checks; raw `X-Forwarded-*` remains untrusted. |
 | `FRONTEND_BASE_URL` | empty | Controls non-Creative SPA fallback only; Creative API/relay routes are local and must not redirect to this host. |
 
 ## Route matrix

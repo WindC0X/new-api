@@ -528,12 +528,19 @@ func cloneRequestHeaders(c *gin.Context) map[string]string {
 		return nil
 	}
 	headers := make(map[string]string, len(c.Request.Header))
-	for key := range c.Request.Header {
-		value := strings.TrimSpace(c.Request.Header.Get(key))
-		if value == "" {
+	for key, values := range c.Request.Header {
+		trimmedValues := make([]string, 0, len(values))
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			trimmedValues = append(trimmedValues, value)
+		}
+		if len(trimmedValues) == 0 {
 			continue
 		}
-		headers[key] = value
+		headers[key] = strings.Join(trimmedValues, ", ")
 	}
 	if len(headers) == 0 {
 		return nil

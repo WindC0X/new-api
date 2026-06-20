@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -22,6 +23,7 @@ const (
 	creativeCSRFHeaderName   = "X-Creative-CSRF"
 	creativeNonceHeaderName  = "X-Creative-Nonce"
 	creativeSessionTokenSize = 48
+	creativePublicOriginEnv  = "CREATIVE_PUBLIC_ORIGIN"
 )
 
 const ContextKeyCreativeRelayModelOverride = "creative_relay_model_override"
@@ -313,9 +315,17 @@ func creativeUnsafeRequestOriginIsValid(c *gin.Context) bool {
 	return false
 }
 
+func CreativeRequestOrigin(c *gin.Context) string {
+	return creativeRequestOrigin(c)
+}
+
 func creativeRequestOrigin(c *gin.Context) string {
 	if c == nil || c.Request == nil {
 		return ""
+	}
+
+	if publicOrigin := creativeConfiguredPublicOrigin(); publicOrigin != "" {
+		return publicOrigin
 	}
 
 	scheme := creativeRequestScheme(c.Request)
@@ -337,6 +347,28 @@ func creativeRequestScheme(request *http.Request) string {
 		}
 	}
 	return "http"
+}
+
+func creativeConfiguredPublicOrigin() string {
+	return creativeNormalizeOrigin(os.Getenv(creativePublicOriginEnv))
+}
+
+func creativeNormalizeOrigin(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	if creativeSafeScheme(parsed.Scheme) == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func creativeForwardedProto(header string) string {

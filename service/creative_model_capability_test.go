@@ -220,8 +220,9 @@ func TestResolveCreativeImageModelBindingForGroupIsMockOnlyAndGroupScoped(t *tes
 	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
 	require.NoError(t, err)
 	withCreativeCapabilityOptions(t, map[string]string{
-		CreativeAdapterEnabledOptionKey: "true",
-		CreativeModelBindingsOptionKey:  configJSON,
+		CreativeAdapterEnabledOptionKey:        "true",
+		CreativeMockImageTasksEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:         configJSON,
 	})
 
 	resolved, err := ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "vip", map[string]any{"size": "1024x1024"})
@@ -242,6 +243,86 @@ func TestResolveCreativeImageModelBindingForGroupIsMockOnlyAndGroupScoped(t *tes
 	require.Error(t, err)
 }
 
+func TestResolveCreativeImageModelBindingForGroupResolvesExposedBuiltInPreview(t *testing.T) {
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey:        "true",
+		CreativeMockImageTasksEnabledOptionKey: "true",
+		CreativeAdapterCanaryGroupsOptionKey:   "vip",
+		CreativeModelBindingsOptionKey:         "",
+	})
+	require.Len(t, GetCreativePreviewModelBindingsForGroup("vip"), 1)
+
+	resolved, err := ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "vip", map[string]any{
+		"size":    "1024x1024",
+		"quality": "auto",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "mock:gpt-image-2:preview", resolved.BindingId)
+	require.Equal(t, "gpt-image-2", resolved.ProviderModelId)
+	require.Equal(t, "mock-gpt-image-2-price", resolved.PriceModelId)
+	require.Equal(t, "mock_image_task", resolved.AdapterPreset)
+	require.Equal(t, "mock_gpt_image", resolved.ParameterTemplate)
+	require.Equal(t, 0, resolved.ChannelId)
+	require.Equal(t, map[string]any{"quality": "auto", "size": "1024x1024"}, resolved.UserParams)
+	require.True(t, resolved.Binding.Enabled)
+	require.Empty(t, resolved.Binding.CanaryGroups)
+}
+
+func TestResolveCreativeImageModelBindingForGroupFailsClosedForBuiltInPreviewGates(t *testing.T) {
+	tests := []struct {
+		name    string
+		options map[string]string
+		group   string
+		wantErr string
+	}{
+		{
+			name: "preview disabled",
+			options: map[string]string{
+				CreativeAdapterEnabledOptionKey:        "",
+				CreativeMockImageTasksEnabledOptionKey: "true",
+				CreativeAdapterCanaryGroupsOptionKey:   "vip",
+				CreativeModelBindingsOptionKey:         "",
+			},
+			group:   "vip",
+			wantErr: "creative adapter is disabled",
+		},
+		{
+			name: "mock disabled",
+			options: map[string]string{
+				CreativeAdapterEnabledOptionKey:        "true",
+				CreativeMockImageTasksEnabledOptionKey: "",
+				CreativeAdapterCanaryGroupsOptionKey:   "vip",
+				CreativeModelBindingsOptionKey:         "",
+			},
+			group:   "vip",
+			wantErr: "mock image task route is disabled",
+		},
+		{
+			name: "canary miss",
+			options: map[string]string{
+				CreativeAdapterEnabledOptionKey:        "true",
+				CreativeMockImageTasksEnabledOptionKey: "true",
+				CreativeAdapterCanaryGroupsOptionKey:   "vip",
+				CreativeModelBindingsOptionKey:         "",
+			},
+			group:   "default",
+			wantErr: "not enabled for this group",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withCreativeCapabilityOptions(t, tt.options)
+
+			_, err := ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", tt.group, map[string]any{"size": "1024x1024"})
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchema(t *testing.T) {
 	config := validCreativeModelBindingsConfigForTest()
 	config.Bindings[0].Enabled = true
@@ -256,8 +337,9 @@ func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchem
 	require.NoError(t, err)
 
 	withCreativeCapabilityOptions(t, map[string]string{
-		CreativeAdapterEnabledOptionKey: "true",
-		CreativeModelBindingsOptionKey:  configJSON,
+		CreativeAdapterEnabledOptionKey:        "true",
+		CreativeMockImageTasksEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:         configJSON,
 	})
 	items := GetStoredCreativeModelBindingsCatalogForGroup("vip")
 	require.Len(t, items, 1)
@@ -273,8 +355,9 @@ func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchem
 	disabledJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
 	require.NoError(t, err)
 	withCreativeCapabilityOptions(t, map[string]string{
-		CreativeAdapterEnabledOptionKey: "true",
-		CreativeModelBindingsOptionKey:  disabledJSON,
+		CreativeAdapterEnabledOptionKey:        "true",
+		CreativeMockImageTasksEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:         disabledJSON,
 	})
 	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("vip"))
 
@@ -283,6 +366,70 @@ func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchem
 		CreativeModelBindingsOptionKey:  configJSON,
 	})
 	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("vip"))
+}
+
+func TestStoredCreativeModelBindingsCatalogSerializesPresentEmptySchema(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema []dto.CreativeParameterSchemaItem
+	}{
+		{
+			name:   "explicit empty schema",
+			schema: []dto.CreativeParameterSchemaItem{},
+		},
+		{
+			name: "all hidden schema",
+			schema: []dto.CreativeParameterSchemaItem{{
+				Id:     "serverOnly",
+				Label:  "Server Only",
+				Type:   "string",
+				Hidden: true,
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := validCreativeModelBindingsConfigForTest()
+			config.Bindings[0].Enabled = true
+			config.Bindings[0].CanaryGroups = []string{"vip"}
+			config.Bindings[0].ParameterSchema = tt.schema
+			configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+			require.NoError(t, err)
+
+			withCreativeCapabilityOptions(t, map[string]string{
+				CreativeAdapterEnabledOptionKey:        "true",
+				CreativeMockImageTasksEnabledOptionKey: "true",
+				CreativeModelBindingsOptionKey:         configJSON,
+			})
+			items := GetStoredCreativeModelBindingsCatalogForGroup("vip")
+			require.Len(t, items, 1)
+			require.Empty(t, items[0].ParameterSchema)
+
+			encoded, err := common.Marshal(items[0])
+			require.NoError(t, err)
+			require.Contains(t, string(encoded), `"parameterSchema":[]`)
+		})
+	}
+}
+
+func TestStoredCreativeModelBindingsRequireExplicitMockImageTaskEnablement(t *testing.T) {
+	config := validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = true
+	config.Bindings[0].CanaryGroups = []string{"vip"}
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey:        "true",
+		CreativeMockImageTasksEnabledOptionKey: "",
+		CreativeModelBindingsOptionKey:         configJSON,
+	})
+
+	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("vip"))
+	_, err = ResolveCreativeImageModelBindingForGroup("mock:gpt-image-2:preview", "vip", map[string]any{"size": "1024x1024"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mock image task route is disabled")
 }
 
 func TestStoredCreativeModelBindingsCatalogHidesFixtureProviderBindings(t *testing.T) {
@@ -297,8 +444,9 @@ func TestStoredCreativeModelBindingsCatalogHidesFixtureProviderBindings(t *testi
 	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
 	require.NoError(t, err)
 	withCreativeCapabilityOptions(t, map[string]string{
-		CreativeAdapterEnabledOptionKey: "true",
-		CreativeModelBindingsOptionKey:  configJSON,
+		CreativeAdapterEnabledOptionKey:        "true",
+		CreativeMockImageTasksEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:         configJSON,
 	})
 
 	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("vip"))
@@ -311,14 +459,16 @@ func withCreativeAdapterPreviewOptions(t *testing.T, enabled string, canaryGroup
 
 	common.OptionMapRWMutex.Lock()
 	originalMap := common.OptionMap
-	copyMap := make(map[string]string, len(originalMap)+2)
+	copyMap := make(map[string]string, len(originalMap)+3)
 	for key, value := range originalMap {
 		copyMap[key] = value
 	}
 	if enabled == "" {
 		delete(copyMap, CreativeAdapterEnabledOptionKey)
+		delete(copyMap, CreativeMockImageTasksEnabledOptionKey)
 	} else {
 		copyMap[CreativeAdapterEnabledOptionKey] = enabled
+		copyMap[CreativeMockImageTasksEnabledOptionKey] = enabled
 	}
 	if canaryGroups == "" {
 		delete(copyMap, CreativeAdapterCanaryGroupsOptionKey)

@@ -51,6 +51,42 @@ func setupCreativeAssetServiceTestDB(t *testing.T) {
 	})
 }
 
+func TestCreativeAssetConfigRequiresExplicitRolloutWhenEnabledFromEnv(t *testing.T) {
+	t.Setenv("CREATIVE_ASSET_SYNC_ENABLED", "true")
+	t.Setenv("CREATIVE_ASSET_ROLLOUT_MODE", "")
+	t.Setenv("CREATIVE_ASSET_STORAGE", "")
+
+	cfg := DefaultCreativeAssetConfigFromEnv()
+	_, err := NewCreativeAssetRuntime(cfg, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rollout mode must be explicit")
+}
+
+func TestInitializeCreativeAssetRuntimeFromEnvReturnsConfigErrors(t *testing.T) {
+	SetCreativeAssetRuntimeForTest(t, nil)
+	t.Setenv("CREATIVE_ASSET_SYNC_ENABLED", "true")
+	t.Setenv("CREATIVE_ASSET_ROLLOUT_MODE", CreativeAssetRolloutProduction)
+	t.Setenv("CREATIVE_ASSET_STORAGE", model.CreativeAssetStorageDatabase)
+
+	runtime, err := InitializeCreativeAssetRuntimeFromEnv()
+	require.Nil(t, runtime)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "production creative assets require s3-compatible storage")
+}
+
+func TestInitializeCreativeAssetRuntimeFromEnvInstallsDisabledRuntime(t *testing.T) {
+	SetCreativeAssetRuntimeForTest(t, nil)
+	t.Setenv("CREATIVE_ASSET_SYNC_ENABLED", "false")
+
+	runtime, err := InitializeCreativeAssetRuntimeFromEnv()
+	require.NoError(t, err)
+	require.NotNil(t, runtime)
+	require.Same(t, runtime, CurrentCreativeAssetRuntime())
+	ok, reason := runtime.Status()
+	require.False(t, ok)
+	require.Contains(t, reason, "disabled")
+}
+
 func TestCreativeAssetConfigFailsClosedForProductionWithoutS3(t *testing.T) {
 	cfg := CreativeAssetConfig{
 		Enabled:        true,
@@ -115,6 +151,34 @@ func TestCreativeAssetS3ClientUsesManagedRedirectPolicy(t *testing.T) {
 	require.NotNil(t, client.httpClient)
 	require.NotSame(t, http.DefaultClient, client.httpClient)
 	require.NotNil(t, client.httpClient.CheckRedirect)
+}
+
+func TestCreativeAssetS3ClientUsesIndependentFiniteTimeout(t *testing.T) {
+	previous := httpClient
+	httpClient = &http.Client{Timeout: 0}
+	t.Cleanup(func() { httpClient = previous })
+
+	defaultClient := NewHTTPS3CompatibleObjectClient(CreativeAssetConfig{
+		S3Endpoint:        "https://s3.example",
+		S3Region:          "auto",
+		S3Bucket:          "private-bucket",
+		S3AccessKeyID:     "test-ak",
+		S3SecretAccessKey: "test-sk",
+	})
+	require.Equal(t, time.Duration(30)*time.Second, defaultClient.httpClient.Timeout)
+	require.NotSame(t, httpClient, defaultClient.httpClient, "creative S3 client must not mutate the shared relay HTTP client")
+	require.NotNil(t, defaultClient.httpClient.CheckRedirect)
+
+	customClient := NewHTTPS3CompatibleObjectClient(CreativeAssetConfig{
+		S3Endpoint:              "https://s3.example",
+		S3Region:                "auto",
+		S3Bucket:                "private-bucket",
+		S3AccessKeyID:           "test-ak",
+		S3SecretAccessKey:       "test-sk",
+		S3RequestTimeoutSeconds: 45,
+	})
+	require.Equal(t, time.Duration(45)*time.Second, customClient.httpClient.Timeout)
+	require.NotNil(t, customClient.httpClient.CheckRedirect)
 }
 
 func TestCreativeAssetDatabaseFallbackRequiresCanaryCapsAndDiskHeadroom(t *testing.T) {

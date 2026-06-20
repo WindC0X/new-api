@@ -109,6 +109,26 @@ func TestCreativeOriginWithoutForwardedHeadersKeepsHTTPFallback(t *testing.T) {
 	require.False(t, creativeUnsafeRequestOriginIsValid(ctx))
 }
 
+func TestCreativeOriginUsesConfiguredPublicOriginForTLSProxy(t *testing.T) {
+	t.Setenv("CREATIVE_PUBLIC_ORIGIN", "https://console.example")
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "http://internal.example/creative/api/documents/doc-1", nil)
+	ctx.Request.Host = "internal.example"
+	ctx.Request.Header.Set("X-Forwarded-Proto", "http")
+	ctx.Request.Header.Set("X-Forwarded-Host", "evil.example")
+	ctx.Request.Header.Set("Origin", "https://console.example")
+
+	require.Equal(t, "https://console.example", creativeRequestOrigin(ctx))
+	require.True(t, creativeUnsafeRequestOriginIsValid(ctx))
+
+	ctx.Request.Header.Set("Origin", "http://internal.example")
+	require.False(t, creativeUnsafeRequestOriginIsValid(ctx))
+	ctx.Request.Header.Set("Origin", "https://evil.example")
+	require.False(t, creativeUnsafeRequestOriginIsValid(ctx))
+}
+
 func TestCreativeOriginIgnoresInvalidForwardedProto(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

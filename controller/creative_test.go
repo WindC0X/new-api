@@ -367,8 +367,9 @@ func TestCreativeListModelsIncludesMockPreviewBindingOnlyForEnabledCanary(t *tes
 	seedCreativeControllerUser(t, 35)
 	seedCreativeControllerModelPool(t)
 	withCreativeControllerOptions(t, map[string]string{
-		service.CreativeAdapterEnabledOptionKey:      "true",
-		service.CreativeAdapterCanaryGroupsOptionKey: "default",
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "true",
+		service.CreativeAdapterCanaryGroupsOptionKey:   "default",
 	})
 	router := newCreativeSessionTestRouter(35)
 
@@ -451,13 +452,52 @@ func TestCreativeListModelsIncludesStoredEnabledBindingsAndDedupesPreview(t *tes
 	require.Equal(t, 1, count)
 }
 
+func TestCreativeListModelsPreservesEmptyParameterSchemaForConfiguredBindings(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	seedCreativeControllerUser(t, 3502)
+	seedCreativeControllerModelPool(t)
+	withCreativeImageTaskMockBindingSchema(t, true, []string{"default"}, []dto.CreativeParameterSchemaItem{{
+		Id:     "serverOnly",
+		Label:  "Server Only",
+		Type:   "string",
+		Hidden: true,
+	}})
+	router := newCreativeSessionTestRouter(3502)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/creative/api/models", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	models := decodeCreativeResponse(t, recorder)["data"].([]any)
+	require.Len(t, models, 31)
+
+	var ordinaryModel map[string]any
+	var mockBinding map[string]any
+	for _, rawModel := range models {
+		modelObject := rawModel.(map[string]any)
+		switch modelObject["id"] {
+		case "creative-model-01":
+			ordinaryModel = modelObject
+		case "mock:gpt-image-2:preview":
+			mockBinding = modelObject
+		}
+	}
+	require.NotNil(t, ordinaryModel)
+	require.NotContains(t, ordinaryModel, "parameterSchema")
+	require.NotNil(t, mockBinding)
+	schema, ok := mockBinding["parameterSchema"].([]any)
+	require.True(t, ok)
+	require.Empty(t, schema)
+}
+
 func TestCreativeListModelsDoesNotIncludeMockPreviewBindingWhenCanaryMisses(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	seedCreativeControllerUser(t, 36)
 	seedCreativeControllerModelPool(t)
 	withCreativeControllerOptions(t, map[string]string{
-		service.CreativeAdapterEnabledOptionKey:      "true",
-		service.CreativeAdapterCanaryGroupsOptionKey: "vip",
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "true",
+		service.CreativeAdapterCanaryGroupsOptionKey:   "vip",
 	})
 	router := newCreativeSessionTestRouter(36)
 
@@ -1435,6 +1475,37 @@ func TestCreativeRelayVideoContentIsOwnerScoped(t *testing.T) {
 	require.Contains(t, errorObject["message"], "Task not found")
 }
 
+func TestCreativeRelayVideoContentRejectsSameUserNonVideoPlatform(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}))
+	require.NoError(t, model.DB.Create(&model.Task{
+		TaskID:    "task_same_user_image_not_video",
+		UserId:    6501,
+		Status:    model.TaskStatusSuccess,
+		ChannelId: 9999,
+		Platform:  constant.TaskPlatformCreativeImage,
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://private.example/not-video.mp4?token=secret",
+		},
+	}).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/creative/relay/v1/videos/task_same_user_image_not_video/content", nil)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_same_user_image_not_video"}}
+	ctx.Set("id", 6501)
+	ctx.Set("group", "default")
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "default")
+
+	CreativeRelayVideoContent(ctx)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	errorObject := creativeResponseObject(t, decodeCreativeResponse(t, recorder), "error")
+	require.Contains(t, errorObject["message"], "Task not found")
+}
+
 func TestCreativeRelayVideoContentUsesStoredKeyAffinity(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}))
@@ -1850,6 +1921,83 @@ func TestCreativeImageTaskSubmitFetchAndReplayAreMockOnlyAndPrivate(t *testing.T
 	require.Equal(t, "private, no-store", content.Header().Get("Cache-Control"))
 }
 
+func TestCreativeImageTaskSubmitAcceptsExposedBuiltInPreviewBinding(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 812)
+	seedCreativeControllerModelPool(t)
+	withCreativeControllerOptions(t, map[string]string{
+		service.CreativeAdapterEnabledOptionKey:        "true",
+		service.CreativeMockImageTasksEnabledOptionKey: "true",
+		service.CreativeAdapterCanaryGroupsOptionKey:   "default",
+		service.CreativeModelBindingsOptionKey:         "",
+	})
+	router := newCreativeRelayBrokerTestRouter(t, 812, func(c *gin.Context) {
+		t.Fatal("built-in preview image task route must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "image-task-built-in-preview"
+
+	submit := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe built-in mock image",
+		"userParams": map[string]any{
+			"size":    "1024x1024",
+			"quality": "auto",
+		},
+	}, auth.cookies, headers)
+
+	require.Equal(t, http.StatusAccepted, submit.Code)
+	payload := decodeCreativeResponse(t, submit)
+	taskID, ok := payload["task_id"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, taskID)
+	require.Equal(t, "mock:gpt-image-2:preview", payload["model"])
+	metadata := creativeResponseObject(t, payload, "metadata")
+	require.Equal(t, "mock:gpt-image-2:preview", metadata["bindingId"])
+	require.Equal(t, "gpt-image-2", metadata["providerModelId"])
+	require.Equal(t, "mock-gpt-image-2-price", metadata["priceModelId"])
+	require.NotContains(t, metadata, "channelId")
+
+	var storedTask model.Task
+	require.NoError(t, model.DB.Where("user_id = ? AND task_id = ?", 812, taskID).First(&storedTask).Error)
+	require.Equal(t, 0, storedTask.ChannelId)
+	var storedMetadata creativeImageTaskMetadata
+	require.NoError(t, storedTask.GetData(&storedMetadata))
+	require.Equal(t, "mock:gpt-image-2:preview", storedMetadata.BindingId)
+	require.Equal(t, "gpt-image-2", storedMetadata.ProviderModelId)
+	require.Equal(t, "mock-gpt-image-2-price", storedMetadata.PriceModelId)
+	require.Equal(t, "mock_image_task", storedMetadata.AdapterPreset)
+	require.Equal(t, "mock_gpt_image", storedMetadata.ParameterTemplate)
+	require.Equal(t, map[string]any{"quality": "auto", "size": "1024x1024"}, storedMetadata.UserParams)
+}
+
+func TestCreativeImageTaskRouteRejectsWhenMockPreviewDisabledByDefault(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
+	seedCreativeControllerUser(t, 809)
+	seedCreativeControllerModelPool(t)
+	withCreativeImageTaskMockBinding(t, false, []string{"default"})
+	router := newCreativeRelayBrokerTestRouter(t, 809, func(c *gin.Context) {
+		t.Fatal("disabled image task route must not use distributed provider relay")
+	})
+	auth := bootstrapCreativeSessionAuth(t, router)
+	headers := creativeSameOriginNonceHeaders(auth)
+	headers["Idempotency-Key"] = "image-task-disabled-default"
+
+	submit := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", map[string]any{
+		"model":  "mock:gpt-image-2:preview",
+		"prompt": "safe mock image",
+	}, auth.cookies, headers)
+	require.Equal(t, http.StatusNotFound, submit.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, submit), "error")["message"], "preview is disabled")
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Task{}).Where("platform = ?", constant.TaskPlatformCreativeImage).Count(&count).Error)
+	require.Zero(t, count)
+}
+
 func TestCreativeImageTaskPersistsConfiguredChannelID(t *testing.T) {
 	setupCreativeControllerTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Channel{}))
@@ -1934,8 +2082,8 @@ func TestCreativeImageTaskRouteBoundariesAndResolverFailClosed(t *testing.T) {
 	disabledHeaders["Idempotency-Key"] = "adapter-disabled"
 	withCreativeImageTaskMockBinding(t, false, []string{"default"})
 	disabled := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, disabledHeaders)
-	require.Equal(t, http.StatusBadRequest, disabled.Code)
-	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, disabled), "error")["message"], "disabled")
+	require.Equal(t, http.StatusNotFound, disabled.Code)
+	require.Contains(t, creativeResponseObject(t, decodeCreativeResponse(t, disabled), "error")["message"], "preview is disabled")
 }
 
 func TestCreativeImageTaskRejectsBoundaryAliasesBeforeMockInsert(t *testing.T) {
@@ -2128,6 +2276,7 @@ func TestCreativeImageTaskPublicSurfacesDoNotLeakFakeSecretCorpus(t *testing.T) 
 	setupCreativeControllerTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.CreativeVideoIdempotency{}))
 	seedCreativeControllerUser(t, 810)
+	withCreativeImageTaskMockBinding(t, true, []string{"default"})
 	corpus := []string{
 		"Bearer sk-test-secret",
 		"sk-test-secret",
@@ -2659,6 +2808,22 @@ func TestCreativeSunoSubmitRejectsNotifyCallbackOwnerAliasesBeforeRelay(t *testi
 			wantField: "notify",
 		},
 		{
+			name: "notification url alias",
+			body: map[string]any{
+				"prompt":          "safe song prompt",
+				"notificationUrl": "https://evil.example/callback",
+			},
+			wantField: "notificationUrl",
+		},
+		{
+			name: "notify endpoint alias nested",
+			body: map[string]any{
+				"prompt": "safe song prompt",
+				"params": map[string]any{"notifyEndpoint": "https://evil.example/callback"},
+			},
+			wantField: "params.notifyEndpoint",
+		},
+		{
 			name: "callback top level",
 			body: map[string]any{
 				"prompt":   "safe song prompt",
@@ -2681,6 +2846,30 @@ func TestCreativeSunoSubmitRejectsNotifyCallbackOwnerAliasesBeforeRelay(t *testi
 				"ownerId": 999,
 			},
 			wantField: "ownerId",
+		},
+		{
+			name: "owner override alias",
+			body: map[string]any{
+				"prompt":        "safe song prompt",
+				"ownerOverride": 999,
+			},
+			wantField: "ownerOverride",
+		},
+		{
+			name: "selected key override alias",
+			body: map[string]any{
+				"prompt":              "safe song prompt",
+				"selectedKeyOverride": "sk-leak",
+			},
+			wantField: "selectedKeyOverride",
+		},
+		{
+			name: "x selected key override alias nested",
+			body: map[string]any{
+				"prompt":  "safe song prompt",
+				"headers": map[string]any{"x-selected-key-override": "sk-leak"},
+			},
+			wantField: "headers",
 		},
 		{
 			name: "user id snake alias",
@@ -3216,6 +3405,19 @@ func TestCreativeAPIRequestOriginIgnoresUntrustedForwardedHeaders(t *testing.T) 
 	require.Equal(t, "http://internal.example", creativeAPIRequestOrigin(ctx))
 }
 
+func TestCreativeAPIRequestOriginUsesConfiguredPublicOrigin(t *testing.T) {
+	t.Setenv("CREATIVE_PUBLIC_ORIGIN", "https://console.example")
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "http://internal.example/creative/api/documents/doc-1", nil)
+	ctx.Request.Host = "internal.example"
+	ctx.Request.Header.Set("X-Forwarded-Proto", "http")
+	ctx.Request.Header.Set("X-Forwarded-Host", "evil.example")
+
+	require.Equal(t, "https://console.example", creativeAPIRequestOrigin(ctx))
+}
+
 func TestCreativeRelayMJUnsupportedIsExplicit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -3622,6 +3824,30 @@ func withCreativeControllerOptions(t *testing.T, values map[string]string) {
 
 func withCreativeImageTaskMockBinding(t *testing.T, adapterEnabled bool, canaryGroups []string, channelIDs ...int) {
 	t.Helper()
+	withCreativeImageTaskMockBindingSchema(t, adapterEnabled, canaryGroups, []dto.CreativeParameterSchemaItem{
+		{
+			Id:           "size",
+			Label:        "Size",
+			Type:         "enum",
+			DefaultValue: "1024x1024",
+			Options: []dto.CreativeParamOption{
+				{Value: "1024x1024", Label: "1024×1024"},
+			},
+		},
+		{
+			Id:           "quality",
+			Label:        "Quality",
+			Type:         "enum",
+			DefaultValue: "auto",
+			Options: []dto.CreativeParamOption{
+				{Value: "auto", Label: "Auto"},
+			},
+		},
+	}, channelIDs...)
+}
+
+func withCreativeImageTaskMockBindingSchema(t *testing.T, adapterEnabled bool, canaryGroups []string, schema []dto.CreativeParameterSchemaItem, channelIDs ...int) {
+	t.Helper()
 	var channelID *int
 	if len(channelIDs) > 0 && channelIDs[0] > 0 {
 		id := channelIDs[0]
@@ -3650,26 +3876,7 @@ func withCreativeImageTaskMockBinding(t *testing.T, adapterEnabled bool, canaryG
 			ChannelId:         channelID,
 			AdapterPreset:     "mock_image_task",
 			ParameterTemplate: "mock_gpt_image",
-			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{
-					Id:           "size",
-					Label:        "Size",
-					Type:         "enum",
-					DefaultValue: "1024x1024",
-					Options: []dto.CreativeParamOption{
-						{Value: "1024x1024", Label: "1024×1024"},
-					},
-				},
-				{
-					Id:           "quality",
-					Label:        "Quality",
-					Type:         "enum",
-					DefaultValue: "auto",
-					Options: []dto.CreativeParamOption{
-						{Value: "auto", Label: "Auto"},
-					},
-				},
-			},
+			ParameterSchema:   schema,
 		}},
 	}
 	configJSON, err := service.NormalizeCreativeModelBindingsConfigJSON(config)
@@ -3679,8 +3886,9 @@ func withCreativeImageTaskMockBinding(t *testing.T, adapterEnabled bool, canaryG
 		enabledValue = "true"
 	}
 	withCreativeControllerOptions(t, map[string]string{
-		service.CreativeAdapterEnabledOptionKey: enabledValue,
-		service.CreativeModelBindingsOptionKey:  configJSON,
+		service.CreativeAdapterEnabledOptionKey:        enabledValue,
+		service.CreativeMockImageTasksEnabledOptionKey: enabledValue,
+		service.CreativeModelBindingsOptionKey:         configJSON,
 	})
 }
 
@@ -3795,6 +4003,7 @@ func newCreativeRelayBrokerTestRouter(t *testing.T, userId int, relayHandler gin
 	generalRelayRouter.POST("/chat/completions", relayHandler)
 	relayRouter.POST("/images/generations", CreativeRejectManagedImageBindingSyncRoute(), middleware.CreativeRelaySessionBroker(), relayHandler)
 	imageTaskRouter := relayRouter.Group("/images/tasks")
+	imageTaskRouter.Use(CreativeImageTaskPreviewGate())
 	imageTaskRouter.Use(CreativeImageTaskSubmitIdempotency())
 	imageTaskRouter.POST("", CreativeRelayImageTaskSubmit)
 	imageTaskRouter.GET("/:task_id", CreativeRelayImageTaskFetch)

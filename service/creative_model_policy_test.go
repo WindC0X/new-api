@@ -125,8 +125,9 @@ func TestBuildCreativeModelPolicyAdminStateIncludesStoredManagedBindings(t *test
 	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
 	require.NoError(t, err)
 	withCreativeCapabilityOptions(t, map[string]string{
-		CreativeAdapterEnabledOptionKey: "true",
-		CreativeModelBindingsOptionKey:  configJSON,
+		CreativeAdapterEnabledOptionKey:        "true",
+		CreativeMockImageTasksEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:         configJSON,
 	})
 
 	policy, err := NormalizeCreativeModelPolicyJSON(`{

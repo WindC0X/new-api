@@ -88,6 +88,17 @@ func CreativeImageTaskSubmitIdempotency() gin.HandlerFunc {
 	}
 }
 
+func CreativeImageTaskPreviewGate() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !service.CreativeMockImageTasksEnabled() {
+			creativeOpenAIError(c, http.StatusNotFound, "creative image task preview is disabled")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 func CreativeRejectManagedImageBindingSyncRoute() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		modelName, err := creativeImageRequestModel(c)

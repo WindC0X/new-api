@@ -297,6 +297,10 @@ func InitResources() error {
 	// Initialize options, should after model.InitDB()
 	model.InitOptionMap()
 
+	if _, err = service.InitializeCreativeAssetRuntimeFromEnv(); err != nil {
+		return fmt.Errorf("initialize creative asset runtime: %w", err)
+	}
+
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()
 

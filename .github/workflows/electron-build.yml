@@ -9,7 +9,25 @@ on:
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
+  creative_release_gate:
+    name: Creative release gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.25.1'
+      - name: Run Creative release gate
+        run: bash scripts/creative_ci_gate.sh
+
   build:
+    needs: [creative_release_gate]
     strategy:
       matrix:
         # os: [macos-latest, windows-latest]

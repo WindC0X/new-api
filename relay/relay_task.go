@@ -262,12 +262,11 @@ func taskSubmitNonOKResponseError(resp *http.Response) *dto.TaskError {
 	if resp == nil {
 		return service.TaskErrorWrapper(fmt.Errorf("upstream returned nil response"), "fail_to_fetch_task", http.StatusBadGateway)
 	}
-	var responseBody []byte
 	if resp.Body != nil {
 		defer resp.Body.Close()
-		responseBody, _ = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	}
-	return service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+	return service.TaskErrorWrapper(fmt.Errorf("upstream task submit failed with status %d", resp.StatusCode), "fail_to_fetch_task", resp.StatusCode)
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

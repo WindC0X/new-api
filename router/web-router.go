@@ -108,6 +108,7 @@ func SetCreativeRouter(router *gin.Engine) {
 		creativeImageSyncRelayRouter.POST("/images/generations/", creativeRouteNotFound)
 
 		creativeImageTaskRelayRouter := creativeRelayRouter.Group("/images/tasks")
+		creativeImageTaskRelayRouter.Use(controller.CreativeImageTaskPreviewGate())
 		creativeImageTaskRelayRouter.Use(controller.CreativeImageTaskSubmitIdempotency())
 		creativeImageTaskRelayRouter.POST("", controller.CreativeRelayImageTaskSubmit)
 		creativeImageTaskRelayRouter.GET("/:task_id", controller.CreativeRelayImageTaskFetch)

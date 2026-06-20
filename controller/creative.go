@@ -1973,14 +1973,19 @@ func creativeForbiddenRelayBodyNormalizedKey(normalized string) bool {
 	if strings.HasPrefix(normalized, "upstream") ||
 		strings.HasPrefix(strings.TrimPrefix(normalized, "x"), "upstream") ||
 		strings.Contains(normalized, "model") ||
+		strings.Contains(normalized, "selectedkey") ||
 		strings.Contains(normalized, "apikey") ||
 		strings.Contains(normalized, "apisecret") ||
 		strings.Contains(normalized, "mjsecret") ||
 		strings.Contains(normalized, "mjapisecret") ||
+		strings.HasPrefix(normalized, "notify") ||
+		strings.Contains(normalized, "notification") ||
 		strings.Contains(normalized, "notifyhook") ||
 		strings.Contains(normalized, "callback") ||
 		strings.Contains(normalized, "webhook") ||
 		strings.Contains(normalized, "accesstoken") ||
+		strings.HasPrefix(normalized, "owner") ||
+		strings.HasPrefix(normalized, "useroverride") ||
 		strings.Contains(normalized, "sourceprofileid") ||
 		strings.Contains(normalized, "internaloptions") ||
 		strings.Contains(normalized, "onprogress") ||
@@ -1992,7 +1997,7 @@ func creativeForbiddenRelayBodyNormalizedKey(normalized string) bool {
 	case "apikey", "apikeys", "apisecret", "xapisecret", "mjapisecret", "xmjapisecret", "apitoken", "key", "authorization", "proxyauthorization", "bearer", "bearertoken",
 		"baseurl", "xbaseurl", "upstreambaseurl", "provider", "xprovider", "providerid", "xproviderid", "providername", "xprovidername", "provideroverride", "xprovideroverride", "providertype",
 		"channel", "xchannel", "channelid", "xchannelid", "channeloverride", "xchanneloverride", "channeltype",
-		"group", "xgroup", "groupid", "xgroupid", "model", "xmodel", "modelid", "xmodelid", "modelname", "xmodelname", "modeloverride", "xmodeloverride", "reqkey", "xreqkey", "requestkey", "xrequestkey",
+		"group", "xgroup", "groupid", "xgroupid", "model", "xmodel", "modelid", "xmodelid", "modelname", "xmodelname", "modeloverride", "xmodeloverride", "selectedkey", "xselectedkey", "reqkey", "xreqkey", "requestkey", "xrequestkey",
 		"endpoint", "xendpoint", "url", "xurl", "proxy", "xproxy", "headers", "requestheaders",
 		"sourceprofileid", "xsourceprofileid", "profileid", "xprofileid", "internaloptions", "xinternaloptions",
 		"onprogress", "xonprogress", "onsubmitted", "xonsubmitted", "idempotencykey", "xidempotencykey", "idempotency", "xidempotency",
@@ -2267,24 +2272,5 @@ func creativeConflictMessage(conflict bool) string {
 }
 
 func creativeAPIRequestOrigin(c *gin.Context) string {
-	if c == nil || c.Request == nil {
-		return ""
-	}
-
-	scheme := ""
-	if c.Request.URL != nil {
-		scheme = strings.TrimSpace(c.Request.URL.Scheme)
-	}
-	if scheme == "" {
-		if c.Request.TLS != nil {
-			scheme = "https"
-		} else {
-			scheme = "http"
-		}
-	}
-	host := strings.TrimSpace(c.Request.Host)
-	if host == "" {
-		return ""
-	}
-	return scheme + "://" + host
+	return middleware.CreativeRequestOrigin(c)
 }

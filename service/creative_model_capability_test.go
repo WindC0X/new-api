@@ -633,7 +633,7 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	require.NotEmpty(t, state.Manifests)
 	require.NotEmpty(t, state.ParameterTemplates)
 
-	var sawMock, sawDuomiLive, sawQualityLabel, sawDuomiQualityLabel, sawNanoTemplate, sawGrsAISquareLabel, sawGrsAIImageSize, sawGrsAIVIPUltraTall bool
+	var sawMock, sawDuomiLive, sawQualityLabel, sawDuomiQualityLabel, sawNanoTemplate, sawGrsAISquareLabel, sawGrsAIImageSize, sawGrsAIQuality, sawGrsAIVIPQuality bool
 	for _, manifest := range state.Manifests {
 		require.NotContains(t, manifest.Description, "apiKey")
 		require.NotContains(t, manifest.Description, "baseUrl")
@@ -671,16 +671,35 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 				}
 			}
 		}
-		if template.Id == "grsai_gpt_image_vip" {
+		if template.Id == "grsai_gpt_image" {
+			ids := make([]string, 0, len(template.Schema))
 			for _, item := range template.Schema {
-				if item.Id == "aspectRatio" {
-					for _, option := range item.Options {
-						if option.Value == "1:3" && option.Label == "1:3 竖版" {
-							sawGrsAIVIPUltraTall = true
-						}
-					}
+				ids = append(ids, item.Id)
+				if item.Id == "quality" {
+					require.Equal(t, "质量", item.Label)
+					require.Equal(t, "auto", item.DefaultValue)
+					require.Equal(t, []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}, {Value: "medium", Label: "标准"}, {Value: "high", Label: "高清"}}, item.Options)
+					sawGrsAIQuality = true
 				}
 			}
+			require.Equal(t, []string{"aspectRatio", "imageSize", "quality"}, ids)
+		}
+		if template.Id == "grsai_gpt_image_vip" {
+			ids := make([]string, 0, len(template.Schema))
+			for _, item := range template.Schema {
+				ids = append(ids, item.Id)
+				if item.Id == "aspectRatio" {
+					require.NotContains(t, fmtAnyForTest(item.Options), "1:3")
+					require.NotContains(t, fmtAnyForTest(item.Options), "9:21")
+				}
+				if item.Id == "quality" {
+					require.Equal(t, "质量", item.Label)
+					require.Equal(t, "auto", item.DefaultValue)
+					require.Equal(t, []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}, {Value: "medium", Label: "标准"}, {Value: "high", Label: "高清"}}, item.Options)
+					sawGrsAIVIPQuality = true
+				}
+			}
+			require.Equal(t, []string{"aspectRatio", "imageSize", "quality"}, ids)
 		}
 		if template.Id == "duomi_gpt_image" {
 			for _, item := range template.Schema {
@@ -702,7 +721,8 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	require.True(t, sawNanoTemplate)
 	require.True(t, sawGrsAISquareLabel)
 	require.True(t, sawGrsAIImageSize)
-	require.True(t, sawGrsAIVIPUltraTall)
+	require.True(t, sawGrsAIQuality)
+	require.True(t, sawGrsAIVIPQuality)
 }
 
 func TestCreativeLiveBindingAcceptsDuomiCustomMappedAspectOptions(t *testing.T) {
@@ -1334,10 +1354,7 @@ func TestBuildCreativeModelBindingsDryRunMirrorsGrsAIGPTImageLiveMapping(t *test
 			ChannelId:         &channelID,
 			AdapterPreset:     CreativeImageAdapterPresetGrsAILive,
 			ParameterTemplate: "grsai_gpt_image_vip",
-			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "aspectRatio", Label: "图片尺寸", Type: "enum", DefaultValue: "16:9", Options: []dto.CreativeParamOption{{Value: "16:9", Label: "16:9 横版"}}},
-				{Id: "imageSize", Label: "图片分辨率", Type: "enum", DefaultValue: "4K", Options: []dto.CreativeParamOption{{Value: "1K", Label: "1K"}, {Value: "2K", Label: "2K"}, {Value: "4K", Label: "4K"}}},
-			},
+			ParameterSchema:   creativeGrsAIGPTImageVIPSchemaForTest("16:9", "4K", "high"),
 		}},
 	}
 
@@ -1350,6 +1367,7 @@ func TestBuildCreativeModelBindingsDryRunMirrorsGrsAIGPTImageLiveMapping(t *test
 	require.Equal(t, "gpt-image-2-vip", body["model"])
 	require.Equal(t, "3840x2160", body["aspectRatio"])
 	require.Equal(t, "async", body["replyType"])
+	require.Equal(t, "high", body["quality"])
 	require.NotContains(t, body, "imageSize")
 }
 
@@ -1378,10 +1396,7 @@ func TestBuildCreativeModelBindingsDryRunOmitsGrsAIGPTImageAutoAspectRatioLikeLi
 			ChannelId:         &channelID,
 			AdapterPreset:     CreativeImageAdapterPresetGrsAILive,
 			ParameterTemplate: "grsai_gpt_image_vip",
-			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "aspectRatio", Label: "图片尺寸", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "16:9", Label: "16:9 横版"}}},
-				{Id: "imageSize", Label: "图片分辨率", Type: "enum", DefaultValue: "1K", Options: []dto.CreativeParamOption{{Value: "1K", Label: "1K"}, {Value: "2K", Label: "2K"}, {Value: "4K", Label: "4K"}}},
-			},
+			ParameterSchema:   creativeGrsAIGPTImageVIPSchemaForTest("auto", "1K", "auto"),
 		}},
 	}
 
@@ -1394,6 +1409,7 @@ func TestBuildCreativeModelBindingsDryRunOmitsGrsAIGPTImageAutoAspectRatioLikeLi
 	require.Equal(t, "async", body["replyType"])
 	require.NotContains(t, body, "aspectRatio")
 	require.NotContains(t, body, "imageSize")
+	require.NotContains(t, body, "quality")
 }
 
 func TestBuildCreativeModelBindingsDryRunMirrorsDuomiLiveSizeMapping(t *testing.T) {
@@ -1599,4 +1615,51 @@ func TestBuildCreativeModelBindingsDryRunHasNoProviderTransportReferences(t *tes
 
 func fmtAnyForTest(value any) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(fmt.Sprintf("%#v", value))), "\\\\", "")
+}
+
+func creativeGrsAIGPTImageVIPSchemaForTest(defaultAspectRatio string, defaultImageSize string, defaultQuality string) []dto.CreativeParameterSchemaItem {
+	return []dto.CreativeParameterSchemaItem{
+		{
+			Id:           "aspectRatio",
+			Label:        "图片尺寸",
+			Type:         "enum",
+			DefaultValue: defaultAspectRatio,
+			Options: []dto.CreativeParamOption{
+				{Value: "auto", Label: "自动"},
+				{Value: "1:1", Label: "1:1"},
+				{Value: "2:3", Label: "2:3"},
+				{Value: "3:2", Label: "3:2"},
+				{Value: "3:4", Label: "3:4"},
+				{Value: "4:3", Label: "4:3"},
+				{Value: "4:5", Label: "4:5"},
+				{Value: "5:4", Label: "5:4"},
+				{Value: "9:16", Label: "9:16"},
+				{Value: "16:9", Label: "16:9"},
+				{Value: "21:9", Label: "21:9"},
+			},
+		},
+		{
+			Id:           "imageSize",
+			Label:        "图片分辨率",
+			Type:         "enum",
+			DefaultValue: defaultImageSize,
+			Options: []dto.CreativeParamOption{
+				{Value: "1K", Label: "1K"},
+				{Value: "2K", Label: "2K"},
+				{Value: "4K", Label: "4K"},
+			},
+		},
+		{
+			Id:           "quality",
+			Label:        "质量",
+			Type:         "enum",
+			DefaultValue: defaultQuality,
+			Options: []dto.CreativeParamOption{
+				{Value: "auto", Label: "自动"},
+				{Value: "low", Label: "快速"},
+				{Value: "medium", Label: "标准"},
+				{Value: "high", Label: "高清"},
+			},
+		},
+	}
 }

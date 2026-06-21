@@ -2119,7 +2119,9 @@ func TestCreativeImageTaskSubmitGrsAILiveForcesAsyncAndBearerAuth(t *testing.T) 
 		require.NoError(t, err)
 		require.Contains(t, string(body), `"model":"gpt-image-2-vip"`)
 		require.Contains(t, string(body), `"replyType":"async"`)
-		require.Contains(t, string(body), `"aspectRatio":"1K"`)
+		require.Contains(t, string(body), `"aspectRatio":"3840x2160"`)
+		require.Contains(t, string(body), `"quality":"high"`)
+		require.NotContains(t, string(body), `"imageSize"`)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"grs-live-task-1","status":"running","progress":7}`))
 	}))
@@ -2151,7 +2153,9 @@ func TestCreativeImageTaskSubmitGrsAILiveForcesAsyncAndBearerAuth(t *testing.T) 
 			AdapterPreset:     service.CreativeImageAdapterPresetGrsAILive,
 			ParameterTemplate: "grsai_gpt_image_vip",
 			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "aspectRatio", Label: "Aspect Ratio", Type: "enum", DefaultValue: "1K", Options: []dto.CreativeParamOption{{Value: "1K", Label: "1K"}, {Value: "2K", Label: "2K"}, {Value: "4K", Label: "4K"}}},
+				{Id: "aspectRatio", Label: "图片尺寸", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "1:1", Label: "1:1"}, {Value: "2:3", Label: "2:3"}, {Value: "3:2", Label: "3:2"}, {Value: "3:4", Label: "3:4"}, {Value: "4:3", Label: "4:3"}, {Value: "4:5", Label: "4:5"}, {Value: "5:4", Label: "5:4"}, {Value: "9:16", Label: "9:16"}, {Value: "16:9", Label: "16:9"}, {Value: "21:9", Label: "21:9"}}},
+				{Id: "imageSize", Label: "图片分辨率", Type: "enum", DefaultValue: "1K", Options: []dto.CreativeParamOption{{Value: "1K", Label: "1K"}, {Value: "2K", Label: "2K"}, {Value: "4K", Label: "4K"}}},
+				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}, {Value: "medium", Label: "标准"}, {Value: "high", Label: "高清"}}},
 			},
 		}},
 	}
@@ -2173,7 +2177,9 @@ func TestCreativeImageTaskSubmitGrsAILiveForcesAsyncAndBearerAuth(t *testing.T) 
 		"model":  "grsai:gpt-image-2-vip:live",
 		"prompt": "safe grsai live image",
 		"userParams": map[string]any{
-			"aspectRatio": "1K",
+			"aspectRatio": "16:9",
+			"imageSize":   "4K",
+			"quality":     "high",
 		},
 	}, auth.cookies, headers)
 	require.Equal(t, http.StatusAccepted, submit.Code)

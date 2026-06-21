@@ -228,10 +228,11 @@ func TestCreativeGrsAIGPTImageMapsUiAspectAndResolutionToPixelAspectRatio(t *tes
 		Credential:      "grs-key",
 		ProviderModelID: "gpt-image-2-vip",
 		Prompt:          "safe prompt",
-		UserParams:      map[string]any{"aspectRatio": "16:9", "imageSize": "4K"},
+		UserParams:      map[string]any{"aspectRatio": "16:9", "imageSize": "4K", "quality": "high"},
 	})
 	require.NoError(t, err)
 	require.Contains(t, bodies[1], `"aspectRatio":"3840x2160"`)
+	require.Contains(t, bodies[1], `"quality":"high"`)
 	require.NotContains(t, bodies[1], `"imageSize"`)
 }
 
@@ -451,7 +452,7 @@ func TestCreativeGrsAIGPTImageVIPUsesAspectRatioAndResolutionTemplate(t *testing
 			AdapterPreset:     CreativeImageAdapterPresetGrsAILive,
 			ParameterTemplate: "grsai_gpt_image",
 			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "aspectRatio", Label: "比例", Type: "enum", DefaultValue: "16:9", Options: []dto.CreativeParamOption{{Value: "16:9", Label: "16:9"}}},
+				creativeGrsAIGPTImageVIPSchemaForTest("auto", "1K", "auto")[0],
 			},
 		}},
 	}
@@ -461,11 +462,14 @@ func TestCreativeGrsAIGPTImageVIPUsesAspectRatioAndResolutionTemplate(t *testing
 	require.Contains(t, err.Error(), "providerModelId")
 
 	config.Bindings[0].ParameterTemplate = "grsai_gpt_image_vip"
-	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+	err = ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires parameterSchema field")
 
 	config.Bindings[0].ParameterSchema = []dto.CreativeParameterSchemaItem{
-		{Id: "aspectRatio", Label: "图片尺寸", Type: "enum", DefaultValue: "16:9", Options: []dto.CreativeParamOption{{Value: "16:9", Label: "16:9"}}},
+		{Id: "aspectRatio", Label: "图片尺寸", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "1:1", Label: "1:1"}, {Value: "2:3", Label: "2:3"}, {Value: "3:2", Label: "3:2"}, {Value: "3:4", Label: "3:4"}, {Value: "4:3", Label: "4:3"}, {Value: "4:5", Label: "4:5"}, {Value: "5:4", Label: "5:4"}, {Value: "9:16", Label: "9:16"}, {Value: "16:9", Label: "16:9"}, {Value: "21:9", Label: "21:9"}}},
 		{Id: "imageSize", Label: "图片分辨率", Type: "enum", DefaultValue: "8K", Options: []dto.CreativeParamOption{{Value: "8K", Label: "8K"}}},
+		{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}, {Value: "medium", Label: "标准"}, {Value: "high", Label: "高清"}}},
 	}
 	err = ValidateCreativeModelBindingsConfig(config)
 	require.Error(t, err)

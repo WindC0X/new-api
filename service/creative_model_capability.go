@@ -405,9 +405,6 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 						{Value: "9:16", Label: "9:16 竖版"},
 						{Value: "16:9", Label: "16:9 横版"},
 						{Value: "21:9", Label: "21:9 超宽"},
-						{Value: "9:21", Label: "9:21 超高"},
-						{Value: "1:2", Label: "1:2 竖版"},
-						{Value: "2:1", Label: "2:1 横版"},
 					},
 					Order: 10,
 				},
@@ -420,6 +417,21 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 					DefaultValue: "1K",
 					Options:      []dto.CreativeParamOption{{Value: "1K", Label: "1K"}},
 					Order:        20,
+				},
+				{
+					Id:           "quality",
+					Label:        "质量",
+					ShortLabel:   "质量",
+					Description:  "GrsAI GPT image quality parameter. Auto means use the default behavior.",
+					Type:         "enum",
+					DefaultValue: "auto",
+					Options: []dto.CreativeParamOption{
+						{Value: "auto", Label: "自动"},
+						{Value: "low", Label: "快速"},
+						{Value: "medium", Label: "标准"},
+						{Value: "high", Label: "高清"},
+					},
+					Order: 30,
 				},
 			},
 		},
@@ -448,11 +460,6 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 						{Value: "9:16", Label: "9:16 竖版"},
 						{Value: "16:9", Label: "16:9 横版"},
 						{Value: "21:9", Label: "21:9 超宽"},
-						{Value: "9:21", Label: "9:21 超高"},
-						{Value: "1:3", Label: "1:3 竖版"},
-						{Value: "3:1", Label: "3:1 横版"},
-						{Value: "1:2", Label: "1:2 竖版"},
-						{Value: "2:1", Label: "2:1 横版"},
 					},
 					Order: 10,
 				},
@@ -469,6 +476,21 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 						{Value: "4K", Label: "4K"},
 					},
 					Order: 20,
+				},
+				{
+					Id:           "quality",
+					Label:        "质量",
+					ShortLabel:   "质量",
+					Description:  "GrsAI VIP quality parameter. Auto means use the default behavior.",
+					Type:         "enum",
+					DefaultValue: "auto",
+					Options: []dto.CreativeParamOption{
+						{Value: "auto", Label: "自动"},
+						{Value: "low", Label: "快速"},
+						{Value: "medium", Label: "标准"},
+						{Value: "high", Label: "高清"},
+					},
+					Order: 30,
 				},
 			},
 		},
@@ -1258,6 +1280,9 @@ func creativeModelBindingDryRunRequestPreview(binding CreativeModelBindingConfig
 			if mapped := creativeGrsAIGPTImagePixelAspectRatio(binding.ProviderModelId, fmt.Sprint(aspectRatio), fmt.Sprint(imageSize)); mapped != "" {
 				requestBody["aspectRatio"] = mapped
 			}
+			if quality := strings.TrimSpace(fmt.Sprint(creativeDryRunSchemaDefault(binding.ParameterSchema, "quality", "auto"))); quality != "" && quality != "auto" {
+				requestBody["quality"] = quality
+			}
 		} else if fmt.Sprint(aspectRatio) != "auto" {
 			requestBody["aspectRatio"] = aspectRatio
 		}
@@ -1865,7 +1890,69 @@ func creativeValidateAdapterParameterSchemaIDs(binding CreativeModelBindingConfi
 	if visibleFieldCount == 0 {
 		return fmt.Errorf("binding %q live parameterSchema must expose at least one visible field", binding.Id)
 	}
+	if err := creativeValidateRequiredAdapterParameterSchemaContract(binding); err != nil {
+		return err
+	}
 	return nil
+}
+
+type creativeRequiredParameterSchemaContract struct {
+	id      string
+	label   string
+	options []string
+}
+
+func creativeValidateRequiredAdapterParameterSchemaContract(binding CreativeModelBindingConfig) error {
+	var expected []creativeRequiredParameterSchemaContract
+	switch strings.TrimSpace(binding.AdapterPreset) + "|" + strings.TrimSpace(binding.ParameterTemplate) {
+	case CreativeImageAdapterPresetGrsAILive + "|grsai_gpt_image":
+		expected = []creativeRequiredParameterSchemaContract{
+			{id: "aspectRatio", label: "图片尺寸", options: []string{"auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"}},
+			{id: "imageSize", label: "图片分辨率", options: []string{"1K"}},
+			{id: "quality", label: "质量", options: []string{"auto", "low", "medium", "high"}},
+		}
+	case CreativeImageAdapterPresetGrsAILive + "|grsai_gpt_image_vip":
+		expected = []creativeRequiredParameterSchemaContract{
+			{id: "aspectRatio", label: "图片尺寸", options: []string{"auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"}},
+			{id: "imageSize", label: "图片分辨率", options: []string{"1K", "2K", "4K"}},
+			{id: "quality", label: "质量", options: []string{"auto", "low", "medium", "high"}},
+		}
+	default:
+		return nil
+	}
+
+	byID := make(map[string]dto.CreativeParameterSchemaItem, len(binding.ParameterSchema))
+	for _, item := range binding.ParameterSchema {
+		byID[strings.TrimSpace(item.Id)] = item
+	}
+	for _, required := range expected {
+		item, ok := byID[required.id]
+		if !ok {
+			return fmt.Errorf("binding %q parameterTemplate %q requires parameterSchema field %q", binding.Id, binding.ParameterTemplate, required.id)
+		}
+		if item.Hidden {
+			return fmt.Errorf("binding %q parameterSchema field %q must be visible", binding.Id, required.id)
+		}
+		if strings.TrimSpace(item.Label) != required.label {
+			return fmt.Errorf("binding %q parameterSchema field %q label must be %q", binding.Id, required.id, required.label)
+		}
+		if !creativeParameterSchemaOptionValuesEqual(item.Options, required.options) {
+			return fmt.Errorf("binding %q parameterSchema field %q options must be %v", binding.Id, required.id, required.options)
+		}
+	}
+	return nil
+}
+
+func creativeParameterSchemaOptionValuesEqual(options []dto.CreativeParamOption, expected []string) bool {
+	if len(options) != len(expected) {
+		return false
+	}
+	for index, option := range options {
+		if strings.TrimSpace(fmt.Sprint(option.Value)) != expected[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func creativeValidateAdapterParameterSchemaValueSet(binding CreativeModelBindingConfig, item dto.CreativeParameterSchemaItem) error {
@@ -1923,12 +2010,10 @@ func creativeGrsAIParameterSchemaAllowedValues(template string, id string) map[s
 	id = strings.TrimSpace(id)
 	gptAspectRatios := map[string]struct{}{
 		"auto": {}, "1:1": {}, "2:3": {}, "3:2": {}, "3:4": {}, "4:3": {}, "4:5": {}, "5:4": {},
-		"9:16": {}, "16:9": {}, "21:9": {}, "9:21": {}, "1:2": {}, "2:1": {},
+		"9:16": {}, "16:9": {}, "21:9": {},
 	}
-	vipAspectRatios := map[string]struct{}{
-		"auto": {}, "1:1": {}, "2:3": {}, "3:2": {}, "3:4": {}, "4:3": {}, "4:5": {}, "5:4": {},
-		"9:16": {}, "16:9": {}, "21:9": {}, "9:21": {}, "1:3": {}, "3:1": {}, "1:2": {}, "2:1": {},
-	}
+	vipAspectRatios := gptAspectRatios
+	qualityValues := map[string]struct{}{"auto": {}, "low": {}, "medium": {}, "high": {}}
 	switch template {
 	case "grsai_gpt_image":
 		switch id {
@@ -1936,6 +2021,8 @@ func creativeGrsAIParameterSchemaAllowedValues(template string, id string) map[s
 			return gptAspectRatios
 		case "imageSize":
 			return map[string]struct{}{"1K": {}}
+		case "quality":
+			return qualityValues
 		}
 	case "grsai_gpt_image_vip":
 		switch id {
@@ -1943,6 +2030,8 @@ func creativeGrsAIParameterSchemaAllowedValues(template string, id string) map[s
 			return vipAspectRatios
 		case "imageSize":
 			return map[string]struct{}{"1K": {}, "2K": {}, "4K": {}}
+		case "quality":
+			return qualityValues
 		}
 	}
 	return nil
@@ -1953,9 +2042,9 @@ func creativeAdapterSupportedParameterIDs(preset string, template string) map[st
 	case CreativeImageAdapterPresetDuomiLive + "|duomi_gpt_image":
 		return map[string]struct{}{"size": {}, "quality": {}}
 	case CreativeImageAdapterPresetGrsAILive + "|grsai_gpt_image":
-		return map[string]struct{}{"aspectRatio": {}, "imageSize": {}}
+		return map[string]struct{}{"aspectRatio": {}, "imageSize": {}, "quality": {}}
 	case CreativeImageAdapterPresetGrsAILive + "|grsai_gpt_image_vip":
-		return map[string]struct{}{"aspectRatio": {}, "imageSize": {}}
+		return map[string]struct{}{"aspectRatio": {}, "imageSize": {}, "quality": {}}
 	case CreativeImageAdapterPresetGrsAILive + "|grsai_nano_banana":
 		return map[string]struct{}{"aspectRatio": {}, "imageSize": {}}
 	default:

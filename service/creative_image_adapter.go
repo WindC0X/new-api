@@ -215,6 +215,9 @@ func (grsAICreativeImageAdapter) submit(ctx context.Context, req CreativeImagePr
 	if value := creativeGrsAIImageSizeParam(req); value != "" {
 		body["imageSize"] = value
 	}
+	if value := creativeStringParam(req.UserParams, "quality"); value != "" && value != "auto" {
+		body["quality"] = value
+	}
 	if len(req.Images) > 0 {
 		body["images"] = req.Images
 	}

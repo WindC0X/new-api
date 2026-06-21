@@ -191,15 +191,32 @@ func (duomiCreativeImageAdapter) poll(ctx context.Context, req CreativeImageProv
 type grsAICreativeImageAdapter struct{}
 
 func creativeDuomiSizeParam(params map[string]any) string {
-	size := creativeStringParam(params, "size")
-	switch size {
+	aspectRatio := creativeStringParam(params, "aspectRatio")
+	if aspectRatio == "" {
+		// Backward-compatible legacy schema support. New Duomi bindings use
+		// aspectRatio + imageSize and the adapter maps them to the provider size.
+		aspectRatio = creativeStringParam(params, "size")
+	}
+	imageSize := creativeStringParam(params, "imageSize")
+	if imageSize == "" {
+		imageSize = "1K"
+	}
+	if aspectRatio == "" || aspectRatio == "auto" {
+		return ""
+	}
+	if imageSize != "" && imageSize != "1K" {
+		imageSize = "1K"
+	}
+	switch aspectRatio {
+	case "1024x1024", "1:1":
+		return "1024x1024"
 	case "21:9":
 		// Duomi documents custom widthxheight sizes but does not list raw 21:9
 		// as a size enum. Keep the UI aspect option while sending a documented
 		// custom size that is divisible by 16 and within the provider pixel budget.
 		return "1792x768"
 	default:
-		return size
+		return aspectRatio
 	}
 }
 

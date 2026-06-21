@@ -633,7 +633,7 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	require.NotEmpty(t, state.Manifests)
 	require.NotEmpty(t, state.ParameterTemplates)
 
-	var sawMock, sawDuomiLive, sawQualityLabel, sawDuomiQualityLabel, sawNanoTemplate, sawGrsAISquareLabel, sawGrsAIImageSize, sawGrsAIQuality, sawGrsAIVIPQuality bool
+	var sawMock, sawDuomiLive, sawQualityLabel, sawDuomiAspect, sawDuomiImageSize, sawDuomiQualityLabel, sawNanoTemplate, sawGrsAISquareLabel, sawGrsAIImageSize, sawGrsAIQuality, sawGrsAIVIPQuality bool
 	for _, manifest := range state.Manifests {
 		require.NotContains(t, manifest.Description, "apiKey")
 		require.NotContains(t, manifest.Description, "baseUrl")
@@ -702,11 +702,27 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 			require.Equal(t, []string{"aspectRatio", "imageSize", "quality"}, ids)
 		}
 		if template.Id == "duomi_gpt_image" {
+			ids := make([]string, 0, len(template.Schema))
 			for _, item := range template.Schema {
+				ids = append(ids, item.Id)
+				if item.Id == "aspectRatio" {
+					require.Equal(t, "图片尺寸", item.Label)
+					require.NotContains(t, fmtAnyForTest(item.Options), "1024x1024")
+					require.NotContains(t, fmtAnyForTest(item.Options), "1:2")
+					require.NotContains(t, fmtAnyForTest(item.Options), "2:1")
+					require.Contains(t, fmtAnyForTest(item.Options), "21:9")
+					sawDuomiAspect = true
+				}
+				if item.Id == "imageSize" {
+					require.Equal(t, "图片分辨率", item.Label)
+					require.Equal(t, []dto.CreativeParamOption{{Value: "1K", Label: "1K"}}, item.Options)
+					sawDuomiImageSize = true
+				}
 				if item.Id == "quality" && item.Label == "质量" && item.ShortLabel == "质量" {
 					sawDuomiQualityLabel = true
 				}
 			}
+			require.Equal(t, []string{"aspectRatio", "imageSize", "quality"}, ids)
 		}
 		for _, item := range template.Schema {
 			if item.Id == "quality" && item.Label == "质量" {
@@ -716,6 +732,8 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	}
 	require.True(t, sawMock)
 	require.True(t, sawDuomiLive)
+	require.True(t, sawDuomiAspect)
+	require.True(t, sawDuomiImageSize)
 	require.True(t, sawQualityLabel)
 	require.True(t, sawDuomiQualityLabel)
 	require.True(t, sawNanoTemplate)
@@ -751,10 +769,7 @@ func TestCreativeLiveBindingAcceptsDuomiCustomMappedAspectOptions(t *testing.T) 
 			ChannelId:         &channelID,
 			AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
 			ParameterTemplate: "duomi_gpt_image",
-			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "size", Label: "图片尺寸", Type: "enum", DefaultValue: "21:9", Options: []dto.CreativeParamOption{{Value: "21:9", Label: "21:9 超宽"}}},
-				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}}},
-			},
+			ParameterSchema:   creativeDuomiGPTImageSchemaForTest("21:9", "auto"),
 		}},
 	}
 
@@ -778,6 +793,7 @@ func TestValidateCreativeModelBindingsConfigRejectsEnabledDryRunAndInvalidLive(t
 	config = validCreativeModelBindingsConfigForTest()
 	config.Bindings[0].AdapterPreset = "duomi_image_live"
 	config.Bindings[0].ParameterTemplate = "duomi_gpt_image"
+	config.Bindings[0].ParameterSchema = creativeDuomiGPTImageSchemaForTest("1:1", "auto")
 	config.Bindings[0].Enabled = false
 	err = ValidateCreativeModelBindingsConfig(config)
 	require.Error(t, err)
@@ -1437,10 +1453,7 @@ func TestBuildCreativeModelBindingsDryRunMirrorsDuomiLiveSizeMapping(t *testing.
 			ChannelId:         &channelID,
 			AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
 			ParameterTemplate: "duomi_gpt_image",
-			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "size", Label: "图片尺寸", Type: "enum", DefaultValue: "21:9", Options: []dto.CreativeParamOption{{Value: "21:9", Label: "21:9 超宽"}}},
-				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}}},
-			},
+			ParameterSchema:   creativeDuomiGPTImageSchemaForTest("21:9", "high"),
 		}},
 	}
 
@@ -1450,7 +1463,10 @@ func TestBuildCreativeModelBindingsDryRunMirrorsDuomiLiveSizeMapping(t *testing.
 
 	body := result.Bindings[0].RequestPreview["requestBody"].(map[string]any)
 	require.Equal(t, "1792x768", body["size"])
+	require.Equal(t, "high", body["quality"])
 	require.NotEqual(t, "21:9", body["size"])
+	require.NotContains(t, body, "aspectRatio")
+	require.NotContains(t, body, "imageSize")
 }
 
 func TestBuildCreativeModelBindingsDryRunOmitsDuomiAutoQualityLikeLiveAdapter(t *testing.T) {
@@ -1478,10 +1494,7 @@ func TestBuildCreativeModelBindingsDryRunOmitsDuomiAutoQualityLikeLiveAdapter(t 
 			ChannelId:         &channelID,
 			AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
 			ParameterTemplate: "duomi_gpt_image",
-			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "size", Label: "图片尺寸", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}}},
-				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}}},
-			},
+			ParameterSchema:   creativeDuomiGPTImageSchemaForTest("auto", "auto"),
 		}},
 	}
 
@@ -1490,8 +1503,10 @@ func TestBuildCreativeModelBindingsDryRunOmitsDuomiAutoQualityLikeLiveAdapter(t 
 	require.Len(t, result.Bindings, 1)
 
 	body := result.Bindings[0].RequestPreview["requestBody"].(map[string]any)
-	require.Equal(t, "auto", body["size"])
+	require.NotContains(t, body, "size")
 	require.NotContains(t, body, "quality")
+	require.NotContains(t, body, "aspectRatio")
+	require.NotContains(t, body, "imageSize")
 }
 
 func TestParseCreativeGrsAIImageFixtureResponseRedactsProviderResults(t *testing.T) {
@@ -1648,6 +1663,49 @@ func creativeGrsAIGPTImageVIPSchemaForTest(defaultAspectRatio string, defaultIma
 				{Value: "2K", Label: "2K"},
 				{Value: "4K", Label: "4K"},
 			},
+		},
+		{
+			Id:           "quality",
+			Label:        "质量",
+			Type:         "enum",
+			DefaultValue: defaultQuality,
+			Options: []dto.CreativeParamOption{
+				{Value: "auto", Label: "自动"},
+				{Value: "low", Label: "快速"},
+				{Value: "medium", Label: "标准"},
+				{Value: "high", Label: "高清"},
+			},
+		},
+	}
+}
+
+func creativeDuomiGPTImageSchemaForTest(defaultAspectRatio string, defaultQuality string) []dto.CreativeParameterSchemaItem {
+	return []dto.CreativeParameterSchemaItem{
+		{
+			Id:           "aspectRatio",
+			Label:        "图片尺寸",
+			Type:         "enum",
+			DefaultValue: defaultAspectRatio,
+			Options: []dto.CreativeParamOption{
+				{Value: "auto", Label: "自动"},
+				{Value: "1:1", Label: "1:1"},
+				{Value: "2:3", Label: "2:3"},
+				{Value: "3:2", Label: "3:2"},
+				{Value: "3:4", Label: "3:4"},
+				{Value: "4:3", Label: "4:3"},
+				{Value: "4:5", Label: "4:5"},
+				{Value: "5:4", Label: "5:4"},
+				{Value: "9:16", Label: "9:16"},
+				{Value: "16:9", Label: "16:9"},
+				{Value: "21:9", Label: "21:9"},
+			},
+		},
+		{
+			Id:           "imageSize",
+			Label:        "图片分辨率",
+			Type:         "enum",
+			DefaultValue: "1K",
+			Options:      []dto.CreativeParamOption{{Value: "1K", Label: "1K"}},
 		},
 		{
 			Id:           "quality",

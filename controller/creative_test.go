@@ -2033,10 +2033,7 @@ func TestCreativeImageTaskSubmitLiveBindingUsesLockedChannelAndSanitizedDTO(t *t
 			ChannelId:         &channelID,
 			AdapterPreset:     service.CreativeImageAdapterPresetDuomiLive,
 			ParameterTemplate: "duomi_gpt_image",
-			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "size", Label: "Size", Type: "enum", DefaultValue: "1024x1024", Options: []dto.CreativeParamOption{{Value: "1024x1024", Label: "1024×1024"}}},
-				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "medium", Options: []dto.CreativeParamOption{{Value: "medium", Label: "Medium"}, {Value: "high", Label: "High"}}},
-			},
+			ParameterSchema:   creativeDuomiGPTImageSchemaForControllerTest("1:1", "medium"),
 		}},
 	}
 	configJSON, err := service.NormalizeCreativeModelBindingsConfigJSON(config)
@@ -2058,8 +2055,9 @@ func TestCreativeImageTaskSubmitLiveBindingUsesLockedChannelAndSanitizedDTO(t *t
 		"model":  "duomi:gpt-image-2:live",
 		"prompt": "safe live image",
 		"userParams": map[string]any{
-			"size":    "1024x1024",
-			"quality": "high",
+			"aspectRatio": "1:1",
+			"imageSize":   "1K",
+			"quality":     "high",
 		},
 	}, auth.cookies, headers)
 
@@ -2087,8 +2085,9 @@ func TestCreativeImageTaskSubmitLiveBindingUsesLockedChannelAndSanitizedDTO(t *t
 		"model":  "duomi:gpt-image-2:live",
 		"prompt": "safe live image",
 		"userParams": map[string]any{
-			"size":    "1024x1024",
-			"quality": "high",
+			"aspectRatio": "1:1",
+			"imageSize":   "1K",
+			"quality":     "high",
 		},
 	}, auth.cookies, headers)
 	require.Equal(t, http.StatusOK, replay.Code)
@@ -2244,9 +2243,7 @@ func TestCreativeImageTaskSubmitLiveRecordsConsumptionOnce(t *testing.T) {
 			ChannelId:         &channelID,
 			AdapterPreset:     service.CreativeImageAdapterPresetDuomiLive,
 			ParameterTemplate: "duomi_gpt_image",
-			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "size", Label: "Size", Type: "enum", DefaultValue: "1024x1024", Options: []dto.CreativeParamOption{{Value: "1024x1024", Label: "1024×1024"}}},
-			},
+			ParameterSchema:   creativeDuomiGPTImageSchemaForControllerTest("1:1", "auto"),
 		}},
 	}
 	configJSON, err := service.NormalizeCreativeModelBindingsConfigJSON(config)
@@ -2268,7 +2265,8 @@ func TestCreativeImageTaskSubmitLiveRecordsConsumptionOnce(t *testing.T) {
 		"model":  "duomi:gpt-image-2:live",
 		"prompt": "safe live billing image",
 		"userParams": map[string]any{
-			"size": "1024x1024",
+			"aspectRatio": "1:1",
+			"imageSize":   "1K",
 		},
 	}, auth.cookies, headers)
 	require.Equal(t, http.StatusAccepted, submit.Code)
@@ -2349,10 +2347,7 @@ func TestCreativeImageTaskSubmitLiveAcceptedInsertFailureRefundsAndKeepsGuard(t 
 			ChannelId:         &channelID,
 			AdapterPreset:     service.CreativeImageAdapterPresetDuomiLive,
 			ParameterTemplate: "duomi_gpt_image",
-			ParameterSchema: []dto.CreativeParameterSchemaItem{
-				{Id: "size", Label: "Size", Type: "enum", DefaultValue: "1024x1024", Options: []dto.CreativeParamOption{{Value: "1024x1024", Label: "1024×1024"}}},
-				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "medium", Options: []dto.CreativeParamOption{{Value: "medium", Label: "Medium"}, {Value: "high", Label: "High"}}},
-			},
+			ParameterSchema:   creativeDuomiGPTImageSchemaForControllerTest("1:1", "medium"),
 		}},
 	}
 	configJSON, err := service.NormalizeCreativeModelBindingsConfigJSON(config)
@@ -2373,8 +2368,9 @@ func TestCreativeImageTaskSubmitLiveAcceptedInsertFailureRefundsAndKeepsGuard(t 
 		"model":  "duomi:gpt-image-2:live",
 		"prompt": "safe live image",
 		"userParams": map[string]any{
-			"size":    "1024x1024",
-			"quality": "high",
+			"aspectRatio": "1:1",
+			"imageSize":   "1K",
+			"quality":     "high",
 		},
 	}
 	submit := performCreativeSessionJSON(t, router, http.MethodPost, "/creative/relay/v1/images/tasks", body, auth.cookies, headers)
@@ -2692,6 +2688,49 @@ func TestCreativeImageTaskContentProxiesLiveResultPrivately(t *testing.T) {
 	require.Equal(t, 1, providerHits)
 }
 
+func creativeDuomiGPTImageSchemaForControllerTest(defaultAspectRatio string, defaultQuality string) []dto.CreativeParameterSchemaItem {
+	return []dto.CreativeParameterSchemaItem{
+		{
+			Id:           "aspectRatio",
+			Label:        "图片尺寸",
+			Type:         "enum",
+			DefaultValue: defaultAspectRatio,
+			Options: []dto.CreativeParamOption{
+				{Value: "auto", Label: "自动"},
+				{Value: "1:1", Label: "1:1"},
+				{Value: "2:3", Label: "2:3"},
+				{Value: "3:2", Label: "3:2"},
+				{Value: "3:4", Label: "3:4"},
+				{Value: "4:3", Label: "4:3"},
+				{Value: "4:5", Label: "4:5"},
+				{Value: "5:4", Label: "5:4"},
+				{Value: "9:16", Label: "9:16"},
+				{Value: "16:9", Label: "16:9"},
+				{Value: "21:9", Label: "21:9"},
+			},
+		},
+		{
+			Id:           "imageSize",
+			Label:        "图片分辨率",
+			Type:         "enum",
+			DefaultValue: "1K",
+			Options:      []dto.CreativeParamOption{{Value: "1K", Label: "1K"}},
+		},
+		{
+			Id:           "quality",
+			Label:        "质量",
+			Type:         "enum",
+			DefaultValue: defaultQuality,
+			Options: []dto.CreativeParamOption{
+				{Value: "auto", Label: "自动"},
+				{Value: "low", Label: "快速"},
+				{Value: "medium", Label: "标准"},
+				{Value: "high", Label: "高清"},
+			},
+		},
+	}
+}
+
 func creativeLiveImageTaskForTest(taskID string, userID int, channelID int, status model.TaskStatus) *model.Task {
 	now := common.GetTimestamp()
 	task := &model.Task{
@@ -2734,7 +2773,7 @@ func creativeLiveImageTaskForTest(taskID string, userID int, channelID int, stat
 		AdapterPreset:     service.CreativeImageAdapterPresetDuomiLive,
 		ParameterTemplate: "duomi_gpt_image",
 		ChannelId:         channelID,
-		UserParams:        map[string]any{"quality": "high", "size": "1024x1024"},
+		UserParams:        map[string]any{"aspectRatio": "1:1", "imageSize": "1K", "quality": "high"},
 	})
 	return task
 }

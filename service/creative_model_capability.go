@@ -501,15 +501,14 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 			Modality:    "image",
 			Schema: []dto.CreativeParameterSchemaItem{
 				{
-					Id:           "size",
+					Id:           "aspectRatio",
 					Label:        "图片尺寸",
 					ShortLabel:   "尺寸",
-					Description:  "Image size or aspect ratio interpreted by the Duomi adapter.",
+					Description:  "Duomi GPT image aspect ratio for the selected 1K tier.",
 					Type:         "enum",
 					DefaultValue: "auto",
 					Options: []dto.CreativeParamOption{
 						{Value: "auto", Label: "自动"},
-						{Value: "1024x1024", Label: "1024×1024"},
 						{Value: "1:1", Label: "1:1 方形"},
 						{Value: "2:3", Label: "2:3 竖版"},
 						{Value: "3:2", Label: "3:2 横版"},
@@ -520,10 +519,18 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 						{Value: "9:16", Label: "9:16 竖版"},
 						{Value: "16:9", Label: "16:9 横版"},
 						{Value: "21:9", Label: "21:9 超宽"},
-						{Value: "1:2", Label: "1:2 竖版"},
-						{Value: "2:1", Label: "2:1 横版"},
 					},
 					Order: 10,
+				},
+				{
+					Id:           "imageSize",
+					Label:        "图片分辨率",
+					ShortLabel:   "分辨率",
+					Description:  "Duomi gpt-image-2 supports the 1K tier.",
+					Type:         "enum",
+					DefaultValue: "1K",
+					Options:      []dto.CreativeParamOption{{Value: "1K", Label: "1K"}},
+					Order:        20,
 				},
 				{
 					Id:           "quality",
@@ -538,7 +545,7 @@ func creativeParameterTemplatesRegistry() []CreativeParameterTemplate {
 						{Value: "medium", Label: "标准"},
 						{Value: "high", Label: "高清"},
 					},
-					Order: 20,
+					Order: 30,
 				},
 			},
 		},
@@ -1246,7 +1253,11 @@ func creativeModelBindingDryRunRequestPreview(binding CreativeModelBindingConfig
 			"model":  binding.ProviderModelId,
 			"prompt": "<user-prompt>",
 		}
-		if size := creativeDuomiSizeParam(map[string]any{"size": creativeDryRunSchemaDefault(binding.ParameterSchema, "size", "1024x1024")}); size != "" {
+		if size := creativeDuomiSizeParam(map[string]any{
+			"aspectRatio": creativeDryRunSchemaDefault(binding.ParameterSchema, "aspectRatio", "auto"),
+			"imageSize":   creativeDryRunSchemaDefault(binding.ParameterSchema, "imageSize", "1K"),
+			"size":        creativeDryRunSchemaDefault(binding.ParameterSchema, "size", ""),
+		}); size != "" {
 			requestBody["size"] = size
 		}
 		if quality := creativeDryRunSchemaDefault(binding.ParameterSchema, "quality", "auto"); fmt.Sprint(quality) != "auto" {
@@ -1905,6 +1916,12 @@ type creativeRequiredParameterSchemaContract struct {
 func creativeValidateRequiredAdapterParameterSchemaContract(binding CreativeModelBindingConfig) error {
 	var expected []creativeRequiredParameterSchemaContract
 	switch strings.TrimSpace(binding.AdapterPreset) + "|" + strings.TrimSpace(binding.ParameterTemplate) {
+	case CreativeImageAdapterPresetDuomiLive + "|duomi_gpt_image":
+		expected = []creativeRequiredParameterSchemaContract{
+			{id: "aspectRatio", label: "图片尺寸", options: []string{"auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"}},
+			{id: "imageSize", label: "图片分辨率", options: []string{"1K"}},
+			{id: "quality", label: "质量", options: []string{"auto", "low", "medium", "high"}},
+		}
 	case CreativeImageAdapterPresetGrsAILive + "|grsai_gpt_image":
 		expected = []creativeRequiredParameterSchemaContract{
 			{id: "aspectRatio", label: "图片尺寸", options: []string{"auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"}},
@@ -1992,12 +2009,15 @@ func creativeDuomiParameterSchemaAllowedValues(template string, id string) map[s
 	if template != "duomi_gpt_image" {
 		return nil
 	}
+	aspectRatios := map[string]struct{}{
+		"auto": {}, "1:1": {}, "2:3": {}, "3:2": {}, "3:4": {}, "4:3": {}, "4:5": {}, "5:4": {},
+		"9:16": {}, "16:9": {}, "21:9": {},
+	}
 	switch id {
-	case "size":
-		return map[string]struct{}{
-			"auto": {}, "1024x1024": {}, "1:1": {}, "2:3": {}, "3:2": {}, "3:4": {}, "4:3": {},
-			"4:5": {}, "5:4": {}, "9:16": {}, "16:9": {}, "21:9": {}, "1:2": {}, "2:1": {},
-		}
+	case "aspectRatio":
+		return aspectRatios
+	case "imageSize":
+		return map[string]struct{}{"1K": {}}
 	case "quality":
 		return map[string]struct{}{"auto": {}, "low": {}, "medium": {}, "high": {}}
 	default:
@@ -2040,7 +2060,7 @@ func creativeGrsAIParameterSchemaAllowedValues(template string, id string) map[s
 func creativeAdapterSupportedParameterIDs(preset string, template string) map[string]struct{} {
 	switch strings.TrimSpace(preset) + "|" + strings.TrimSpace(template) {
 	case CreativeImageAdapterPresetDuomiLive + "|duomi_gpt_image":
-		return map[string]struct{}{"size": {}, "quality": {}}
+		return map[string]struct{}{"aspectRatio": {}, "imageSize": {}, "quality": {}}
 	case CreativeImageAdapterPresetGrsAILive + "|grsai_gpt_image":
 		return map[string]struct{}{"aspectRatio": {}, "imageSize": {}, "quality": {}}
 	case CreativeImageAdapterPresetGrsAILive + "|grsai_gpt_image_vip":

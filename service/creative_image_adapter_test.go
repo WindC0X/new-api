@@ -129,7 +129,10 @@ func TestCreativeImageProviderAdaptersMapHTTPContracts(t *testing.T) {
 		switch r.URL.RequestURI() {
 		case "/v1/images/generations?async=true":
 			require.Equal(t, "duomi-key", r.Header.Get("Authorization"))
-			require.Contains(t, readRequestBodyForTest(t, r), `"quality":"high"`)
+			body := readRequestBodyForTest(t, r)
+			require.Contains(t, body, `"quality":"high"`)
+			require.Contains(t, body, `"size":"1792x768"`)
+			require.NotContains(t, body, `"size":"21:9"`)
 			_, _ = w.Write([]byte(`{"id":"dm-http-1","state":"running","progress":9}`))
 		case "/v1/tasks/dm-http-1":
 			require.Equal(t, "duomi-key", r.Header.Get("Authorization"))
@@ -157,7 +160,7 @@ func TestCreativeImageProviderAdaptersMapHTTPContracts(t *testing.T) {
 		Credential:      "duomi-key",
 		ProviderModelID: "gpt-image-2",
 		Prompt:          "safe prompt",
-		UserParams:      map[string]any{"quality": "high", "size": "1024x1024"},
+		UserParams:      map[string]any{"quality": "high", "size": "21:9"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "dm-http-1", duomiSubmit.UpstreamTaskID)
@@ -191,6 +194,92 @@ func TestCreativeImageProviderAdaptersMapHTTPContracts(t *testing.T) {
 	require.Equal(t, string(model.TaskStatusSuccess), string(grsPoll.Status))
 	require.Equal(t, "https://cdn.example/grs.png", grsPoll.ResultURL)
 	require.Len(t, seen, 4)
+}
+
+func TestCreativeGrsAIGPTImageMapsUiAspectAndResolutionToPixelAspectRatio(t *testing.T) {
+	previousClient := httpClient
+	defer func() { httpClient = previousClient }()
+
+	var bodies []string
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/api/generate", r.URL.RequestURI())
+		bodies = append(bodies, readRequestBodyForTest(t, r))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"grs-map","status":"running","progress":1}`))
+	}))
+	defer provider.Close()
+	httpClient = provider.Client()
+
+	_, err := SubmitCreativeImageProviderTask(t.Context(), CreativeImageProviderRequest{
+		AdapterPreset:   CreativeImageAdapterPresetGrsAILive,
+		Endpoint:        provider.URL,
+		Credential:      "grs-key",
+		ProviderModelID: "gpt-image-2",
+		Prompt:          "safe prompt",
+		UserParams:      map[string]any{"aspectRatio": "3:4", "imageSize": "1K"},
+	})
+	require.NoError(t, err)
+	require.Contains(t, bodies[0], `"aspectRatio":"1090x1443"`)
+	require.NotContains(t, bodies[0], `"imageSize"`)
+
+	_, err = SubmitCreativeImageProviderTask(t.Context(), CreativeImageProviderRequest{
+		AdapterPreset:   CreativeImageAdapterPresetGrsAILive,
+		Endpoint:        provider.URL,
+		Credential:      "grs-key",
+		ProviderModelID: "gpt-image-2-vip",
+		Prompt:          "safe prompt",
+		UserParams:      map[string]any{"aspectRatio": "16:9", "imageSize": "4K"},
+	})
+	require.NoError(t, err)
+	require.Contains(t, bodies[1], `"aspectRatio":"3840x2160"`)
+	require.NotContains(t, bodies[1], `"imageSize"`)
+}
+
+func TestCreativeImageProviderAdaptersOmitMissingOptionalParams(t *testing.T) {
+	previousClient := httpClient
+	defer func() { httpClient = previousClient }()
+
+	var bodies []string
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodies = append(bodies, readRequestBodyForTest(t, r))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/images/generations":
+			_, _ = w.Write([]byte(`{"id":"dm-default","state":"running","progress":1}`))
+		case "/v1/api/generate":
+			_, _ = w.Write([]byte(`{"id":"grs-default","status":"running","progress":1}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer provider.Close()
+	httpClient = provider.Client()
+
+	_, err := SubmitCreativeImageProviderTask(t.Context(), CreativeImageProviderRequest{
+		AdapterPreset:   CreativeImageAdapterPresetDuomiLive,
+		Endpoint:        provider.URL,
+		Credential:      "duomi-key",
+		ProviderModelID: "gpt-image-2",
+		Prompt:          "safe prompt",
+		UserParams:      map[string]any{},
+	})
+	require.NoError(t, err)
+	require.NotContains(t, bodies[0], "<nil>")
+	require.NotContains(t, bodies[0], `"size"`)
+	require.NotContains(t, bodies[0], `"quality"`)
+
+	_, err = SubmitCreativeImageProviderTask(t.Context(), CreativeImageProviderRequest{
+		AdapterPreset:   CreativeImageAdapterPresetGrsAILive,
+		Endpoint:        provider.URL,
+		Credential:      "grs-key",
+		ProviderModelID: "gpt-image-2-vip",
+		Prompt:          "safe prompt",
+		UserParams:      map[string]any{"aspectRatio": "16:9"},
+	})
+	require.NoError(t, err)
+	require.NotContains(t, bodies[1], "<nil>")
+	require.Contains(t, bodies[1], `"aspectRatio":"1280x720"`)
+	require.NotContains(t, bodies[1], `"imageSize"`)
 }
 
 func TestFetchCreativeImageProviderContentRejectsSVG(t *testing.T) {
@@ -335,7 +424,7 @@ func TestCreativeLiveBindingRejectsSchemaFieldsNotMappedByAdapter(t *testing.T) 
 	require.Contains(t, err.Error(), "not supported")
 }
 
-func TestCreativeGrsAIGPTImageVIPRequiresPixelSchemaTemplate(t *testing.T) {
+func TestCreativeGrsAIGPTImageVIPUsesAspectRatioAndResolutionTemplate(t *testing.T) {
 	setupCreativeCapabilityServiceTestDB(t)
 	baseURL := "https://grsai.example"
 	require.NoError(t, model.DB.Create(&model.Channel{
@@ -372,12 +461,22 @@ func TestCreativeGrsAIGPTImageVIPRequiresPixelSchemaTemplate(t *testing.T) {
 	require.Contains(t, err.Error(), "providerModelId")
 
 	config.Bindings[0].ParameterTemplate = "grsai_gpt_image_vip"
-	err = ValidateCreativeModelBindingsConfig(config)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "aspectRatio")
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
 
 	config.Bindings[0].ParameterSchema = []dto.CreativeParameterSchemaItem{
-		{Id: "aspectRatio", Label: "尺寸", Type: "enum", DefaultValue: "1K", Options: []dto.CreativeParamOption{{Value: "1K", Label: "1K"}, {Value: "2K", Label: "2K"}, {Value: "4K", Label: "4K"}}},
+		{Id: "aspectRatio", Label: "图片尺寸", Type: "enum", DefaultValue: "16:9", Options: []dto.CreativeParamOption{{Value: "16:9", Label: "16:9"}}},
+		{Id: "imageSize", Label: "图片分辨率", Type: "enum", DefaultValue: "8K", Options: []dto.CreativeParamOption{{Value: "8K", Label: "8K"}}},
+	}
+	err = ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "imageSize")
+
+	config.Bindings[0].ParameterSchema[1] = dto.CreativeParameterSchemaItem{
+		Id:           "imageSize",
+		Label:        "图片分辨率",
+		Type:         "enum",
+		DefaultValue: "1K",
+		Options:      []dto.CreativeParamOption{{Value: "1K", Label: "1K"}, {Value: "2K", Label: "2K"}, {Value: "4K", Label: "4K"}},
 	}
 	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
 }

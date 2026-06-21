@@ -160,7 +160,7 @@ func (duomiCreativeImageAdapter) submit(ctx context.Context, req CreativeImagePr
 		"model":  req.ProviderModelID,
 		"prompt": req.Prompt,
 	}
-	if value := creativeStringParam(req.UserParams, "size"); value != "" {
+	if value := creativeDuomiSizeParam(req.UserParams); value != "" {
 		body["size"] = value
 	}
 	if value := creativeStringParam(req.UserParams, "quality"); value != "" && value != "auto" {
@@ -190,16 +190,29 @@ func (duomiCreativeImageAdapter) poll(ctx context.Context, req CreativeImageProv
 
 type grsAICreativeImageAdapter struct{}
 
+func creativeDuomiSizeParam(params map[string]any) string {
+	size := creativeStringParam(params, "size")
+	switch size {
+	case "21:9":
+		// Duomi documents custom widthxheight sizes but does not list raw 21:9
+		// as a size enum. Keep the UI aspect option while sending a documented
+		// custom size that is divisible by 16 and within the provider pixel budget.
+		return "1792x768"
+	default:
+		return size
+	}
+}
+
 func (grsAICreativeImageAdapter) submit(ctx context.Context, req CreativeImageProviderRequest) (CreativeImageProviderResult, error) {
 	body := map[string]any{
 		"model":     req.ProviderModelID,
 		"prompt":    req.Prompt,
 		"replyType": "async",
 	}
-	if value := creativeStringParam(req.UserParams, "aspectRatio"); value != "" {
+	if value := creativeGrsAIAspectRatioParam(req); value != "" {
 		body["aspectRatio"] = value
 	}
-	if value := creativeStringParam(req.UserParams, "imageSize"); value != "" {
+	if value := creativeGrsAIImageSizeParam(req); value != "" {
 		body["imageSize"] = value
 	}
 	if len(req.Images) > 0 {
@@ -222,6 +235,88 @@ func (grsAICreativeImageAdapter) poll(ctx context.Context, req CreativeImageProv
 		return CreativeImageProviderResult{}, err
 	}
 	return parseGrsAICreativeImageResult(raw, false)
+}
+
+func creativeGrsAIAspectRatioParam(req CreativeImageProviderRequest) string {
+	aspectRatio := creativeStringParam(req.UserParams, "aspectRatio")
+	if aspectRatio == "" {
+		return ""
+	}
+	if strings.EqualFold(strings.TrimSpace(req.ProviderModelID), "gpt-image-2") || strings.EqualFold(strings.TrimSpace(req.ProviderModelID), "gpt-image-2-vip") {
+		imageSize := creativeStringParam(req.UserParams, "imageSize")
+		if mapped := creativeGrsAIGPTImagePixelAspectRatio(req.ProviderModelID, aspectRatio, imageSize); mapped != "" {
+			return mapped
+		}
+	}
+	return aspectRatio
+}
+
+func creativeGrsAIImageSizeParam(req CreativeImageProviderRequest) string {
+	modelID := strings.TrimSpace(req.ProviderModelID)
+	if modelID == "gpt-image-2" || modelID == "gpt-image-2-vip" {
+		// GrsAI GPT image APIs encode the selected resolution as the aspectRatio
+		// pixel value. Nano-banana keeps imageSize as a separate provider field.
+		return ""
+	}
+	return creativeStringParam(req.UserParams, "imageSize")
+}
+
+func creativeGrsAIGPTImagePixelAspectRatio(modelID string, aspectRatio string, imageSize string) string {
+	aspectRatio = strings.TrimSpace(aspectRatio)
+	imageSize = strings.TrimSpace(imageSize)
+	if aspectRatio == "" || aspectRatio == "auto" {
+		return ""
+	}
+	if strings.Contains(aspectRatio, "x") {
+		return aspectRatio
+	}
+	if imageSize == "" {
+		imageSize = "1K"
+	}
+	if strings.TrimSpace(modelID) == "gpt-image-2" && imageSize != "1K" {
+		imageSize = "1K"
+	}
+	if table, ok := creativeGrsAIGPTImageAspectRatioPixels[strings.TrimSpace(modelID)]; ok {
+		if sizes, ok := table[aspectRatio]; ok {
+			return sizes[imageSize]
+		}
+	}
+	return aspectRatio
+}
+
+var creativeGrsAIGPTImageAspectRatioPixels = map[string]map[string]map[string]string{
+	"gpt-image-2": {
+		"1:1":  {"1K": "1024x1024"},
+		"16:9": {"1K": "1672x941"},
+		"9:16": {"1K": "941x1672"},
+		"4:3":  {"1K": "1443x1090"},
+		"3:4":  {"1K": "1090x1443"},
+		"3:2":  {"1K": "1536x1024"},
+		"2:3":  {"1K": "1024x1536"},
+		"5:4":  {"1K": "1408x1120"},
+		"4:5":  {"1K": "1120x1408"},
+		"21:9": {"1K": "1920x832"},
+		"9:21": {"1K": "832x1920"},
+		"1:2":  {"1K": "896x1792"},
+		"2:1":  {"1K": "1792x896"},
+	},
+	"gpt-image-2-vip": {
+		"1:1":  {"1K": "1024x1024", "2K": "2048x2048", "4K": "2880x2880"},
+		"16:9": {"1K": "1280x720", "2K": "2048x1152", "4K": "3840x2160"},
+		"9:16": {"1K": "720x1280", "2K": "1152x2048", "4K": "2160x3840"},
+		"4:3":  {"1K": "1152x864", "2K": "2304x1728", "4K": "3264x2448"},
+		"3:4":  {"1K": "864x1152", "2K": "1728x2304", "4K": "2448x3264"},
+		"3:2":  {"1K": "1536x1024", "2K": "2048x1360", "4K": "3504x2336"},
+		"2:3":  {"1K": "1024x1536", "2K": "1360x2048", "4K": "2336x3504"},
+		"5:4":  {"1K": "1120x896", "2K": "2240x1792", "4K": "3200x2560"},
+		"4:5":  {"1K": "896x1120", "2K": "1792x2240", "4K": "2560x3200"},
+		"21:9": {"1K": "1456x624", "2K": "2912x1248", "4K": "3840x1648"},
+		"9:21": {"1K": "624x1456", "2K": "1248x2912", "4K": "1648x3840"},
+		"1:3":  {"1K": "688x2048", "2K": "1280x3840", "4K": "1280x3840"},
+		"3:1":  {"1K": "2048x688", "2K": "3840x1280", "4K": "3840x1280"},
+		"1:2":  {"1K": "768x1536", "2K": "1536x3072", "4K": "1920x3840"},
+		"2:1":  {"1K": "1536x768", "2K": "3072x1536", "4K": "3840x1920"},
+	},
 }
 
 func creativeImageProviderJSON(ctx context.Context, method string, target string, authHeader string, body any) ([]byte, error) {
@@ -266,7 +361,11 @@ func creativeStringParam(params map[string]any, key string) string {
 	if params == nil {
 		return ""
 	}
-	switch value := params[key].(type) {
+	raw, ok := params[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	switch value := raw.(type) {
 	case string:
 		return strings.TrimSpace(value)
 	default:

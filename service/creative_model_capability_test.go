@@ -213,6 +213,19 @@ func TestValidateCreativeUserParamsForSchemaIsTypedAndFailClosed(t *testing.T) {
 	}
 }
 
+func TestValidateCreativeUserParamsForSchemaMaterializesDefaults(t *testing.T) {
+	schema := []dto.CreativeParameterSchemaItem{
+		{Id: "size", Label: "Size", Type: "enum", DefaultValue: "1:1", Options: []dto.CreativeParamOption{{Value: "1:1", Label: "1:1"}}},
+		{Id: "quality", Label: "Quality", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "Auto"}, {Value: "low", Label: "Low"}}},
+		{Id: "internal", Label: "Internal", Type: "string", Hidden: true, DefaultValue: "server-only"},
+	}
+
+	normalized, err := ValidateCreativeUserParamsForSchema(schema, nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"size": "1:1", "quality": "auto"}, normalized)
+	require.NotContains(t, normalized, "internal")
+}
+
 func TestResolveCreativeImageModelBindingForGroupIsMockOnlyAndGroupScoped(t *testing.T) {
 	config := validCreativeModelBindingsConfigForTest()
 	config.Bindings[0].Enabled = true
@@ -620,7 +633,7 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	require.NotEmpty(t, state.Manifests)
 	require.NotEmpty(t, state.ParameterTemplates)
 
-	var sawMock, sawDuomiLive, sawQualityLabel, sawNanoTemplate, sawGrsAISquareLabel bool
+	var sawMock, sawDuomiLive, sawQualityLabel, sawDuomiQualityLabel, sawNanoTemplate, sawGrsAISquareLabel, sawGrsAIImageSize, sawGrsAIVIPUltraTall bool
 	for _, manifest := range state.Manifests {
 		require.NotContains(t, manifest.Description, "apiKey")
 		require.NotContains(t, manifest.Description, "baseUrl")
@@ -646,10 +659,33 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 					require.Equal(t, "图片尺寸", item.Label)
 					require.Equal(t, "尺寸", item.ShortLabel)
 					for _, option := range item.Options {
-						if option.Value == "1024x1024" && option.Label == "1024×1024 (1:1)" {
+						if option.Value == "1:1" && option.Label == "1:1 方形" {
 							sawGrsAISquareLabel = true
 						}
 					}
+				}
+				if item.Id == "imageSize" {
+					require.Equal(t, "图片分辨率", item.Label)
+					require.Equal(t, []dto.CreativeParamOption{{Value: "1K", Label: "1K"}}, item.Options)
+					sawGrsAIImageSize = true
+				}
+			}
+		}
+		if template.Id == "grsai_gpt_image_vip" {
+			for _, item := range template.Schema {
+				if item.Id == "aspectRatio" {
+					for _, option := range item.Options {
+						if option.Value == "1:3" && option.Label == "1:3 竖版" {
+							sawGrsAIVIPUltraTall = true
+						}
+					}
+				}
+			}
+		}
+		if template.Id == "duomi_gpt_image" {
+			for _, item := range template.Schema {
+				if item.Id == "quality" && item.Label == "质量" && item.ShortLabel == "质量" {
+					sawDuomiQualityLabel = true
 				}
 			}
 		}
@@ -662,8 +698,52 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	require.True(t, sawMock)
 	require.True(t, sawDuomiLive)
 	require.True(t, sawQualityLabel)
+	require.True(t, sawDuomiQualityLabel)
 	require.True(t, sawNanoTemplate)
 	require.True(t, sawGrsAISquareLabel)
+	require.True(t, sawGrsAIImageSize)
+	require.True(t, sawGrsAIVIPUltraTall)
+}
+
+func TestCreativeLiveBindingAcceptsDuomiCustomMappedAspectOptions(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://duomi.example"
+	channelID := 7110
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-duomi-contract",
+		Models:  "gpt-image-2",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+
+	config := CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "duomi:gpt-image-2:live",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "gpt-image-2",
+			DisplayName:       "Duomi GPT Image 2",
+			Modality:          "image",
+			Enabled:           false,
+			ChannelId:         &channelID,
+			AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
+			ParameterTemplate: "duomi_gpt_image",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{Id: "size", Label: "图片尺寸", Type: "enum", DefaultValue: "21:9", Options: []dto.CreativeParamOption{{Value: "21:9", Label: "21:9 超宽"}}},
+				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}}},
+			},
+		}},
+	}
+
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+
+	config.Bindings[0].ParameterSchema[0].Options = append(config.Bindings[0].ParameterSchema[0].Options, dto.CreativeParamOption{Value: "9:21", Label: "9:21 超高"})
+	err := ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "9:21")
 }
 
 func TestValidateCreativeModelBindingsConfigRejectsEnabledDryRunAndInvalidLive(t *testing.T) {
@@ -1227,6 +1307,175 @@ func TestBuildCreativeModelBindingsDryRunSupportsGrsAIFixtureWithoutProviderMate
 	require.NotContains(t, fmtAnyForTest(preview), "http://")
 	require.NotContains(t, fmtAnyForTest(preview), "https://")
 	require.NotContains(t, fmtAnyForTest(preview), "baseurl")
+}
+
+func TestBuildCreativeModelBindingsDryRunMirrorsGrsAIGPTImageLiveMapping(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://grsai.example"
+	channelID := 7108
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-vip-dryrun",
+		Models:  "gpt-image-2-vip",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+	config := CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "grsai:gpt-image-2-vip:live",
+			ProviderModelId:   "gpt-image-2-vip",
+			PriceModelId:      "grsai-gpt-image-2-vip-price",
+			DisplayName:       "GrsAI GPT Image 2 VIP",
+			Modality:          "image",
+			Enabled:           false,
+			ChannelId:         &channelID,
+			AdapterPreset:     CreativeImageAdapterPresetGrsAILive,
+			ParameterTemplate: "grsai_gpt_image_vip",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{Id: "aspectRatio", Label: "图片尺寸", Type: "enum", DefaultValue: "16:9", Options: []dto.CreativeParamOption{{Value: "16:9", Label: "16:9 横版"}}},
+				{Id: "imageSize", Label: "图片分辨率", Type: "enum", DefaultValue: "4K", Options: []dto.CreativeParamOption{{Value: "1K", Label: "1K"}, {Value: "2K", Label: "2K"}, {Value: "4K", Label: "4K"}}},
+			},
+		}},
+	}
+
+	result, err := BuildCreativeModelBindingsDryRun(config)
+	require.NoError(t, err)
+	require.True(t, result.NoProviderCall)
+	require.Len(t, result.Bindings, 1)
+
+	body := result.Bindings[0].RequestPreview["requestBody"].(map[string]any)
+	require.Equal(t, "gpt-image-2-vip", body["model"])
+	require.Equal(t, "3840x2160", body["aspectRatio"])
+	require.Equal(t, "async", body["replyType"])
+	require.NotContains(t, body, "imageSize")
+}
+
+func TestBuildCreativeModelBindingsDryRunOmitsGrsAIGPTImageAutoAspectRatioLikeLiveAdapter(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://grsai.example"
+	channelID := 7111
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-grs-default",
+		Models:  "gpt-image-2-vip",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+	config := CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "grsai:gpt-image-2-vip:live",
+			ProviderModelId:   "gpt-image-2-vip",
+			PriceModelId:      "gpt-image-2-vip",
+			DisplayName:       "GrsAI GPT Image 2 VIP",
+			Modality:          "image",
+			Enabled:           false,
+			ChannelId:         &channelID,
+			AdapterPreset:     CreativeImageAdapterPresetGrsAILive,
+			ParameterTemplate: "grsai_gpt_image_vip",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{Id: "aspectRatio", Label: "图片尺寸", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "16:9", Label: "16:9 横版"}}},
+				{Id: "imageSize", Label: "图片分辨率", Type: "enum", DefaultValue: "1K", Options: []dto.CreativeParamOption{{Value: "1K", Label: "1K"}, {Value: "2K", Label: "2K"}, {Value: "4K", Label: "4K"}}},
+			},
+		}},
+	}
+
+	result, err := BuildCreativeModelBindingsDryRun(config)
+	require.NoError(t, err)
+	require.Len(t, result.Bindings, 1)
+
+	body := result.Bindings[0].RequestPreview["requestBody"].(map[string]any)
+	require.Equal(t, "gpt-image-2-vip", body["model"])
+	require.Equal(t, "async", body["replyType"])
+	require.NotContains(t, body, "aspectRatio")
+	require.NotContains(t, body, "imageSize")
+}
+
+func TestBuildCreativeModelBindingsDryRunMirrorsDuomiLiveSizeMapping(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://duomi.example"
+	channelID := 7112
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-duomi-21x9-dryrun",
+		Models:  "gpt-image-2",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+	config := CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "duomi:gpt-image-2:live",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "gpt-image-2",
+			DisplayName:       "Duomi GPT Image 2",
+			Modality:          "image",
+			Enabled:           false,
+			ChannelId:         &channelID,
+			AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
+			ParameterTemplate: "duomi_gpt_image",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{Id: "size", Label: "图片尺寸", Type: "enum", DefaultValue: "21:9", Options: []dto.CreativeParamOption{{Value: "21:9", Label: "21:9 超宽"}}},
+				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}}},
+			},
+		}},
+	}
+
+	result, err := BuildCreativeModelBindingsDryRun(config)
+	require.NoError(t, err)
+	require.Len(t, result.Bindings, 1)
+
+	body := result.Bindings[0].RequestPreview["requestBody"].(map[string]any)
+	require.Equal(t, "1792x768", body["size"])
+	require.NotEqual(t, "21:9", body["size"])
+}
+
+func TestBuildCreativeModelBindingsDryRunOmitsDuomiAutoQualityLikeLiveAdapter(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://duomi.example"
+	channelID := 7109
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-duomi-dryrun",
+		Models:  "gpt-image-2",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+	config := CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "duomi:gpt-image-2:live",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "gpt-image-2",
+			DisplayName:       "Duomi GPT Image 2",
+			Modality:          "image",
+			Enabled:           false,
+			ChannelId:         &channelID,
+			AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
+			ParameterTemplate: "duomi_gpt_image",
+			ParameterSchema: []dto.CreativeParameterSchemaItem{
+				{Id: "size", Label: "图片尺寸", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}}},
+				{Id: "quality", Label: "质量", Type: "enum", DefaultValue: "auto", Options: []dto.CreativeParamOption{{Value: "auto", Label: "自动"}, {Value: "low", Label: "快速"}}},
+			},
+		}},
+	}
+
+	result, err := BuildCreativeModelBindingsDryRun(config)
+	require.NoError(t, err)
+	require.Len(t, result.Bindings, 1)
+
+	body := result.Bindings[0].RequestPreview["requestBody"].(map[string]any)
+	require.Equal(t, "auto", body["size"])
+	require.NotContains(t, body, "quality")
 }
 
 func TestParseCreativeGrsAIImageFixtureResponseRedactsProviderResults(t *testing.T) {

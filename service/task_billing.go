@@ -270,12 +270,10 @@ func ProcessTaskBillingOutbox(ctx context.Context, outbox *model.TaskBillingOutb
 		return nil
 	}
 	if shouldLog && !outbox.LogDone {
-		recordTaskBillingOutboxLog(&task, outbox, logType, logQuota)
-		if err := model.DB.Model(&model.TaskBillingOutbox{}).Where("id = ?", outbox.ID).Update("log_done", true).Error; err != nil {
+		if err := completeTaskBillingOutboxLogEffects(ctx, &task, outbox, logType, logQuota); err != nil {
 			_ = markTaskBillingOutboxFailure(outbox.ID, err)
 			return err
 		}
-		outbox.LogDone = true
 	}
 	if err := model.DB.Model(&model.TaskBillingOutbox{}).Where("id = ?", outbox.ID).Updates(map[string]interface{}{
 		"status":         model.TaskBillingOutboxStatusDone,
@@ -370,9 +368,51 @@ func taskBillingOutboxEffect(task *model.Task, outbox *model.TaskBillingOutbox) 
 	}
 }
 
-func recordTaskBillingOutboxLog(task *model.Task, outbox *model.TaskBillingOutbox, logType int, logQuota int) {
+func completeTaskBillingOutboxLogEffects(ctx context.Context, task *model.Task, outbox *model.TaskBillingOutbox, logType int, logQuota int) error {
 	if logQuota <= 0 {
-		return
+		return nil
+	}
+	if err := ensureTaskBillingOutboxLog(task, outbox, logType, logQuota); err != nil {
+		return err
+	}
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var current model.TaskBillingOutbox
+		if err := tx.Where("id = ?", outbox.ID).First(&current).Error; err != nil {
+			return err
+		}
+		if current.LogDone {
+			*outbox = current
+			return nil
+		}
+		if logType == model.LogTypeConsume {
+			if err := tx.Model(&model.User{}).Where("id = ?", task.UserId).Updates(map[string]interface{}{
+				"used_quota":    gorm.Expr("used_quota + ?", logQuota),
+				"request_count": gorm.Expr("request_count + ?", 1),
+			}).Error; err != nil {
+				return err
+			}
+			if task.ChannelId > 0 {
+				if err := tx.Model(&model.Channel{}).Where("id = ?", task.ChannelId).Update("used_quota", gorm.Expr("used_quota + ?", logQuota)).Error; err != nil {
+					return err
+				}
+			}
+		}
+		if err := tx.Model(&model.TaskBillingOutbox{}).Where("id = ?", outbox.ID).Update("log_done", true).Error; err != nil {
+			return err
+		}
+		current.LogDone = true
+		*outbox = current
+		return nil
+	})
+	if err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("task billing outbox #%d log side effects failed: %s", outbox.ID, err.Error()))
+	}
+	return err
+}
+
+func ensureTaskBillingOutboxLog(task *model.Task, outbox *model.TaskBillingOutbox, logType int, logQuota int) error {
+	if logQuota <= 0 {
+		return nil
 	}
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
@@ -384,21 +424,18 @@ func recordTaskBillingOutboxLog(task *model.Task, outbox *model.TaskBillingOutbo
 		other["pre_consumed_quota"] = outbox.PreConsumedQuota
 		other["actual_quota"] = outbox.ActualQuota
 	}
-	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   logType,
-		Content:   outbox.Reason,
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     logQuota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
+	return model.EnsureTaskBillingOutboxLog(model.RecordTaskBillingLogParams{
+		UserId:              task.UserId,
+		LogType:             logType,
+		Content:             outbox.Reason,
+		ChannelId:           task.ChannelId,
+		ModelName:           taskModelName(task),
+		Quota:               logQuota,
+		TokenId:             task.PrivateData.TokenId,
+		Group:               task.Group,
+		Other:               other,
+		TaskBillingOutboxID: outbox.ID,
 	})
-	if logType == model.LogTypeConsume {
-		model.UpdateUserUsedQuotaAndRequestCount(task.UserId, logQuota)
-		model.UpdateChannelUsedQuota(task.ChannelId, logQuota)
-	}
 }
 
 func markTaskBillingOutboxFailure(outboxID int64, err error) error {

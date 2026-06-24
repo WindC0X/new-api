@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -12,7 +13,9 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type recordingVideoPollingAdaptor struct {
@@ -600,12 +603,362 @@ func TestCollectPollingTaskBucketsCreativeMissingUpstreamDoesNotFallbackToPublic
 	task.PrivateData.IdempotencyKey = "creative-request-id"
 	task.PrivateData.UpstreamTaskID = ""
 
-	taskChannelM, taskM, nullTasks := collectPollingTaskBuckets([]*model.Task{task})
+	taskChannelM, taskM, nullTasks, ambiguousExpiredTasks := collectPollingTaskBuckets([]*model.Task{task})
 
 	require.Empty(t, taskChannelM)
 	require.Empty(t, taskM)
 	require.Len(t, nullTasks, 1)
+	require.Empty(t, ambiguousExpiredTasks)
 	require.Equal(t, task.TaskID, nullTasks[0].TaskID)
+}
+
+func TestCollectPollingTaskBucketsSkipsCreativeImageSubmitInFlight(t *testing.T) {
+	task := makeTask(1, 2, 1000, 0, BillingSourceWallet, 0)
+	task.Platform = constant.TaskPlatformCreativeImage
+	task.TaskID = "task_public_submit_in_flight"
+	task.Status = model.TaskStatusSubmitted
+	task.PrivateData.IdempotencyKey = "creative-request-id"
+	task.PrivateData.ProviderSubmitInFlight = true
+	task.PrivateData.ProviderSubmitInFlightAt = common.GetTimestamp()
+	task.PrivateData.UpstreamTaskID = ""
+
+	taskChannelM, taskM, nullTasks, ambiguousExpiredTasks := collectPollingTaskBuckets([]*model.Task{task})
+
+	require.Empty(t, taskChannelM)
+	require.Empty(t, taskM)
+	require.Empty(t, nullTasks)
+	require.Empty(t, ambiguousExpiredTasks)
+}
+
+func TestCollectPollingTaskBucketsExpiresCreativeImageSubmitInFlight(t *testing.T) {
+	task := makeTask(1, 2, 1000, 0, BillingSourceWallet, 0)
+	task.Platform = constant.TaskPlatformCreativeImage
+	task.TaskID = "task_public_submit_in_flight_expired"
+	task.Status = model.TaskStatusSubmitted
+	task.PrivateData.IdempotencyKey = "creative-request-id"
+	task.PrivateData.ProviderSubmitInFlight = true
+	task.PrivateData.ProviderSubmitInFlightAt = common.GetTimestamp() - creativeImageSubmitInFlightTimeoutSeconds - 1
+	task.PrivateData.UpstreamTaskID = ""
+
+	taskChannelM, taskM, nullTasks, ambiguousExpiredTasks := collectPollingTaskBuckets([]*model.Task{task})
+
+	require.Empty(t, taskChannelM)
+	require.Empty(t, taskM)
+	require.Len(t, nullTasks, 1)
+	require.Empty(t, ambiguousExpiredTasks)
+	require.Equal(t, task.TaskID, nullTasks[0].TaskID)
+}
+
+func TestCollectPollingTaskBucketsSkipsAmbiguousCreativeImageSubmit(t *testing.T) {
+	task := makeTask(1, 2, 1000, 0, BillingSourceWallet, 0)
+	task.Platform = constant.TaskPlatformCreativeImage
+	task.TaskID = "task_public_ambiguous_submit"
+	task.PrivateData.IdempotencyKey = "creative-request-id"
+	task.PrivateData.ProviderSubmitAmbiguous = true
+	task.PrivateData.ProviderSubmitAmbiguousAt = common.GetTimestamp()
+	task.PrivateData.UpstreamTaskID = ""
+
+	taskChannelM, taskM, nullTasks, ambiguousExpiredTasks := collectPollingTaskBuckets([]*model.Task{task})
+
+	require.Empty(t, taskChannelM)
+	require.Empty(t, taskM)
+	require.Empty(t, nullTasks)
+	require.Empty(t, ambiguousExpiredTasks)
+}
+
+func TestCollectPollingTaskBucketsExpiresAmbiguousCreativeImageSubmit(t *testing.T) {
+	task := makeTask(1, 2, 1000, 0, BillingSourceWallet, 0)
+	task.Platform = constant.TaskPlatformCreativeImage
+	task.TaskID = "task_public_ambiguous_submit_expired"
+	task.PrivateData.IdempotencyKey = "creative-request-id"
+	task.PrivateData.ProviderSubmitAmbiguous = true
+	task.PrivateData.ProviderSubmitAmbiguousAt = common.GetTimestamp() - creativeImageAmbiguousSubmitTimeoutSeconds - 1
+	task.PrivateData.UpstreamTaskID = ""
+
+	taskChannelM, taskM, nullTasks, ambiguousExpiredTasks := collectPollingTaskBuckets([]*model.Task{task})
+
+	require.Empty(t, taskChannelM)
+	require.Empty(t, taskM)
+	require.Empty(t, nullTasks)
+	require.Len(t, ambiguousExpiredTasks, 1)
+	require.Equal(t, task.TaskID, ambiguousExpiredTasks[0].TaskID)
+}
+
+func TestFailTaskWithCASAndRefundMarksCreativeImageSubmitUnrecoverable(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	const userID, tokenID, channelID = 918, 918, 918
+	const initQuota, preConsumed, tokenRemain = 10000, 1200, 4000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token-unrecoverable", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.Platform = constant.TaskPlatformCreativeImage
+	task.TaskID = "task_public_submit_unrecoverable"
+	task.Status = model.TaskStatusInProgress
+	task.PrivateData.ProviderSubmitAmbiguous = true
+	task.PrivateData.ProviderSubmitAmbiguousAt = common.GetTimestamp() - creativeImageAmbiguousSubmitTimeoutSeconds - 1
+	task.PrivateData.UpstreamTaskID = ""
+	require.NoError(t, model.DB.Create(task).Error)
+
+	won, err := failTaskWithCASAndRefund(ctx, task, creativeImageProviderSubmitUnrecoverableReason)
+	require.NoError(t, err)
+	require.True(t, won)
+
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Contains(t, reloaded.FailReason, "unrecoverable")
+	require.True(t, reloaded.PrivateData.ProviderSubmitUnrecoverable)
+	require.NotZero(t, reloaded.PrivateData.ProviderSubmitUnrecoverableAt)
+	require.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	require.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+}
+
+func TestSweepTimedOutTasksDefersCreativeProviderSubmitStates(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	previousTimeout := constant.TaskTimeoutMinutes
+	constant.TaskTimeoutMinutes = 1
+	t.Cleanup(func() { constant.TaskTimeoutMinutes = previousTimeout })
+
+	const userID, tokenID, channelID = 915, 915, 915
+	const initQuota, preConsumed, tokenRemain = 10000, 1200, 4000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token", tokenRemain)
+	seedChannel(t, channelID)
+
+	oldSubmitTime := common.GetTimestamp() - int64(constant.TaskTimeoutMinutes*60) - 60
+	freshProviderSubmitAt := common.GetTimestamp()
+	inFlight := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	inFlight.Platform = constant.TaskPlatformCreativeImage
+	inFlight.TaskID = "task_public_sweep_in_flight"
+	inFlight.Status = model.TaskStatusSubmitted
+	inFlight.SubmitTime = oldSubmitTime
+	inFlight.Progress = "0%"
+	inFlight.PrivateData.ProviderSubmitInFlight = true
+	inFlight.PrivateData.ProviderSubmitInFlightAt = freshProviderSubmitAt
+	inFlight.PrivateData.UpstreamTaskID = ""
+	require.NoError(t, model.DB.Create(inFlight).Error)
+
+	ambiguous := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	ambiguous.Platform = constant.TaskPlatformCreativeImage
+	ambiguous.TaskID = "task_public_sweep_ambiguous"
+	ambiguous.Status = model.TaskStatusSubmitted
+	ambiguous.SubmitTime = oldSubmitTime
+	ambiguous.Progress = "0%"
+	ambiguous.PrivateData.ProviderSubmitAmbiguous = true
+	ambiguous.PrivateData.ProviderSubmitAmbiguousAt = freshProviderSubmitAt
+	ambiguous.PrivateData.UpstreamTaskID = ""
+	require.NoError(t, model.DB.Create(ambiguous).Error)
+
+	sweepTimedOutTasks(ctx)
+
+	var reloadedInFlight model.Task
+	require.NoError(t, model.DB.First(&reloadedInFlight, inFlight.ID).Error)
+	require.EqualValues(t, model.TaskStatusSubmitted, reloadedInFlight.Status)
+	require.Empty(t, reloadedInFlight.FailReason)
+
+	var reloadedAmbiguous model.Task
+	require.NoError(t, model.DB.First(&reloadedAmbiguous, ambiguous.ID).Error)
+	require.EqualValues(t, model.TaskStatusSubmitted, reloadedAmbiguous.Status)
+	require.Empty(t, reloadedAmbiguous.FailReason)
+
+	require.Equal(t, initQuota, getUserQuota(t, userID))
+	require.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	require.Equal(t, int64(0), countLogs(t))
+}
+
+func TestDispatchPlatformUpdateCreativeImagePollsLiveTaskToSuccess(t *testing.T) {
+	truncate(t)
+	installCreativeAssetRuntimeForPollingTest(t)
+	previousClient := httpClient
+	defer func() { httpClient = previousClient }()
+	fetchSetting := system_setting.GetFetchSetting()
+	previousSSRFProtection := fetchSetting.EnableSSRFProtection
+	fetchSetting.EnableSSRFProtection = false
+	t.Cleanup(func() { fetchSetting.EnableSSRFProtection = previousSSRFProtection })
+
+	const userID, tokenID, channelID = 921, 921, 921
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-token", 5000)
+
+	var seenAuth string
+	imageHits := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/tasks/dm-bg-1":
+			seenAuth = r.Header.Get("Authorization")
+			require.Equal(t, "/v1/tasks/dm-bg-1", r.URL.RequestURI())
+			_, _ = w.Write([]byte(`{"id":"dm-bg-1","state":"succeeded","data":{"images":[{"url":"` + providerResultURL(r, "/background.png?signature=secret") + `"}]}}`))
+		case "/background.png":
+			imageHits++
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	httpClient = provider.Client()
+
+	baseURL := provider.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Name:    "creative-live",
+		Key:     "fresh-channel-key-should-not-be-used",
+		BaseURL: &baseURL,
+		Status:  common.ChannelStatusEnabled,
+		Type:    constant.ChannelTypeOpenAI,
+	}).Error)
+
+	task := makeTask(userID, channelID, 2000, tokenID, BillingSourceWallet, 0)
+	task.Platform = constant.TaskPlatformCreativeImage
+	task.TaskID = "task_public_creative_background"
+	task.Status = model.TaskStatusSubmitted
+	task.Progress = "0%"
+	task.Action = "image.generate"
+	task.PrivateData.UpstreamTaskID = "dm-bg-1"
+	task.PrivateData.Key = "duomi-original-key"
+	task.PrivateData.ProviderEndpoint = baseURL
+	task.PrivateData.IdempotencyKey = "creative-request-id"
+	task.SetData(creativeImagePollingMetadata{
+		Version:           1,
+		CreativeManaged:   true,
+		BindingId:         "duomi:gpt-image-2:live",
+		ProviderModelId:   "gpt-image-2",
+		PriceModelId:      "duomi-gpt-image-2-price",
+		AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
+		ParameterTemplate: "duomi_gpt_image",
+		ChannelId:         channelID,
+		UserParams:        map[string]any{"aspectRatio": "1:1", "imageSize": "1K"},
+	})
+	require.NoError(t, model.DB.Create(task).Error)
+
+	originalGetTaskAdaptor := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(platform constant.TaskPlatform) TaskPollingAdaptor {
+		t.Fatalf("creative_image polling must not use generic video task adaptors, got %s", platform)
+		return nil
+	}
+	t.Cleanup(func() { GetTaskAdaptorFunc = originalGetTaskAdaptor })
+
+	DispatchPlatformUpdate(constant.TaskPlatformCreativeImage, map[int][]string{
+		channelID: []string{"dm-bg-1"},
+	}, map[string]*model.Task{
+		"dm-bg-1": task,
+	})
+
+	require.Equal(t, "duomi-original-key", seenAuth)
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.EqualValues(t, model.TaskStatusSuccess, reloaded.Status)
+	require.Equal(t, "100%", reloaded.Progress)
+	assetID, ok := CreativeAssetContentURLAssetID(reloaded.PrivateData.ResultURL)
+	require.True(t, ok, "polling success should persist a durable creative asset URL, got %s", reloaded.PrivateData.ResultURL)
+	require.NotEmpty(t, assetID)
+	require.Equal(t, 1, imageHits)
+
+	var outbox model.TaskBillingOutbox
+	require.NoError(t, model.DB.Where("task_row_id = ? AND operation = ?", task.ID, model.TaskBillingOutboxOperationTerminalSettle).First(&outbox).Error)
+	require.Equal(t, model.TaskBillingOutboxStatusDone, outbox.Status)
+}
+
+func TestDispatchPlatformUpdateCreativeImageMissingStoredKeyWithoutIdempotencyFailsClosed(t *testing.T) {
+	truncate(t)
+	installCreativeAssetRuntimeForPollingTest(t)
+	previousClient := httpClient
+	defer func() { httpClient = previousClient }()
+	fetchSetting := system_setting.GetFetchSetting()
+	previousSSRFProtection := fetchSetting.EnableSSRFProtection
+	fetchSetting.EnableSSRFProtection = false
+	t.Cleanup(func() { fetchSetting.EnableSSRFProtection = previousSSRFProtection })
+
+	const userID, tokenID, channelID = 922, 922, 922
+	const initQuota, preConsumed, tokenRemain = 10000, 2000, 5000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-token", tokenRemain)
+
+	providerHits := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerHits++
+		http.Error(w, "must not poll with fallback key", http.StatusUnauthorized)
+	}))
+	defer provider.Close()
+	httpClient = provider.Client()
+
+	baseURL := provider.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Name:    "creative-live",
+		Key:     "fresh-channel-key-must-not-be-used",
+		BaseURL: &baseURL,
+		Status:  common.ChannelStatusEnabled,
+		Type:    constant.ChannelTypeOpenAI,
+	}).Error)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.Platform = constant.TaskPlatformCreativeImage
+	task.TaskID = "task_public_creative_missing_key_no_idempotency"
+	task.Status = model.TaskStatusSubmitted
+	task.Progress = "0%"
+	task.Action = "image.generate"
+	task.PrivateData.UpstreamTaskID = "dm-bg-missing-key"
+	task.PrivateData.Key = ""
+	task.PrivateData.ProviderEndpoint = baseURL
+	task.PrivateData.IdempotencyKey = ""
+	task.SetData(creativeImagePollingMetadata{
+		Version:           1,
+		CreativeManaged:   true,
+		BindingId:         "duomi:gpt-image-2:live",
+		ProviderModelId:   "gpt-image-2",
+		PriceModelId:      "duomi-gpt-image-2-price",
+		AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
+		ParameterTemplate: "duomi_gpt_image",
+		ChannelId:         channelID,
+	})
+	require.NoError(t, model.DB.Create(task).Error)
+
+	DispatchPlatformUpdate(constant.TaskPlatformCreativeImage, map[int][]string{
+		channelID: []string{"dm-bg-missing-key"},
+	}, map[string]*model.Task{
+		"dm-bg-missing-key": task,
+	})
+
+	require.Equal(t, 0, providerHits, "creative live polling must fail closed before using the current channel key")
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	require.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+}
+
+func providerResultURL(r *http.Request, path string) string {
+	return "http://" + r.Host + path
+}
+
+func installCreativeAssetRuntimeForPollingTest(t *testing.T) {
+	t.Helper()
+	require.NoError(t, model.DB.AutoMigrate(&model.CreativeAsset{}, &model.CreativeAssetQuota{}, &model.CreativeDocumentAssetRef{}, &model.CreativeAssetLifecycleOutbox{}))
+	require.NoError(t, model.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CreativeDocumentAssetRef{}).Error)
+	require.NoError(t, model.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CreativeAssetLifecycleOutbox{}).Error)
+	require.NoError(t, model.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CreativeAssetQuota{}).Error)
+	require.NoError(t, model.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CreativeAsset{}).Error)
+	runtime, err := NewCreativeAssetRuntime(CreativeAssetConfig{
+		Enabled:                   true,
+		RolloutMode:               CreativeAssetRolloutLocal,
+		StorageBackend:            model.CreativeAssetStorageDatabase,
+		DatabaseGlobalMaxBytes:    1024 * 1024,
+		DatabaseUserMaxBytes:      1024 * 1024,
+		DatabaseReservedFreeBytes: 0,
+		UserMaxBytes:              1024 * 1024,
+		UserMaxAssets:             100,
+		DiskSpaceProviderForWrites: func() common.DiskSpaceInfo {
+			return common.DiskSpaceInfo{Total: 1024 * 1024, Free: 1024 * 1024, UsedPercent: 1}
+		},
+	}, nil)
+	require.NoError(t, err)
+	SetCreativeAssetRuntimeForTest(t, runtime)
 }
 
 func TestUpdateSunoTaskFromResponseRefundsOnlyCASWinner(t *testing.T) {

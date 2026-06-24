@@ -24,6 +24,9 @@ func TestGetUserTaskRedactsCreativeImageChannelMetadata(t *testing.T) {
 		ChannelId: 77,
 		Status:    model.TaskStatusSuccess,
 		Action:    creativeImageTaskActionGenerate,
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://cdn.example/result.png?signature=secret",
+		},
 	}
 	task.SetData(map[string]any{
 		"version":         1,
@@ -51,9 +54,11 @@ func TestGetUserTaskRedactsCreativeImageChannelMetadata(t *testing.T) {
 		Data    struct {
 			Total int `json:"total"`
 			Items []struct {
-				TaskID   string         `json:"task_id"`
-				Platform string         `json:"platform"`
-				Data     map[string]any `json:"data"`
+				TaskID    string         `json:"task_id"`
+				Platform  string         `json:"platform"`
+				ChannelID *int           `json:"channel_id"`
+				ResultURL string         `json:"result_url"`
+				Data      map[string]any `json:"data"`
 			} `json:"items"`
 		} `json:"data"`
 	}
@@ -64,6 +69,8 @@ func TestGetUserTaskRedactsCreativeImageChannelMetadata(t *testing.T) {
 	item := response.Data.Items[0]
 	require.Equal(t, "task_creative_image_self_dto", item.TaskID)
 	require.Equal(t, string(constant.TaskPlatformCreativeImage), item.Platform)
+	require.Nil(t, item.ChannelID)
+	require.Equal(t, "/creative/relay/v1/images/tasks/task_creative_image_self_dto/content", item.ResultURL)
 	require.NotContains(t, item.Data, "channelId")
 	require.NotContains(t, item.Data, "channel_id")
 	require.Equal(t, true, item.Data["creativeManaged"])

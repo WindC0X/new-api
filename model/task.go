@@ -100,11 +100,17 @@ func (m Properties) Value() (driver.Value, error) {
 }
 
 type TaskPrivateData struct {
-	Key              string `json:"key,omitempty"`
-	UpstreamTaskID   string `json:"upstream_task_id,omitempty"`  // 上游真实 task ID
-	ProviderEndpoint string `json:"provider_endpoint,omitempty"` // 提交时的 provider endpoint 快照，用于轮询亲和性校验
-	IdempotencyKey   string `json:"idempotency_key,omitempty"`
-	ResultURL        string `json:"result_url,omitempty"` // 任务成功后的结果 URL（视频地址等）
+	Key                           string `json:"key,omitempty"`
+	UpstreamTaskID                string `json:"upstream_task_id,omitempty"`  // 上游真实 task ID
+	ProviderEndpoint              string `json:"provider_endpoint,omitempty"` // 提交时的 provider endpoint 快照，用于轮询亲和性校验
+	IdempotencyKey                string `json:"idempotency_key,omitempty"`
+	ResultURL                     string `json:"result_url,omitempty"` // 任务成功后的结果 URL（视频地址等）
+	ProviderSubmitInFlight        bool   `json:"provider_submit_in_flight,omitempty"`
+	ProviderSubmitInFlightAt      int64  `json:"provider_submit_in_flight_at,omitempty"`
+	ProviderSubmitAmbiguous       bool   `json:"provider_submit_ambiguous,omitempty"`
+	ProviderSubmitAmbiguousAt     int64  `json:"provider_submit_ambiguous_at,omitempty"`
+	ProviderSubmitUnrecoverable   bool   `json:"provider_submit_unrecoverable,omitempty"`
+	ProviderSubmitUnrecoverableAt int64  `json:"provider_submit_unrecoverable_at,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -185,7 +191,10 @@ func (r *CreativeVideoIdempotency) BeforeUpdate(tx *gorm.DB) error {
 	return nil
 }
 
-const CreativeVideoIdempotencyScopeVideoSubmit = "video.submit"
+const (
+	CreativeVideoIdempotencyScopeVideoSubmit = "video.submit"
+	CreativeImageTaskIdempotencyScopeSubmit  = "image.task.submit"
+)
 
 func normalizeCreativeVideoIdempotencyScope(scope string) string {
 	scope = strings.TrimSpace(scope)
@@ -232,6 +241,26 @@ func PrepareCreativeVideoIdempotencyScoped(userID int, scope string, requestID s
 		return nil, false, err
 	}
 	return record, false, nil
+}
+
+func GetCreativeVideoIdempotencyScoped(userID int, scope string, requestID string) (*CreativeVideoIdempotency, bool, error) {
+	scope = normalizeCreativeVideoIdempotencyScope(scope)
+	requestID = strings.TrimSpace(requestID)
+	if userID <= 0 || scope == "" || requestID == "" {
+		return nil, false, nil
+	}
+	var record CreativeVideoIdempotency
+	err := DB.Where("user_id = ? AND scope = ? AND request_id = ?", userID, scope, requestID).First(&record).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) && scope == CreativeVideoIdempotencyScopeVideoSubmit {
+		err = DB.Where("user_id = ? AND scope = ? AND request_id = ?", userID, "", requestID).First(&record).Error
+	}
+	if err == nil {
+		return &record, true, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	return nil, false, err
 }
 
 func CompleteCreativeVideoIdempotency(userID int, requestID string, taskID string) error {
@@ -400,8 +429,7 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 
 func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 	var tasks []*Task
-	err := DB.Where("progress != ?", "100%").
-		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+	err := DB.Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
 		Where("submit_time < ?", cutoffUnix).
 		Order("submit_time").
 		Limit(limit).
@@ -415,8 +443,7 @@ func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 func GetAllUnFinishSyncTasks(limit int) []*Task {
 	var tasks []*Task
 	var err error
-	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
+	err = DB.Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).Limit(limit).Order("id").Find(&tasks).Error
 	if err != nil {
 		return nil
 	}

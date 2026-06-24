@@ -33,6 +33,28 @@ type TaskPollingAdaptor interface {
 // 打破 service -> relay -> relay/channel -> service 的循环依赖。
 var GetTaskAdaptorFunc func(platform constant.TaskPlatform) TaskPollingAdaptor
 
+const (
+	creativeImageAmbiguousSubmitTimeoutSeconds     int64 = int64(90 * time.Minute / time.Second)
+	creativeImageSubmitInFlightTimeoutSeconds      int64 = creativeImageAmbiguousSubmitTimeoutSeconds
+	creativeImageProviderSubmitUnrecoverableReason       = "creative image provider submit is unrecoverable: no provider task id was persisted after the submit recovery window; pre-consume refund queued"
+)
+
+type creativeImagePollingMetadata struct {
+	Version           int            `json:"version"`
+	CreativeManaged   bool           `json:"creativeManaged"`
+	BindingId         string         `json:"bindingId"`
+	ProviderModelId   string         `json:"providerModelId"`
+	PriceModelId      string         `json:"priceModelId"`
+	AdapterPreset     string         `json:"adapterPreset"`
+	ParameterTemplate string         `json:"parameterTemplate"`
+	ChannelId         int            `json:"channelId"`
+	UserParams        map[string]any `json:"userParams,omitempty"`
+	TargetWidth       int            `json:"targetWidth,omitempty"`
+	TargetHeight      int            `json:"targetHeight,omitempty"`
+	TargetAspectRatio string         `json:"targetAspectRatio,omitempty"`
+	TargetResolution  string         `json:"targetResolution,omitempty"`
+}
+
 // sweepTimedOutTasks 在主轮询之前独立清理超时任务。
 // 每次最多处理 100 条，剩余的下个周期继续处理。
 // 使用 per-task CAS (UpdateWithStatus) 防止覆盖被正常轮询已推进的任务。
@@ -53,6 +75,9 @@ func sweepTimedOutTasks(ctx context.Context) {
 	timedOutCount := 0
 
 	for _, task := range tasks {
+		if creativeTaskDefersGlobalTimeoutSweep(task) {
+			continue
+		}
 		isLegacy := task.SubmitTime > 0 && task.SubmitTime < legacyTaskCutoff
 
 		if !isLegacy {
@@ -116,10 +141,14 @@ func TaskPollingLoop() {
 			if len(tasks) == 0 {
 				continue
 			}
-			taskChannelM, taskM, nullTasks := collectPollingTaskBuckets(tasks)
+			taskChannelM, taskM, nullTasks, ambiguousExpiredTasks := collectPollingTaskBuckets(tasks)
 			if len(nullTasks) > 0 {
 				updated := markTasksFailedWithCASAndRefund(ctx, nullTasks, "upstream task id is empty")
 				logger.LogInfo(ctx, fmt.Sprintf("Fix null task_id task success: %d/%d", updated, len(nullTasks)))
+			}
+			if len(ambiguousExpiredTasks) > 0 {
+				updated := markTasksFailedWithCASAndRefund(ctx, ambiguousExpiredTasks, creativeImageProviderSubmitUnrecoverableReason)
+				logger.LogInfo(ctx, fmt.Sprintf("Fix ambiguous creative image task success: %d/%d", updated, len(ambiguousExpiredTasks)))
 			}
 			if len(taskChannelM) == 0 {
 				continue
@@ -131,20 +160,34 @@ func TaskPollingLoop() {
 	}
 }
 
-func collectPollingTaskBuckets(tasks []*model.Task) (map[int][]string, map[string]*model.Task, []*model.Task) {
+func collectPollingTaskBuckets(tasks []*model.Task) (map[int][]string, map[string]*model.Task, []*model.Task, []*model.Task) {
 	taskChannelM := make(map[int][]string)
 	taskM := make(map[string]*model.Task)
 	nullTasks := make([]*model.Task, 0)
+	ambiguousExpiredTasks := make([]*model.Task, 0)
+	now := common.GetTimestamp()
 	for _, task := range tasks {
 		upstreamID := pollingUpstreamTaskID(task)
 		if upstreamID == "" {
+			if creativeTaskHasAmbiguousProviderSubmit(task) {
+				if CreativeImageAmbiguousSubmitExpired(task, now) {
+					ambiguousExpiredTasks = append(ambiguousExpiredTasks, task)
+					continue
+				}
+				continue
+			}
+			if creativeTaskHasProviderSubmitInFlight(task) {
+				if !CreativeImageSubmitInFlightExpired(task, now) {
+					continue
+				}
+			}
 			nullTasks = append(nullTasks, task)
 			continue
 		}
 		taskM[upstreamID] = task
 		taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], upstreamID)
 	}
-	return taskChannelM, taskM, nullTasks
+	return taskChannelM, taskM, nullTasks, ambiguousExpiredTasks
 }
 
 func pollingUpstreamTaskID(task *model.Task) string {
@@ -157,6 +200,10 @@ func pollingUpstreamTaskID(task *model.Task) string {
 	return strings.TrimSpace(task.GetUpstreamTaskID())
 }
 
+func creativeTaskDefersGlobalTimeoutSweep(task *model.Task) bool {
+	return creativeTaskHasProviderSubmitInFlight(task) || creativeTaskHasAmbiguousProviderSubmit(task)
+}
+
 // DispatchPlatformUpdate 按平台分发轮询更新
 func DispatchPlatformUpdate(platform constant.TaskPlatform, taskChannelM map[int][]string, taskM map[string]*model.Task) {
 	switch platform {
@@ -166,6 +213,10 @@ func DispatchPlatformUpdate(platform constant.TaskPlatform, taskChannelM map[int
 		}
 	case constant.TaskPlatformSuno:
 		_ = UpdateSunoTasks(context.Background(), taskChannelM, taskM)
+	case constant.TaskPlatformCreativeImage:
+		if err := UpdateCreativeImageTasks(context.Background(), taskChannelM, taskM); err != nil {
+			common.SysLog(fmt.Sprintf("UpdateCreativeImageTasks fail: %s", err))
+		}
 	default:
 		if err := UpdateVideoTasks(context.Background(), platform, taskChannelM, taskM); err != nil {
 			common.SysLog(fmt.Sprintf("UpdateVideoTasks fail: %s", err))
@@ -245,7 +296,230 @@ func selectedPollingKeyForTask(ctx context.Context, task *model.Task, ch *model.
 }
 
 func creativeTaskRequiresStoredKey(task *model.Task) bool {
-	return task != nil && strings.TrimSpace(task.PrivateData.IdempotencyKey) != ""
+	if task == nil {
+		return false
+	}
+	if strings.TrimSpace(task.PrivateData.IdempotencyKey) != "" {
+		return true
+	}
+	if task.Platform != constant.TaskPlatformCreativeImage {
+		return false
+	}
+	var metadata creativeImagePollingMetadata
+	if err := task.GetData(&metadata); err != nil {
+		return false
+	}
+	return metadata.CreativeManaged && CreativeImageLiveAdapterPreset(metadata.AdapterPreset)
+}
+
+func creativeTaskHasAmbiguousProviderSubmit(task *model.Task) bool {
+	return task != nil &&
+		task.Platform == constant.TaskPlatformCreativeImage &&
+		task.PrivateData.ProviderSubmitAmbiguous &&
+		strings.TrimSpace(task.PrivateData.UpstreamTaskID) == ""
+}
+
+func creativeTaskHasProviderSubmitInFlight(task *model.Task) bool {
+	return task != nil &&
+		task.Platform == constant.TaskPlatformCreativeImage &&
+		task.PrivateData.ProviderSubmitInFlight &&
+		strings.TrimSpace(task.PrivateData.UpstreamTaskID) == ""
+}
+
+func CreativeImageSubmitInFlightExpired(task *model.Task, now int64) bool {
+	if !creativeTaskHasProviderSubmitInFlight(task) {
+		return false
+	}
+	start := task.PrivateData.ProviderSubmitInFlightAt
+	if start <= 0 {
+		start = task.UpdatedAt
+	}
+	if start <= 0 {
+		start = task.SubmitTime
+	}
+	if start <= 0 || now <= start {
+		return false
+	}
+	return now-start >= creativeImageSubmitInFlightTimeoutSeconds
+}
+
+func CreativeImageAmbiguousSubmitExpired(task *model.Task, now int64) bool {
+	if !creativeTaskHasAmbiguousProviderSubmit(task) {
+		return false
+	}
+	start := task.PrivateData.ProviderSubmitAmbiguousAt
+	if start <= 0 {
+		start = task.UpdatedAt
+	}
+	if start <= 0 {
+		start = task.SubmitTime
+	}
+	if start <= 0 || now <= start {
+		return false
+	}
+	return now-start >= creativeImageAmbiguousSubmitTimeoutSeconds
+}
+
+// UpdateCreativeImageTasks polls Creative live image tasks independently of the
+// generic video task adaptor table. Creative image tasks store their provider
+// adapter preset, selected key, endpoint and upstream id in the task row; using
+// the video adaptor fallback would fail with "video adaptor not found" and leave
+// closed-browser tasks pending until timeout.
+func UpdateCreativeImageTasks(ctx context.Context, taskChannelM map[int][]string, taskM map[string]*model.Task) error {
+	for channelId, taskIds := range taskChannelM {
+		if err := updateCreativeImageTasks(ctx, channelId, taskIds, taskM); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("Channel #%d failed to update creative image tasks: %s", channelId, err.Error()))
+		}
+	}
+	return nil
+}
+
+func updateCreativeImageTasks(ctx context.Context, channelId int, taskIds []string, taskM map[string]*model.Task) error {
+	logger.LogInfo(ctx, fmt.Sprintf("Channel #%d pending creative image tasks: %d", channelId, len(taskIds)))
+	if len(taskIds) == 0 {
+		return nil
+	}
+	ch, err := model.CacheGetChannel(channelId)
+	if err != nil || ch == nil {
+		if err != nil && !model.IsChannelNotFoundError(err) {
+			return fmt.Errorf("CacheGetChannel failed: %w", err)
+		}
+		var failedTasks []*model.Task
+		for _, upstreamID := range taskIds {
+			if task, ok := taskM[upstreamID]; ok {
+				failedTasks = append(failedTasks, task)
+			}
+		}
+		markTasksFailedWithCASAndRefund(ctx, failedTasks, fmt.Sprintf("Failed to get creative image channel info, channel ID: %d", channelId))
+		if err != nil {
+			return fmt.Errorf("CacheGetChannel failed: %w", err)
+		}
+		return fmt.Errorf("creative image channel #%d not found", channelId)
+	}
+	for _, upstreamID := range taskIds {
+		if err := updateCreativeImageSingleTask(ctx, ch, upstreamID, taskM); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("Failed to update creative image task %s: %s", upstreamID, err.Error()))
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return nil
+}
+
+func updateCreativeImageSingleTask(ctx context.Context, ch *model.Channel, upstreamID string, taskM map[string]*model.Task) error {
+	task := taskM[upstreamID]
+	if task == nil {
+		return fmt.Errorf("creative image task %s not found", upstreamID)
+	}
+	if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+		return nil
+	}
+	var metadata creativeImagePollingMetadata
+	if err := task.GetData(&metadata); err != nil || !metadata.CreativeManaged || !CreativeImageLiveAdapterPreset(metadata.AdapterPreset) {
+		if _, failErr := failTaskWithCASAndRefund(ctx, task, "creative image task metadata is invalid"); failErr != nil {
+			return failErr
+		}
+		return err
+	}
+	key, keyErr := selectedPollingKeyForTask(ctx, task, ch, "creative image")
+	if keyErr != nil {
+		if _, failErr := failTaskWithCASAndRefund(ctx, task, "missing submit-time selected key"); failErr != nil {
+			return failErr
+		}
+		return keyErr
+	}
+	providerEndpoint := strings.TrimSpace(task.PrivateData.ProviderEndpoint)
+	if providerEndpoint == "" {
+		if _, failErr := failTaskWithCASAndRefund(ctx, task, "creative image task is missing provider endpoint affinity"); failErr != nil {
+			return failErr
+		}
+		return errors.New("creative image task is missing provider endpoint affinity")
+	}
+	if strings.TrimSpace(ch.GetBaseURL()) != providerEndpoint {
+		if _, failErr := failTaskWithCASAndRefund(ctx, task, "creative image provider endpoint affinity changed"); failErr != nil {
+			return failErr
+		}
+		return errors.New("creative image provider endpoint affinity changed")
+	}
+	result, err := PollCreativeImageProviderTask(ctx, CreativeImageProviderRequest{
+		AdapterPreset:   metadata.AdapterPreset,
+		Endpoint:        providerEndpoint,
+		Credential:      key,
+		ProviderModelID: metadata.ProviderModelId,
+		UserParams:      metadata.UserParams,
+	}, upstreamID)
+	if err != nil {
+		if CreativeImageProviderTerminalError(err) {
+			if _, failErr := failTaskWithCASAndRefund(ctx, task, "creative image provider terminal result is invalid"); failErr != nil {
+				return failErr
+			}
+		}
+		return err
+	}
+	if result.Progress != "" {
+		task.Progress = result.Progress
+	} else if task.Progress == "" {
+		task.Progress = "0%"
+	}
+	if result.Status != model.TaskStatusSuccess && result.Status != model.TaskStatusFailure {
+		return updateCreativeImageNonTerminalTask(task, result.Status)
+	}
+	return updateCreativeImageTerminalTask(ctx, task, result)
+}
+
+func updateCreativeImageNonTerminalTask(task *model.Task, status model.TaskStatus) error {
+	fromStatus := task.Status
+	if status == "" {
+		status = model.TaskStatusInProgress
+	}
+	task.Status = status
+	task.UpdatedAt = common.GetTimestamp()
+	update := model.DB.Model(&model.Task{}).
+		Where("id = ? AND status = ?", task.ID, fromStatus).
+		Updates(map[string]any{
+			"status":     task.Status,
+			"progress":   task.Progress,
+			"updated_at": task.UpdatedAt,
+		})
+	return update.Error
+}
+
+func updateCreativeImageTerminalTask(ctx context.Context, task *model.Task, result CreativeImageProviderResult) error {
+	fromStatus := task.Status
+	resultURL := strings.TrimSpace(result.ResultURL)
+	if result.Status == model.TaskStatusSuccess {
+		var metadata creativeImagePollingMetadata
+		if err := task.GetData(&metadata); err != nil {
+			return err
+		}
+		assetURL, err := MaterializeCreativeImageProviderResult(ctx, task.UserId, task.TaskID, metadata.BindingId, metadata.ProviderModelId, resultURL)
+		if err != nil {
+			return err
+		}
+		resultURL = assetURL
+	}
+	task.Status = result.Status
+	task.Progress = "100%"
+	task.FinishTime = common.GetTimestamp()
+	task.FailReason = result.FailReason
+	task.PrivateData.ResultURL = resultURL
+	operation := model.TaskBillingOutboxOperationTerminalSettle
+	actualQuota := task.Quota
+	reason := "creative image terminal success"
+	if result.Status == model.TaskStatusFailure {
+		operation = model.TaskBillingOutboxOperationTerminalRefund
+		actualQuota = 0
+		reason = "creative image terminal failure"
+	}
+	won, outbox, err := task.UpdateWithStatusAndBillingOutbox(fromStatus, operation, actualQuota, task.Quota, reason)
+	if err != nil {
+		return err
+	}
+	if won && outbox != nil {
+		if err := ProcessTaskBillingOutbox(ctx, outbox); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("creative image task %s billing pending in outbox #%d: %s", task.TaskID, outbox.ID, err.Error()))
+		}
+	}
+	return nil
 }
 
 func terminalBillingOutboxArgs(adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo, shouldRefund bool, shouldSettle bool) (operation string, actualQuota int, reason string) {
@@ -351,6 +625,20 @@ func failTaskWithCASAndRefund(ctx context.Context, task *model.Task, reason stri
 		task.FinishTime = time.Now().Unix()
 	}
 	task.FailReason = reason
+	if task.Platform == constant.TaskPlatformCreativeImage &&
+		strings.TrimSpace(task.PrivateData.UpstreamTaskID) == "" &&
+		(task.PrivateData.ProviderSubmitInFlight || task.PrivateData.ProviderSubmitAmbiguous) {
+		now := common.GetTimestamp()
+		task.PrivateData.ProviderSubmitInFlight = false
+		task.PrivateData.ProviderSubmitInFlightAt = 0
+		task.PrivateData.ProviderSubmitUnrecoverable = true
+		task.PrivateData.ProviderSubmitUnrecoverableAt = now
+		if strings.TrimSpace(task.FailReason) == "" ||
+			strings.Contains(task.FailReason, "timed out before returning a task id") ||
+			strings.Contains(task.FailReason, "upstream task id is empty") {
+			task.FailReason = creativeImageProviderSubmitUnrecoverableReason
+		}
+	}
 	var outbox *model.TaskBillingOutbox
 	var err error
 	if task.Quota != 0 {

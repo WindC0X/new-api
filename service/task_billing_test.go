@@ -166,6 +166,20 @@ func getTokenUsedQuota(t *testing.T, id int) int {
 	return token.UsedQuota
 }
 
+func getUserUsedQuotaAndRequestCount(t *testing.T, id int) (int, int) {
+	t.Helper()
+	var user model.User
+	require.NoError(t, model.DB.Select("used_quota", "request_count").Where("id = ?", id).First(&user).Error)
+	return user.UsedQuota, user.RequestCount
+}
+
+func getChannelUsedQuota(t *testing.T, id int) int64 {
+	t.Helper()
+	var channel model.Channel
+	require.NoError(t, model.DB.Select("used_quota").Where("id = ?", id).First(&channel).Error)
+	return channel.UsedQuota
+}
+
 func getSubscriptionUsed(t *testing.T, id int) int64 {
 	t.Helper()
 	var sub model.UserSubscription
@@ -941,6 +955,63 @@ func TestTaskBillingOutboxSubmitSettleAdjustsPreConsumeDelta(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota, log.Quota)
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, actualQuota, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, int64(actualQuota), getChannelUsedQuota(t, channelID))
+}
+
+func TestTaskBillingOutboxConsumeLogCrashAfterLogBeforeStatsRecoversOnce(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, channelID = 44, 44
+	const initQuota, actualQuota = 10000, 1700
+	seedUser(t, userID, initQuota)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, actualQuota, 0, BillingSourceWallet, 0)
+	task.TaskID = "task_outbox_consume_log_crash_window"
+	task.Status = model.TaskStatusSubmitted
+	require.NoError(t, model.DB.Create(task).Error)
+
+	outbox, err := model.EnqueueTaskBillingOutbox(task, model.TaskBillingOutboxOperationSubmitSettle, actualQuota, actualQuota, "submit settle")
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.TaskBillingOutbox{}).Where("id = ?", outbox.ID).Updates(map[string]interface{}{
+		"funding_done": true,
+		"token_done":   true,
+		"log_done":     false,
+	}).Error)
+
+	outboxID := outbox.ID
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		UserId:              userID,
+		CreatedAt:           common.GetTimestamp(),
+		Type:                model.LogTypeConsume,
+		Content:             "submit settle",
+		ModelName:           "test-model",
+		Quota:               actualQuota,
+		ChannelId:           channelID,
+		Group:               "default",
+		TaskBillingOutboxID: &outboxID,
+		Other:               common.MapToJsonStr(map[string]interface{}{"task_id": task.TaskID, "billing_outbox_id": outboxID}),
+	}).Error)
+
+	var retry model.TaskBillingOutbox
+	require.NoError(t, model.DB.First(&retry, outbox.ID).Error)
+	require.NoError(t, ProcessTaskBillingOutbox(ctx, &retry))
+	require.NoError(t, ProcessTaskBillingOutbox(ctx, &retry))
+
+	assert.Equal(t, int64(1), countLogs(t), "existing outbox log must be reused after retry")
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, actualQuota, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, int64(actualQuota), getChannelUsedQuota(t, channelID))
+
+	var processed model.TaskBillingOutbox
+	require.NoError(t, model.DB.First(&processed, outbox.ID).Error)
+	assert.Equal(t, model.TaskBillingOutboxStatusDone, processed.Status)
+	assert.True(t, processed.LogDone)
 }
 
 func TestTaskAdjustFundingTxSubscriptionRejectsOwnerMismatch(t *testing.T) {

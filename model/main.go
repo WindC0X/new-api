@@ -258,6 +258,9 @@ func migrateDB() error {
 	if err := migrateTaskBillingOutboxOwnerIndex(); err != nil {
 		return err
 	}
+	if err := ensureSQLiteLogTaskBillingOutboxColumn(DB); err != nil {
+		return err
+	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
@@ -297,6 +300,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := ensureLogTaskBillingOutboxIndex(DB); err != nil {
+		return err
+	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -310,6 +316,9 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+	if err := ensureSQLiteLogTaskBillingOutboxColumn(DB); err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 
@@ -377,6 +386,9 @@ func migrateDBFast() error {
 	if err := migrateTaskBillingOutboxOwnerIndex(); err != nil {
 		return err
 	}
+	if err := ensureLogTaskBillingOutboxIndex(DB); err != nil {
+		return err
+	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -392,8 +404,52 @@ func migrateDBFast() error {
 
 func migrateLOGDB() error {
 	var err error
+	if err = ensureSQLiteLogTaskBillingOutboxColumn(LOG_DB); err != nil {
+		return err
+	}
 	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
 		return err
+	}
+	if err = ensureLogTaskBillingOutboxIndex(LOG_DB); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureSQLiteLogTaskBillingOutboxColumn(db *gorm.DB) error {
+	if db == nil || db.Dialector == nil || db.Dialector.Name() != "sqlite" {
+		return nil
+	}
+	if !db.Migrator().HasTable(&Log{}) {
+		return nil
+	}
+	columns, err := db.Migrator().ColumnTypes(&Log{})
+	if err != nil {
+		return fmt.Errorf("inspect logs columns before task billing outbox migration: %w", err)
+	}
+	for _, column := range columns {
+		if strings.EqualFold(column.Name(), "task_billing_outbox_id") {
+			return nil
+		}
+	}
+	// SQLite cannot add a UNIQUE column to an existing table. Add the nullable
+	// column first, then let AutoMigrate/CreateIndex create the unique index.
+	if err := db.Exec("ALTER TABLE `logs` ADD COLUMN `task_billing_outbox_id` integer").Error; err != nil {
+		return fmt.Errorf("add logs.task_billing_outbox_id sqlite column: %w", err)
+	}
+	return nil
+}
+
+func ensureLogTaskBillingOutboxIndex(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&Log{}) {
+		return nil
+	}
+	const indexName = "idx_logs_task_billing_outbox_id"
+	if db.Migrator().HasIndex(&Log{}, indexName) {
+		return nil
+	}
+	if err := db.Migrator().CreateIndex(&Log{}, indexName); err != nil {
+		return fmt.Errorf("create logs task billing outbox unique index: %w", err)
 	}
 	return nil
 }

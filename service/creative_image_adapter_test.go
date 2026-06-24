@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,11 @@ func TestCreativeImageProviderParsersNormalizeStatusesAndResults(t *testing.T) {
 	require.Equal(t, "dm-task-1", duomiRunning.UpstreamTaskID)
 	require.Equal(t, string(model.TaskStatusInProgress), string(duomiRunning.Status))
 	require.Equal(t, "12%", duomiRunning.Progress)
+
+	duomiRunningAlmostDone, err := parseDuomiCreativeImageResult([]byte(`{"id":"dm-task-1b","state":"running","progress":100}`), true)
+	require.NoError(t, err)
+	require.Equal(t, string(model.TaskStatusInProgress), string(duomiRunningAlmostDone.Status))
+	require.Equal(t, "99%", duomiRunningAlmostDone.Progress)
 
 	duomiSuccess, err := parseDuomiCreativeImageResult([]byte(`{"id":"dm-task-2","state":"succeeded","data":{"images":[{"url":"https://cdn.example/result.png?signature=secret"}]}}`), false)
 	require.NoError(t, err)
@@ -196,6 +202,26 @@ func TestCreativeImageProviderAdaptersMapHTTPContracts(t *testing.T) {
 	require.Len(t, seen, 4)
 }
 
+func TestCreativeImageProviderTransportTimeoutIsAmbiguous(t *testing.T) {
+	previousClient := httpClient
+	defer func() { httpClient = previousClient }()
+
+	httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, context.DeadlineExceeded
+	})}
+
+	_, err := SubmitCreativeImageProviderTask(t.Context(), CreativeImageProviderRequest{
+		AdapterPreset:   CreativeImageAdapterPresetDuomiLive,
+		Endpoint:        "https://provider.example",
+		Credential:      "duomi-key",
+		ProviderModelID: "gpt-image-2",
+		Prompt:          "safe prompt",
+	})
+	require.Error(t, err)
+	require.True(t, CreativeImageProviderAmbiguousSubmitError(err))
+	require.NotContains(t, err.Error(), "duomi-key")
+}
+
 func TestCreativeGrsAIGPTImageMapsUiAspectAndResolutionToPixelAspectRatio(t *testing.T) {
 	previousClient := httpClient
 	defer func() { httpClient = previousClient }()
@@ -234,6 +260,40 @@ func TestCreativeGrsAIGPTImageMapsUiAspectAndResolutionToPixelAspectRatio(t *tes
 	require.Contains(t, bodies[1], `"aspectRatio":"3840x2160"`)
 	require.Contains(t, bodies[1], `"quality":"high"`)
 	require.NotContains(t, bodies[1], `"imageSize"`)
+}
+
+func TestCreativeImageTargetMetadataUsesProviderMapping(t *testing.T) {
+	duomi := ResolveCreativeImageTargetMetadata(CreativeImageAdapterPresetDuomiLive, "gpt-image-2", map[string]any{
+		"aspectRatio": "21:9",
+		"imageSize":   "1K",
+	})
+	require.Equal(t, 1792, duomi.Width)
+	require.Equal(t, 768, duomi.Height)
+	require.Equal(t, "21:9", duomi.AspectRatio)
+	require.Equal(t, "1K", duomi.Resolution)
+
+	grsai := ResolveCreativeImageTargetMetadata(CreativeImageAdapterPresetGrsAILive, "gpt-image-2-vip", map[string]any{
+		"aspectRatio": "21:9",
+		"imageSize":   "4K",
+	})
+	require.Equal(t, 3840, grsai.Width)
+	require.Equal(t, 1648, grsai.Height)
+	require.Equal(t, "21:9", grsai.AspectRatio)
+	require.Equal(t, "4K", grsai.Resolution)
+}
+
+func TestCreativeGrsAINanoBananaOmitsAutoAspectRatioLikeDryRun(t *testing.T) {
+	req := CreativeImageProviderRequest{
+		AdapterPreset:   CreativeImageAdapterPresetGrsAILive,
+		ProviderModelID: "nano-banana-pro",
+		UserParams: map[string]any{
+			"aspectRatio": "auto",
+			"imageSize":   "1K",
+		},
+	}
+
+	require.Empty(t, creativeGrsAIAspectRatioParam(req))
+	require.Equal(t, "1K", creativeGrsAIImageSizeParam(req))
 }
 
 func TestCreativeImageProviderAdaptersOmitMissingOptionalParams(t *testing.T) {
@@ -305,6 +365,12 @@ func readRequestBodyForTest(t *testing.T, r *http.Request) string {
 	raw, err := io.ReadAll(r.Body)
 	require.NoError(t, err)
 	return string(raw)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }
 
 func creativeDuomiGPTImageSchemaForAdapterTest(defaultAspectRatio string, defaultQuality string) []dto.CreativeParameterSchemaItem {

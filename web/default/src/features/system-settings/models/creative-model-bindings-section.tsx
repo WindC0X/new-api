@@ -132,7 +132,7 @@ function configTemplateFromManifest(
         displayName: `${manifest.label} · ${providerModelId}`,
         modality: manifest.modality || template.modality || 'image',
         enabled: false,
-        canaryGroups: ['test'],
+        canaryGroups: ['default'],
         channelId: manifest.requiresChannel ? channelId : undefined,
         adapterPreset: manifest.id,
         parameterTemplate: template.id,
@@ -632,12 +632,11 @@ function CreativeModelBindingsLoaded(props: {
       selectedChannelModels.length > 0 &&
       !selectedChannelModels.includes(providerModelId)
     ) {
-      toast.error(
+      toast.warning(
         t(
-          'Provider model is not in the selected channel model list. Add it to the channel first.'
+          'Provider model is not directly listed by the selected channel. The draft is validation-gated so backend model mapping can still accept it.'
         )
       )
-      return
     }
     const canaryGroups = draftCanaryGroups
       .split(',')
@@ -894,9 +893,9 @@ function CreativeModelBindingsLoaded(props: {
               selectedChannelModels.length > 0 &&
               draftProviderModelId.trim() !== '' &&
               !selectedChannelModels.includes(draftProviderModelId.trim()) && (
-                <p className='text-destructive text-xs'>
+                <p className='text-muted-foreground text-xs'>
                   {t(
-                    'Provider model is not in the selected channel model list. Add it to the channel first.'
+                    'Provider model is not directly listed by this channel. Continue only if channel model mapping resolves to this provider model; backend validation and dry-run remain authoritative.'
                   )}
                 </p>
               )}

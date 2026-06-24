@@ -149,3 +149,26 @@ func TestTaskModel2DtoRedactsCreativeImageChannelMetadata(t *testing.T) {
 	require.Equal(t, float64(43), stored["channel_id"])
 	require.Equal(t, 42, task.ChannelId)
 }
+
+func TestSunoTaskModel2DtoRewritesRawProviderURLsToContentProxy(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_suno_public",
+		Platform: constant.TaskPlatformSuno,
+		Data: []byte(`[
+			{
+				"id":"clip-1",
+				"audio_url":"https://cdn.example/clip-1.mp3?token=secret",
+				"image_url":"https://cdn.example/cover.png?token=secret",
+				"status":"complete"
+			}
+		]`),
+	}
+
+	dto := SunoTaskModel2DtoForPath(task, "/creative/relay/v1/suno/fetch/task_suno_public")
+
+	require.NotContains(t, string(dto.Data), "cdn.example")
+	require.NotContains(t, string(dto.Data), "token=secret")
+	require.Contains(t, string(dto.Data), "/creative/relay/v1/suno/fetch/task_suno_public/content")
+	require.Contains(t, string(dto.Data), "kind=audio")
+	require.Contains(t, string(dto.Data), "clip_id=clip-1")
+}

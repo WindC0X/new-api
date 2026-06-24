@@ -33,6 +33,7 @@ const (
 	creativeTaskIdempotencyKeyContextKey   = "creative_task_idempotency_key"
 	creativeTaskIdempotencyScopeContextKey = "creative_task_idempotency_scope"
 	creativeTaskProviderAcceptedContextKey = "creative_task_provider_accepted"
+	creativeTaskDurableCreatedContextKey   = "creative_task_durable_created"
 )
 
 const (
@@ -64,8 +65,18 @@ func creativeMarkTaskProviderAccepted(c *gin.Context) {
 	}
 }
 
+func creativeMarkTaskDurableCreated(c *gin.Context) {
+	if c != nil {
+		c.Set(creativeTaskDurableCreatedContextKey, true)
+	}
+}
+
 func creativeTaskProviderAccepted(c *gin.Context) bool {
 	return c != nil && c.GetBool(creativeTaskProviderAcceptedContextKey)
+}
+
+func creativeTaskDurableCreated(c *gin.Context) bool {
+	return c != nil && c.GetBool(creativeTaskDurableCreatedContextKey)
 }
 
 func CreativeVideoRelayGate() gin.HandlerFunc {
@@ -569,6 +580,139 @@ func CreativeRelaySunoFetch(c *gin.Context) {
 		return
 	}
 	RelayTaskFetch(c)
+}
+
+func CreativeRelaySunoContent(c *gin.Context) {
+	if !creativeSetupSessionBrokerToken(c) {
+		return
+	}
+	relaySunoContent(c)
+}
+
+func RelaySunoContent(c *gin.Context) {
+	relaySunoContent(c)
+}
+
+func relaySunoContent(c *gin.Context) {
+	taskID := strings.TrimSpace(c.Param("id"))
+	task, exist, err := model.GetByTaskId(c.GetInt("id"), taskID)
+	if err != nil {
+		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to fetch Suno content")
+		return
+	}
+	if !exist || task == nil || task.Platform != constant.TaskPlatformSuno {
+		videoProxyError(c, http.StatusNotFound, "not_found", "Suno task was not found")
+		return
+	}
+	contentURL := sunoTaskContentURL(task.Data, c.Query("kind"), c.Query("clip_id"))
+	if strings.TrimSpace(contentURL) == "" {
+		videoProxyError(c, http.StatusConflict, "not_ready", "Suno content is not ready")
+		return
+	}
+	fetchSetting := system_setting.GetFetchSetting()
+	if err := common.ValidateURLWithFetchSetting(contentURL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+		videoProxyError(c, http.StatusForbidden, "server_error", "request blocked")
+		return
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, contentURL, nil)
+	if err != nil {
+		videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch Suno content")
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch Suno content")
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch Suno content")
+		return
+	}
+	copyVideoProxyHeaders(c, resp)
+	applyVideoProxyCacheHeaders(c)
+	c.Writer.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(c.Writer, resp.Body)
+}
+
+func sunoTaskContentURL(data []byte, kind string, clipID string) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var value any
+	if err := common.Unmarshal(data, &value); err != nil {
+		return ""
+	}
+	return findSunoTaskContentURL(value, strings.TrimSpace(strings.ToLower(kind)), strings.TrimSpace(clipID))
+}
+
+func findSunoTaskContentURL(value any, kind string, clipID string) string {
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			if result := findSunoTaskContentURL(item, kind, clipID); result != "" {
+				return result
+			}
+		}
+	case map[string]any:
+		if clipID != "" && !sunoTaskMapMatchesClipID(typed, clipID) {
+			for _, item := range typed {
+				if result := findSunoTaskContentURL(item, kind, clipID); result != "" {
+					return result
+				}
+			}
+			return ""
+		}
+		for key, item := range typed {
+			if sunoContentKindMatchesKey(kind, key) {
+				if raw, ok := item.(string); ok && sunoContentURLIsRemote(raw) {
+					return strings.TrimSpace(raw)
+				}
+			}
+		}
+		for _, item := range typed {
+			if result := findSunoTaskContentURL(item, kind, clipID); result != "" {
+				return result
+			}
+		}
+	}
+	return ""
+}
+
+func sunoTaskMapMatchesClipID(value map[string]any, clipID string) bool {
+	for _, key := range []string{"clip_id", "id"} {
+		if candidate, ok := value[key].(string); ok && strings.TrimSpace(candidate) == clipID {
+			return true
+		}
+	}
+	return false
+}
+
+func sunoContentKindMatchesKey(kind string, key string) bool {
+	normalizedKey := strings.ToLower(strings.TrimSpace(key))
+	switch kind {
+	case "audio":
+		return normalizedKey == "audio_url"
+	case "video":
+		return normalizedKey == "video_url"
+	case "image":
+		return normalizedKey == "image_url"
+	case "image_large":
+		return normalizedKey == "image_large_url"
+	case "":
+		return normalizedKey == "audio_url" || normalizedKey == "video_url" || normalizedKey == "image_url" || normalizedKey == "image_large_url"
+	default:
+		return false
+	}
+}
+
+func sunoContentURLIsRemote(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed == nil {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
 func CreativeRelayMJSubmitImagine(c *gin.Context) {

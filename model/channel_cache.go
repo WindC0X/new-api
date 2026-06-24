@@ -13,11 +13,18 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"gorm.io/gorm"
 )
 
 var group2model2channels map[string]map[string][]int // enabled channel
 var channelsIDM map[int]*Channel                     // all channels include disabled
 var channelSyncLock sync.RWMutex
+
+var ErrChannelNotFound = errors.New("channel not found")
+
+func IsChannelNotFoundError(err error) bool {
+	return errors.Is(err, ErrChannelNotFound) || errors.Is(err, gorm.ErrRecordNotFound)
+}
 
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
@@ -200,7 +207,7 @@ func CacheGetChannel(id int) (*Channel, error) {
 
 	c, ok := channelsIDM[id]
 	if !ok {
-		return nil, fmt.Errorf("渠道# %d，已不存在", id)
+		return nil, fmt.Errorf("%w: 渠道# %d，已不存在", ErrChannelNotFound, id)
 	}
 	return c, nil
 }
@@ -218,7 +225,7 @@ func CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 
 	c, ok := channelsIDM[id]
 	if !ok {
-		return nil, fmt.Errorf("渠道# %d，已不存在", id)
+		return nil, fmt.Errorf("%w: 渠道# %d，已不存在", ErrChannelNotFound, id)
 	}
 	return &c.ChannelInfo, nil
 }

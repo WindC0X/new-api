@@ -381,6 +381,136 @@ func TestStoredCreativeModelBindingsCatalogHonorsKillSwitchesAndHidesHiddenSchem
 	require.Empty(t, GetStoredCreativeModelBindingsCatalogForGroup("vip"))
 }
 
+func TestStoredLiveCreativeModelBindingDoesNotRequirePreviewGate(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://duomi.example"
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      7111,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-live-no-preview-gate",
+		Models:  "gpt-image-2",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+
+	channelID := 7111
+	config := CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "duomi:gpt-image-2:live",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "duomi-gpt-image-2-price",
+			DisplayName:       "Duomi GPT Image 2",
+			Modality:          "image",
+			Enabled:           true,
+			CanaryGroups:      []string{"default"},
+			ChannelId:         &channelID,
+			AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
+			ParameterTemplate: "duomi_gpt_image",
+			ParameterSchema:   creativeDuomiGPTImageSchemaForAdapterTest("1:1", "medium"),
+		}},
+	}
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey: "",
+		CreativeModelBindingsOptionKey:  configJSON,
+	})
+
+	catalog := GetStoredCreativeModelBindingsCatalogForGroup("default")
+	require.Len(t, catalog, 1)
+	require.Equal(t, "duomi:gpt-image-2:live", catalog[0].Id)
+	require.Contains(t, catalog[0].Tags, "live")
+	require.NotContains(t, catalog[0].Tags, "mock")
+
+	resolved, err := ResolveCreativeImageModelBindingForGroup("duomi:gpt-image-2:live", "default", map[string]any{
+		"aspectRatio": "1:1",
+		"imageSize":   "1K",
+		"quality":     "high",
+	})
+	require.NoError(t, err)
+	require.Equal(t, CreativeImageAdapterPresetDuomiLive, resolved.AdapterPreset)
+	require.Equal(t, channelID, resolved.ChannelId)
+	require.Equal(t, "gpt-image-2", resolved.ProviderModelId)
+}
+
+func TestShouldRejectCreativeManagedImageBindingSyncRouteOnlyForActiveExecutableBindings(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	config := validCreativeModelBindingsConfigForTest()
+	config.Bindings[0].Enabled = false
+	config.Bindings[0].CanaryGroups = []string{"default"}
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey:        "true",
+		CreativeMockImageTasksEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:         configJSON,
+	})
+	reject, err := ShouldRejectCreativeManagedImageBindingSyncRoute("mock:gpt-image-2:preview", "default")
+	require.NoError(t, err)
+	require.False(t, reject)
+
+	config.Bindings[0].Enabled = true
+	configJSON, err = NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeAdapterEnabledOptionKey:        "true",
+		CreativeMockImageTasksEnabledOptionKey: "true",
+		CreativeModelBindingsOptionKey:         configJSON,
+	})
+	reject, err = ShouldRejectCreativeManagedImageBindingSyncRoute("mock:gpt-image-2:preview", "default")
+	require.NoError(t, err)
+	require.True(t, reject)
+}
+
+func TestShouldRejectCreativeManagedImageBindingSyncRouteTracksLiveChannelReadiness(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://duomi.example"
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      7112,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-live-sync-route-gate",
+		Models:  "gpt-image-2",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+
+	channelID := 7112
+	config := CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "duomi:gpt-image-2:live",
+			ProviderModelId:   "gpt-image-2",
+			PriceModelId:      "duomi-gpt-image-2-price",
+			DisplayName:       "Duomi GPT Image 2",
+			Modality:          "image",
+			Enabled:           true,
+			CanaryGroups:      []string{"default"},
+			ChannelId:         &channelID,
+			AdapterPreset:     CreativeImageAdapterPresetDuomiLive,
+			ParameterTemplate: "duomi_gpt_image",
+			ParameterSchema:   creativeDuomiGPTImageSchemaForAdapterTest("1:1", "medium"),
+		}},
+	}
+	configJSON, err := NormalizeCreativeModelBindingsConfigJSON(config)
+	require.NoError(t, err)
+	withCreativeCapabilityOptions(t, map[string]string{
+		CreativeModelBindingsOptionKey: configJSON,
+	})
+
+	reject, err := ShouldRejectCreativeManagedImageBindingSyncRoute("duomi:gpt-image-2:live", "default")
+	require.NoError(t, err)
+	require.True(t, reject)
+
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("status", common.ChannelStatusManuallyDisabled).Error)
+	reject, err = ShouldRejectCreativeManagedImageBindingSyncRoute("duomi:gpt-image-2:live", "default")
+	require.NoError(t, err)
+	require.False(t, reject)
+}
+
 func TestStoredCreativeModelBindingsCatalogSerializesPresentEmptySchema(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -652,6 +782,12 @@ func TestCreativeAdapterManifestRegistryExposesSafeTemplates(t *testing.T) {
 	for _, template := range state.ParameterTemplates {
 		if template.Id == "grsai_nano_banana" {
 			sawNanoTemplate = true
+			for _, item := range template.Schema {
+				if item.Id == "aspectRatio" {
+					require.NotContains(t, fmtAnyForTest(item.Options), "1:8")
+					require.NotContains(t, fmtAnyForTest(item.Options), "8:1")
+				}
+			}
 		}
 		if template.Id == "grsai_gpt_image" {
 			for _, item := range template.Schema {
@@ -779,6 +915,118 @@ func TestCreativeLiveBindingAcceptsDuomiCustomMappedAspectOptions(t *testing.T) 
 	err := ValidateCreativeModelBindingsConfig(config)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "9:21")
+}
+
+func TestCreativeLiveBindingRejectsUnsupportedNanoBananaAllowedValues(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://grsai.example"
+	channelID := 7113
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-nano-contract",
+		Models:  "nano-banana-pro,nano-banana-2",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+
+	config := CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "grsai:nano-banana-pro:live",
+			ProviderModelId:   "nano-banana-pro",
+			PriceModelId:      "nano-banana-pro-price",
+			DisplayName:       "GrsAI Nano Banana",
+			Modality:          "image",
+			Enabled:           false,
+			ChannelId:         &channelID,
+			AdapterPreset:     CreativeImageAdapterPresetGrsAILive,
+			ParameterTemplate: "grsai_nano_banana",
+			ParameterSchema:   creativeGrsAINanoBananaSchemaForTest("auto", "1K", "nano-banana-pro"),
+		}},
+	}
+
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+
+	config.Bindings[0].ParameterSchema = creativeGrsAINanoBananaSchemaForTest("auto", "1K", "nano-banana-pro")
+	config.Bindings[0].ParameterSchema[0].Options = config.Bindings[0].ParameterSchema[0].Options[:3]
+	err := ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "options")
+
+	config.Bindings[0].ParameterSchema = creativeGrsAINanoBananaSchemaForTest("auto", "1K", "nano-banana-pro")
+	config.Bindings[0].ParameterSchema[0].Options = append(config.Bindings[0].ParameterSchema[0].Options, dto.CreativeParamOption{Value: "2:1", Label: "2:1"})
+	err = ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "2:1")
+
+	config.Bindings[0].ParameterSchema = creativeGrsAINanoBananaSchemaForTest("auto", "1K", "nano-banana-pro")
+	config.Bindings[0].ParameterSchema[0].Options = append(config.Bindings[0].ParameterSchema[0].Options, dto.CreativeParamOption{Value: "1:8", Label: "1:8"})
+	err = ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "1:8")
+
+	config.Bindings[0].ProviderModelId = "nano-banana-2"
+	config.Bindings[0].PriceModelId = "nano-banana-2-price"
+	config.Bindings[0].Id = "grsai:nano-banana-2:live"
+	config.Bindings[0].ParameterSchema = creativeGrsAINanoBananaSchemaForTest("auto", "1K", "nano-banana-2")
+	require.NoError(t, ValidateCreativeModelBindingsConfig(config))
+
+	config.Bindings[0].ProviderModelId = "nano-banana-pro"
+	config.Bindings[0].PriceModelId = "nano-banana-pro-price"
+	config.Bindings[0].Id = "grsai:nano-banana-pro:live"
+	config.Bindings[0].ParameterSchema = creativeGrsAINanoBananaSchemaForTest("auto", "1K", "nano-banana-pro")
+	config.Bindings[0].ParameterSchema[1].Options = append(config.Bindings[0].ParameterSchema[1].Options, dto.CreativeParamOption{Value: "4K", Label: "4K"})
+	err = ValidateCreativeModelBindingsConfig(config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "4K")
+}
+
+func TestCreativeNanoBananaAdminTemplateValidatesForProviderFamilies(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://grsai.example"
+	channelID := 7115
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-nano-template-contract",
+		Models:  "nano-banana-pro,nano-banana-2",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+	state, err := GetCreativeAdapterManifestAdminState()
+	require.NoError(t, err)
+	var template *CreativeParameterTemplate
+	for index := range state.ParameterTemplates {
+		if state.ParameterTemplates[index].Id == "grsai_nano_banana" {
+			template = &state.ParameterTemplates[index]
+			break
+		}
+	}
+	require.NotNil(t, template)
+
+	configForProvider := func(providerModelID string) CreativeModelBindingsConfig {
+		return CreativeModelBindingsConfig{
+			Version: 1,
+			Bindings: []CreativeModelBindingConfig{{
+				Id:                "grsai:" + providerModelID + ":live",
+				ProviderModelId:   providerModelID,
+				PriceModelId:      providerModelID + "-price",
+				DisplayName:       "GrsAI " + providerModelID,
+				Modality:          "image",
+				Enabled:           false,
+				ChannelId:         &channelID,
+				AdapterPreset:     CreativeImageAdapterPresetGrsAILive,
+				ParameterTemplate: template.Id,
+				ParameterSchema:   template.Schema,
+			}},
+		}
+	}
+
+	require.NoError(t, ValidateCreativeModelBindingsConfig(configForProvider("nano-banana-pro")))
+	require.NoError(t, ValidateCreativeModelBindingsConfig(configForProvider("nano-banana-2")))
 }
 
 func TestValidateCreativeModelBindingsConfigRejectsEnabledDryRunAndInvalidLive(t *testing.T) {
@@ -1509,6 +1757,46 @@ func TestBuildCreativeModelBindingsDryRunOmitsDuomiAutoQualityLikeLiveAdapter(t 
 	require.NotContains(t, body, "imageSize")
 }
 
+func TestBuildCreativeModelBindingsDryRunMirrorsNanoBananaAutoOmission(t *testing.T) {
+	setupCreativeCapabilityServiceTestDB(t)
+	baseURL := "https://grsai.example"
+	channelID := 7114
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Key:     "test-key",
+		Status:  common.ChannelStatusEnabled,
+		Name:    "creative-nano-dryrun",
+		Models:  "nano-banana-pro",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}).Error)
+	config := CreativeModelBindingsConfig{
+		Version: 1,
+		Bindings: []CreativeModelBindingConfig{{
+			Id:                "grsai:nano-banana-pro:live",
+			ProviderModelId:   "nano-banana-pro",
+			PriceModelId:      "nano-banana-pro-price",
+			DisplayName:       "GrsAI Nano Banana",
+			Modality:          "image",
+			Enabled:           false,
+			ChannelId:         &channelID,
+			AdapterPreset:     CreativeImageAdapterPresetGrsAILive,
+			ParameterTemplate: "grsai_nano_banana",
+			ParameterSchema:   creativeGrsAINanoBananaSchemaForTest("auto", "1K", "nano-banana-pro"),
+		}},
+	}
+
+	result, err := BuildCreativeModelBindingsDryRun(config)
+	require.NoError(t, err)
+	require.Len(t, result.Bindings, 1)
+
+	body := result.Bindings[0].RequestPreview["requestBody"].(map[string]any)
+	require.Equal(t, "nano-banana-pro", body["model"])
+	require.Equal(t, "async", body["replyType"])
+	require.Equal(t, "1K", body["imageSize"])
+	require.NotContains(t, body, "aspectRatio")
+}
+
 func TestParseCreativeGrsAIImageFixtureResponseRedactsProviderResults(t *testing.T) {
 	summary, err := ParseCreativeGrsAIImageFixtureResponse([]byte(`{
 		"id": "14-fixture-task",
@@ -1675,6 +1963,32 @@ func creativeGrsAIGPTImageVIPSchemaForTest(defaultAspectRatio string, defaultIma
 				{Value: "medium", Label: "标准"},
 				{Value: "high", Label: "高清"},
 			},
+		},
+	}
+}
+
+func creativeGrsAINanoBananaSchemaForTest(defaultAspectRatio string, defaultImageSize string, providerModelID string) []dto.CreativeParameterSchemaItem {
+	aspectRatioOptions := make([]dto.CreativeParamOption, 0, len(creativeGrsAINanoBananaAspectRatioOptionValues(providerModelID)))
+	for _, value := range creativeGrsAINanoBananaAspectRatioOptionValues(providerModelID) {
+		aspectRatioOptions = append(aspectRatioOptions, dto.CreativeParamOption{Value: value, Label: value})
+	}
+	if len(aspectRatioOptions) > 0 && aspectRatioOptions[0].Value == "auto" {
+		aspectRatioOptions[0].Label = "Auto"
+	}
+	return []dto.CreativeParameterSchemaItem{
+		{
+			Id:           "aspectRatio",
+			Label:        "比例",
+			Type:         "enum",
+			DefaultValue: defaultAspectRatio,
+			Options:      aspectRatioOptions,
+		},
+		{
+			Id:           "imageSize",
+			Label:        "尺寸档位",
+			Type:         "enum",
+			DefaultValue: defaultImageSize,
+			Options:      []dto.CreativeParamOption{{Value: "1K", Label: "1K"}},
 		},
 	}
 }

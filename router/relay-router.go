@@ -183,6 +183,7 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		relaySunoRouter.POST("/submit/:action", controller.RelayTask)
 		relaySunoRouter.POST("/fetch", controller.RelayTaskFetch)
+		relaySunoRouter.GET("/fetch/:id/content", controller.RelaySunoContent)
 		relaySunoRouter.GET("/fetch/:id", controller.RelayTaskFetch)
 	}
 

@@ -237,6 +237,78 @@ func TestUpdateWithStatus_ConcurrentWinner(t *testing.T) {
 	assert.Equal(t, 1, winCount, "exactly one goroutine should win the CAS")
 }
 
+func TestGetAllUnFinishSyncTasksIncludesNonTerminalHundredPercent(t *testing.T) {
+	truncateTables(t)
+
+	activeHundred := &Task{
+		TaskID:   "task_active_hundred",
+		Status:   TaskStatusInProgress,
+		Progress: "100%",
+		Data:     json.RawMessage(`{}`),
+	}
+	submittedHundred := &Task{
+		TaskID:   "task_submitted_hundred",
+		Status:   TaskStatusSubmitted,
+		Progress: "100%",
+		Data:     json.RawMessage(`{}`),
+	}
+	successHundred := &Task{
+		TaskID:   "task_success_hundred",
+		Status:   TaskStatusSuccess,
+		Progress: "100%",
+		Data:     json.RawMessage(`{}`),
+	}
+	failureHalf := &Task{
+		TaskID:   "task_failure_half",
+		Status:   TaskStatusFailure,
+		Progress: "50%",
+		Data:     json.RawMessage(`{}`),
+	}
+	insertTask(t, activeHundred)
+	insertTask(t, submittedHundred)
+	insertTask(t, successHundred)
+	insertTask(t, failureHalf)
+
+	tasks := GetAllUnFinishSyncTasks(10)
+	require.Len(t, tasks, 2)
+	require.Equal(t, "task_active_hundred", tasks[0].TaskID)
+	require.Equal(t, "task_submitted_hundred", tasks[1].TaskID)
+}
+
+func TestGetTimedOutUnfinishedTasksIncludesNonTerminalHundredPercent(t *testing.T) {
+	truncateTables(t)
+
+	now := time.Now().Unix()
+	oldActiveHundred := &Task{
+		TaskID:     "task_old_active_hundred",
+		Status:     TaskStatusInProgress,
+		Progress:   "100%",
+		SubmitTime: now - 3600,
+		Data:       json.RawMessage(`{}`),
+	}
+	freshActiveHundred := &Task{
+		TaskID:     "task_fresh_active_hundred",
+		Status:     TaskStatusInProgress,
+		Progress:   "100%",
+		SubmitTime: now + 3600,
+		Data:       json.RawMessage(`{}`),
+	}
+	oldSuccessHundred := &Task{
+		TaskID:     "task_old_success_hundred",
+		Status:     TaskStatusSuccess,
+		Progress:   "100%",
+		SubmitTime: now - 3600,
+		Data:       json.RawMessage(`{}`),
+	}
+	insertTask(t, oldActiveHundred)
+	insertTask(t, freshActiveHundred)
+	insertTask(t, oldSuccessHundred)
+
+	tasks := GetTimedOutUnfinishedTasks(now, 10)
+	require.Len(t, tasks, 1)
+	require.Equal(t, "task_old_active_hundred", tasks[0].TaskID)
+}
+
 func TestUpdateWithStatusAndBillingOutbox_CreatesOutboxOnlyForCASWinner(t *testing.T) {
 	truncateTables(t)
 

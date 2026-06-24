@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -166,6 +168,10 @@ func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) 
 // ModelRequestRateLimit 模型请求限流中间件
 func ModelRequestRateLimit() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		if shouldBypassModelRequestRateLimit(c) {
+			c.Next()
+			return
+		}
 		// 在每个请求时检查是否启用限流
 		if !setting.ModelRequestRateLimitEnabled {
 			c.Next()
@@ -197,4 +203,41 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			memoryRateLimitHandler(duration, totalMaxCount, successMaxCount)(c)
 		}
 	}
+}
+
+func shouldBypassModelRequestRateLimit(c *gin.Context) bool {
+	method := c.Request.Method
+	path := c.Request.URL.Path
+	if method != http.MethodGet && method != http.MethodHead {
+		return shouldBypassCreativeImageTaskIdempotencyReplay(c, method, path)
+	}
+	const prefix = "/creative/relay/v1/images/tasks/"
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	suffix := strings.TrimPrefix(path, prefix)
+	if suffix == "" || strings.HasSuffix(suffix, "/") {
+		return false
+	}
+	if !strings.Contains(suffix, "/") {
+		return true
+	}
+	taskID, rest, ok := strings.Cut(suffix, "/")
+	return ok && taskID != "" && rest == "content"
+}
+
+func shouldBypassCreativeImageTaskIdempotencyReplay(c *gin.Context, method string, path string) bool {
+	if method != http.MethodPost || path != "/creative/relay/v1/images/tasks" {
+		return false
+	}
+	requestID := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if requestID == "" || len(requestID) > 128 {
+		return false
+	}
+	record, exists, err := model.GetCreativeVideoIdempotencyScoped(c.GetInt("id"), model.CreativeImageTaskIdempotencyScopeSubmit, requestID)
+	if err != nil {
+		common.SysError("creative image task idempotency rate-limit lookup failed: " + err.Error())
+		return false
+	}
+	return exists && record != nil && strings.TrimSpace(record.TaskID) != ""
 }

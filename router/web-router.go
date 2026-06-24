@@ -130,9 +130,11 @@ func SetCreativeRouter(router *gin.Engine) {
 
 		creativeSunoRelayRouter := creativeRelayRouter.Group("/suno")
 		creativeSunoRelayRouter.POST("/submit/:action", controller.CreativeSunoSubmitGuard(), middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoSubmit)
+		creativeSunoRelayRouter.GET("/fetch/:id/content", middleware.CreativeRelaySessionBroker(), controller.CreativeRelaySunoContent)
 		creativeSunoRelayRouter.GET("/fetch/:id", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
 		creativeSunoRelayRouter.POST("/fetch", middleware.CreativeRelaySessionBroker(), middleware.Distribute(), controller.CreativeRelaySunoFetch)
 		creativeSunoRelayRouter.POST("/submit/:action/", creativeRouteNotFound)
+		creativeSunoRelayRouter.GET("/fetch/:id/content/", creativeRouteNotFound)
 		creativeSunoRelayRouter.GET("/fetch/:id/", creativeRouteNotFound)
 		creativeSunoRelayRouter.POST("/fetch/", creativeRouteNotFound)
 

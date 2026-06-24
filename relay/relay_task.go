@@ -346,7 +346,7 @@ func sunoFetchRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.Ta
 			if task == nil || task.Platform != constant.TaskPlatformSuno {
 				continue
 			}
-			tasks = append(tasks, SunoTaskModel2Dto(task))
+			tasks = append(tasks, SunoTaskModel2DtoForPath(task, c.Request.URL.Path))
 		}
 	} else {
 		tasks = make([]any, 0)
@@ -374,7 +374,7 @@ func sunoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dt
 
 	respBody, err = common.Marshal(dto.TaskResponse[any]{
 		Code: "success",
-		Data: SunoTaskModel2Dto(originTask),
+		Data: SunoTaskModel2DtoForPath(originTask, c.Request.URL.Path),
 	})
 	return
 }
@@ -392,6 +392,10 @@ type SunoTaskDto struct {
 }
 
 func SunoTaskModel2Dto(task *model.Task) *SunoTaskDto {
+	return SunoTaskModel2DtoForPath(task, "")
+}
+
+func SunoTaskModel2DtoForPath(task *model.Task, requestPath string) *SunoTaskDto {
 	if task == nil {
 		return nil
 	}
@@ -404,8 +408,102 @@ func SunoTaskModel2Dto(task *model.Task) *SunoTaskDto {
 		StartTime:  task.StartTime,
 		FinishTime: task.FinishTime,
 		Progress:   task.Progress,
-		Data:       task.Data,
+		Data:       sanitizeSunoTaskDataForDTO(task.TaskID, task.Data, requestPath),
 	}
+}
+
+func sanitizeSunoTaskDataForDTO(taskID string, data json.RawMessage, requestPath string) json.RawMessage {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return data
+	}
+	var value any
+	if err := common.Unmarshal(data, &value); err != nil {
+		return nil
+	}
+	sanitized := sanitizeSunoTaskDataValueForDTO(value, strings.TrimSpace(taskID), sunoContentProxyPrefixForPath(requestPath))
+	out, err := common.Marshal(sanitized)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+func sunoContentProxyPrefixForPath(requestPath string) string {
+	if strings.HasPrefix(strings.TrimSpace(requestPath), "/creative/relay/v1/suno/") {
+		return "/creative/relay/v1/suno/fetch"
+	}
+	return "/v1/suno/fetch"
+}
+
+func sanitizeSunoTaskDataValueForDTO(value any, taskID string, proxyPrefix string) any {
+	switch typed := value.(type) {
+	case []any:
+		for i, item := range typed {
+			typed[i] = sanitizeSunoTaskDataValueForDTO(item, taskID, proxyPrefix)
+		}
+		return typed
+	case map[string]any:
+		clipID := sunoClipIDFromMap(typed)
+		for key, item := range typed {
+			if urlKind, ok := sunoRawURLFieldKind(key); ok {
+				if raw, ok := item.(string); ok && sunoRawProviderURL(raw) {
+					typed[key] = sunoContentProxyURL(taskID, proxyPrefix, urlKind, clipID)
+					continue
+				}
+			}
+			typed[key] = sanitizeSunoTaskDataValueForDTO(item, taskID, proxyPrefix)
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
+func sunoClipIDFromMap(value map[string]any) string {
+	for _, key := range []string{"clip_id", "id"} {
+		if id, ok := value[key].(string); ok {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
+}
+
+func sunoRawURLFieldKind(key string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "audio_url":
+		return "audio", true
+	case "video_url":
+		return "video", true
+	case "image_url":
+		return "image", true
+	case "image_large_url":
+		return "image_large", true
+	default:
+		return "", false
+	}
+}
+
+func sunoRawProviderURL(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed == nil {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
+}
+
+func sunoContentProxyURL(taskID string, proxyPrefix string, kind string, clipID string) string {
+	values := url.Values{}
+	if kind != "" {
+		values.Set("kind", kind)
+	}
+	if strings.TrimSpace(clipID) != "" {
+		values.Set("clip_id", strings.TrimSpace(clipID))
+	}
+	target := strings.TrimRight(proxyPrefix, "/") + "/" + url.PathEscape(strings.TrimSpace(taskID)) + "/content"
+	if encoded := values.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	return target
 }
 
 func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.TaskError) {
@@ -672,6 +770,10 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {
+	channelID := task.ChannelId
+	if task.Platform == constant.TaskPlatformCreativeImage {
+		channelID = 0
+	}
 	return &dto.TaskDto{
 		ID:         task.ID,
 		CreatedAt:  task.CreatedAt,
@@ -680,7 +782,7 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 		Platform:   string(task.Platform),
 		UserId:     task.UserId,
 		Group:      task.Group,
-		ChannelId:  task.ChannelId,
+		ChannelId:  channelID,
 		Quota:      task.Quota,
 		Action:     task.Action,
 		Status:     string(task.Status),
@@ -734,6 +836,13 @@ func redactCreativeImageTaskDataForDTO(data json.RawMessage) json.RawMessage {
 func taskResultURLForDTO(task *model.Task) string {
 	if task == nil {
 		return ""
+	}
+	if task.Platform == constant.TaskPlatformCreativeImage {
+		taskID := strings.TrimSpace(task.TaskID)
+		if task.Status != model.TaskStatusSuccess || taskID == "" {
+			return ""
+		}
+		return "/creative/relay/v1/images/tasks/" + url.PathEscape(taskID) + "/content"
 	}
 	raw := strings.TrimSpace(task.GetResultURL())
 	if raw == "" {

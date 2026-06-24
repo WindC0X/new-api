@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -76,4 +77,29 @@ func TestCreativeVideoContentPlatformAllowedFailClosed(t *testing.T) {
 	require.False(t, creativeVideoContentPlatformAllowed(constant.TaskPlatformSuno))
 	require.False(t, creativeVideoContentPlatformAllowed(constant.TaskPlatformMidjourney))
 	require.False(t, creativeVideoContentPlatformAllowed(constant.TaskPlatform("")))
+}
+
+func TestVideoProxyReturnsConflictForIncompleteTaskContent(t *testing.T) {
+	setupCreativeControllerTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}))
+	require.NoError(t, model.DB.Create(&model.Task{
+		TaskID:    "task_video_still_processing",
+		UserId:    7101,
+		Status:    model.TaskStatusSubmitted,
+		ChannelId: 1,
+		Platform:  constant.TaskPlatform("openai"),
+	}).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/creative/relay/v1/videos/task_video_still_processing/content", nil)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_video_still_processing"}}
+	ctx.Set("id", 7101)
+
+	VideoProxy(ctx)
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	errorObject := creativeResponseObject(t, decodeCreativeResponse(t, recorder), "error")
+	require.Contains(t, errorObject["message"], "not completed")
 }

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -24,7 +26,10 @@ const (
 	creativeImageProviderDefaultProgress = "0%"
 )
 
-var errCreativeImageProviderTerminalMalformed = errors.New("creative image provider terminal response is malformed")
+var (
+	errCreativeImageProviderTerminalMalformed  = errors.New("creative image provider terminal response is malformed")
+	errCreativeImageProviderTransportAmbiguous = errors.New("creative image provider submit status is ambiguous")
+)
 
 type CreativeImageProviderRequest struct {
 	AdapterPreset   string
@@ -42,11 +47,22 @@ type CreativeImageProviderResult struct {
 	Progress       string
 	ResultURL      string
 	FailReason     string
+	TargetWidth    int
+	TargetHeight   int
+	TargetAspect   string
+	TargetSize     string
 }
 
 type CreativeImageProviderContent struct {
 	ContentType string
 	Body        []byte
+}
+
+type CreativeImageTargetMetadata struct {
+	Width       int
+	Height      int
+	AspectRatio string
+	Resolution  string
 }
 
 type creativeProviderImageURL struct {
@@ -85,6 +101,142 @@ func PollCreativeImageProviderTask(ctx context.Context, req CreativeImageProvide
 
 func CreativeImageProviderTerminalError(err error) bool {
 	return errors.Is(err, errCreativeImageProviderTerminalMalformed)
+}
+
+func CreativeImageProviderAmbiguousSubmitError(err error) bool {
+	return errors.Is(err, errCreativeImageProviderTransportAmbiguous)
+}
+
+func ResolveCreativeImageTargetMetadata(adapterPreset string, providerModelID string, userParams map[string]any) CreativeImageTargetMetadata {
+	aspectRatio := creativeStringParam(userParams, "aspectRatio")
+	resolution := creativeStringParam(userParams, "imageSize")
+	switch strings.TrimSpace(adapterPreset) {
+	case CreativeImageAdapterPresetMock:
+		size := creativeStringParam(userParams, "size")
+		width, height := creativeParseImageSize(size)
+		return CreativeImageTargetMetadata{
+			Width:       width,
+			Height:      height,
+			AspectRatio: size,
+			Resolution:  resolution,
+		}
+	case CreativeImageAdapterPresetDuomiLive:
+		if aspectRatio == "" {
+			aspectRatio = creativeStringParam(userParams, "size")
+		}
+		if resolution == "" {
+			resolution = "1K"
+		}
+		width, height := creativeParseImageSize(creativeDuomiSizeParam(userParams))
+		return CreativeImageTargetMetadata{
+			Width:       width,
+			Height:      height,
+			AspectRatio: aspectRatio,
+			Resolution:  resolution,
+		}
+	case CreativeImageAdapterPresetGrsAILive:
+		if resolution == "" {
+			resolution = "1K"
+		}
+		width, height := 0, 0
+		if strings.EqualFold(strings.TrimSpace(providerModelID), "gpt-image-2") || strings.EqualFold(strings.TrimSpace(providerModelID), "gpt-image-2-vip") {
+			width, height = creativeParseImageSize(creativeGrsAIGPTImagePixelAspectRatio(providerModelID, aspectRatio, resolution))
+		}
+		return CreativeImageTargetMetadata{
+			Width:       width,
+			Height:      height,
+			AspectRatio: aspectRatio,
+			Resolution:  resolution,
+		}
+	default:
+		return CreativeImageTargetMetadata{}
+	}
+}
+
+func (r *CreativeImageProviderResult) applyTargetMetadata(metadata CreativeImageTargetMetadata) {
+	if r == nil {
+		return
+	}
+	r.TargetWidth = metadata.Width
+	r.TargetHeight = metadata.Height
+	r.TargetAspect = metadata.AspectRatio
+	r.TargetSize = metadata.Resolution
+}
+
+func MaterializeCreativeImageProviderResult(ctx context.Context, userID int, taskID string, bindingID string, providerModelID string, providerURL string) (string, error) {
+	providerURL = strings.TrimSpace(providerURL)
+	if providerURL == "" {
+		return "", errors.New("creative image result is not ready")
+	}
+	if assetID, ok := CreativeAssetContentURLAssetID(providerURL); ok {
+		return "/creative/api/assets/" + assetID + "/content", nil
+	}
+	content, err := FetchCreativeImageProviderContent(ctx, providerURL)
+	if err != nil {
+		return "", err
+	}
+	return MaterializeCreativeImageProviderContent(ctx, userID, taskID, bindingID, providerModelID, content)
+}
+
+func MaterializeCreativeImageProviderContent(ctx context.Context, userID int, taskID string, bindingID string, providerModelID string, content CreativeImageProviderContent) (string, error) {
+	if len(content.Body) == 0 {
+		return "", fmt.Errorf("%w: creative image result content is empty", ErrCreativeAssetInvalid)
+	}
+	runtime, err := readyCreativeImageAssetRuntime()
+	if err != nil {
+		return "", err
+	}
+	asset, _, err := runtime.CreateOrGet(ctx, userID, CreativeAssetCreateRequest{
+		Reader:          bytes.NewReader(content.Body),
+		Size:            int64(len(content.Body)),
+		ClientMimeType:  content.ContentType,
+		ClientMediaType: "image",
+		Metadata: map[string]string{
+			"source":          "creative_image_task",
+			"taskId":          taskID,
+			"bindingId":       bindingID,
+			"providerModelId": providerModelID,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	assetURL := CreativeAssetPublicResponse(asset).URL
+	if strings.TrimSpace(assetURL) == "" {
+		return "", fmt.Errorf("%w: materialized asset URL is empty", ErrCreativeAssetInvalid)
+	}
+	return assetURL, nil
+}
+
+func readyCreativeImageAssetRuntime() (*CreativeAssetRuntime, error) {
+	runtime := CurrentCreativeAssetRuntime()
+	if ok, reason := runtime.Status(); !ok {
+		if strings.TrimSpace(reason) == "" {
+			return nil, ErrCreativeAssetDisabled
+		}
+		return nil, fmt.Errorf("%w: %s", ErrCreativeAssetDisabled, reason)
+	}
+	return runtime, nil
+}
+
+func CreativeAssetContentURLAssetID(value string) (string, bool) {
+	path := strings.TrimSpace(value)
+	if path == "" {
+		return "", false
+	}
+	if index := strings.IndexAny(path, "?#"); index >= 0 {
+		path = path[:index]
+	}
+	const prefix = "/creative/api/assets/"
+	const suffix = "/content"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return "", false
+	}
+	assetID := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	if strings.Contains(assetID, "/") || !model.IsValidCreativeAssetId(assetID) {
+		return "", false
+	}
+	return assetID, true
 }
 
 func FetchCreativeImageProviderContent(ctx context.Context, rawURL string) (CreativeImageProviderContent, error) {
@@ -173,7 +325,9 @@ func (duomiCreativeImageAdapter) submit(ctx context.Context, req CreativeImagePr
 	if err != nil {
 		return CreativeImageProviderResult{}, err
 	}
-	return parseDuomiCreativeImageResult(raw, true)
+	result, err := parseDuomiCreativeImageResult(raw, true)
+	result.applyTargetMetadata(ResolveCreativeImageTargetMetadata(req.AdapterPreset, req.ProviderModelID, req.UserParams))
+	return result, err
 }
 
 func (duomiCreativeImageAdapter) poll(ctx context.Context, req CreativeImageProviderRequest, upstreamTaskID string) (CreativeImageProviderResult, error) {
@@ -185,7 +339,9 @@ func (duomiCreativeImageAdapter) poll(ctx context.Context, req CreativeImageProv
 	if err != nil {
 		return CreativeImageProviderResult{}, err
 	}
-	return parseDuomiCreativeImageResult(raw, false)
+	result, err := parseDuomiCreativeImageResult(raw, false)
+	result.applyTargetMetadata(ResolveCreativeImageTargetMetadata(req.AdapterPreset, req.ProviderModelID, req.UserParams))
+	return result, err
 }
 
 type grsAICreativeImageAdapter struct{}
@@ -242,7 +398,9 @@ func (grsAICreativeImageAdapter) submit(ctx context.Context, req CreativeImagePr
 	if err != nil {
 		return CreativeImageProviderResult{}, err
 	}
-	return parseGrsAICreativeImageResult(raw, true)
+	result, err := parseGrsAICreativeImageResult(raw, true)
+	result.applyTargetMetadata(ResolveCreativeImageTargetMetadata(req.AdapterPreset, req.ProviderModelID, req.UserParams))
+	return result, err
 }
 
 func (grsAICreativeImageAdapter) poll(ctx context.Context, req CreativeImageProviderRequest, upstreamTaskID string) (CreativeImageProviderResult, error) {
@@ -254,12 +412,17 @@ func (grsAICreativeImageAdapter) poll(ctx context.Context, req CreativeImageProv
 	if err != nil {
 		return CreativeImageProviderResult{}, err
 	}
-	return parseGrsAICreativeImageResult(raw, false)
+	result, err := parseGrsAICreativeImageResult(raw, false)
+	result.applyTargetMetadata(ResolveCreativeImageTargetMetadata(req.AdapterPreset, req.ProviderModelID, req.UserParams))
+	return result, err
 }
 
 func creativeGrsAIAspectRatioParam(req CreativeImageProviderRequest) string {
 	aspectRatio := creativeStringParam(req.UserParams, "aspectRatio")
 	if aspectRatio == "" {
+		return ""
+	}
+	if aspectRatio == "auto" {
 		return ""
 	}
 	if strings.EqualFold(strings.TrimSpace(req.ProviderModelID), "gpt-image-2") || strings.EqualFold(strings.TrimSpace(req.ProviderModelID), "gpt-image-2-vip") {
@@ -360,6 +523,9 @@ func creativeImageProviderJSON(ctx context.Context, method string, target string
 	}
 	response, err := ensureHTTPClient().Do(request)
 	if err != nil {
+		if creativeImageProviderTransportErrorAmbiguous(ctx, err) {
+			return nil, fmt.Errorf("%w: creative image provider request timed out or was interrupted", errCreativeImageProviderTransportAmbiguous)
+		}
 		return nil, errors.New("creative image provider request failed")
 	}
 	defer response.Body.Close()
@@ -371,6 +537,20 @@ func creativeImageProviderJSON(ctx context.Context, method string, target string
 		return nil, fmt.Errorf("creative image provider returned status %d", response.StatusCode)
 	}
 	return raw, nil
+}
+
+func creativeImageProviderTransportErrorAmbiguous(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func creativeJoinURL(endpoint string, path string) string {
@@ -391,6 +571,19 @@ func creativeStringParam(params map[string]any, key string) string {
 	default:
 		return strings.TrimSpace(fmt.Sprint(value))
 	}
+}
+
+func creativeParseImageSize(size string) (int, int) {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(size)), "x")
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return 0, 0
+	}
+	return width, height
 }
 
 func parseDuomiCreativeImageResult(raw []byte, requireAcceptedID bool) (CreativeImageProviderResult, error) {
@@ -493,6 +686,7 @@ func creativeImageStatusFromProvider(status string) model.TaskStatus {
 }
 
 func creativeProgressString(progress int, status string) string {
+	normalizedStatus := creativeImageStatusFromProvider(status)
 	if progress < 0 {
 		progress = 0
 	}
@@ -500,7 +694,7 @@ func creativeProgressString(progress int, status string) string {
 		progress = 100
 	}
 	if progress == 0 {
-		switch creativeImageStatusFromProvider(status) {
+		switch normalizedStatus {
 		case model.TaskStatusSuccess:
 			progress = 100
 		case model.TaskStatusFailure:
@@ -508,6 +702,9 @@ func creativeProgressString(progress int, status string) string {
 		default:
 			return creativeImageProviderDefaultProgress
 		}
+	}
+	if normalizedStatus != model.TaskStatusSuccess && normalizedStatus != model.TaskStatusFailure && progress >= 100 {
+		progress = 99
 	}
 	return fmt.Sprintf("%d%%", progress)
 }
